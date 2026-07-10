@@ -1,0 +1,33 @@
+{
+  "summary": "Iteration 5 backend testing complete: 16/16 pytest cases pass. Verified user's core complaint (broken images + stale news) is FIXED. GET /api/feuds returns 14 feuds; every one has a non-null image_url and every image_url returns HTTP 2xx (verified with HEAD/GET follow-redirects, UA=Mozilla). No two feuds share the same sources[0].link (dedup working). All 7 categories return >=1 feud via /api/feuds?category=<id>. Freshness: 6/7 categories have an AI-generated feud in the last 24h (politica, tv, musica, sport, social, gossip); cinema is legitimately stale (seed only) — acceptable per spec. POST /api/admin/generate-daily?count=1 returns 200 in ~7-10s and, when it creates a feud, that feud has non-empty sources and a reachable image_url. Regression pass: /api/search?q=Ferragni returns 200 with list body, /api/share/{id} returns {feud:{...}}, /api/share/{id}/html returns text/html with og:title/og:image/og:url/twitter:card. Notable observation: sport AI feud now uses a native Gazzetta.it hero image (https://www.gazzetta.it/methode_image/...) instead of a fallback Unsplash, confirming _image_from_entry is correctly extracting hero images from RSS enclosures.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_news_freshness_images.py",
+    "/app/test_reports/pytest/iter5_results.xml",
+    "/app/test_reports/iteration_5.json"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Two older AI feuds (musica feud_f6777ab917cd, social feud_75fd7aff892f, both from 2026-07-10T11:33) have empty sources — likely generated before the sources-persistence fix. They are excluded from the dedup check (skipped when sources[0].link is missing). Non-blocking but consider a one-off backfill or letting the 3-day rotation replace them.",
+    "Cinema still has only a seed feud (no fresh AI). Spec explicitly allows this if today's RSS pool wasn't juicy enough; scheduler will retry next hour. Monitor in 24-48h to confirm BadTaste+ANSA cinema feeds actually yield entries.",
+    "_image_for_category fallback IDs are working — all 12 Unsplash URLs used across the 14 feuds returned 2xx. Good.",
+    "_image_from_entry correctly used for sport (gazzetta.it hero) — the RSS enclosure extraction path is exercised in production.",
+    "server.py is ~980 lines (per prior iteration); still would benefit from modularization but not blocking.",
+    "Consider adding an admin cleanup endpoint (or one-shot script) to purge the 7 seed feuds now that the AI pipeline is healthy — they're duplicating category slots and were flagged in the RCA as visual noise for users."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_news_freshness_images.py (new, 16 tests)"
+  ],
+  "success_rate": {"backend": "100% (16/16)", "frontend": "not tested (per request)"},
+  "seed_data_creation": "test_admin_generate_daily_still_works may add up to 1 new AI feud. No other test data created.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 5 confirms the image + freshness bug fix. Regression file: /app/backend/tests/test_news_freshness_images.py — reusable, uses EXPO_PUBLIC_BACKEND_URL from env (defaults to team-pick.preview.emergentagent.com). It parametrizes over 7 categories, does live HTTP HEAD/GET on every image_url, dedup check on sources[0].link, and 24h freshness check on source='ai' feuds. If future changes add more feuds, the count assertion allows 12-20 slack. Note: 2 old AI feuds have empty sources (musica feud_f6777ab917cd, social feud_75fd7aff892f from 2026-07-10T11:33Z) — dedup test skips them intentionally. Cinema has no AI feud today — allowed per spec.",
+  "rca_of_issue": "Original bug (broken images + stale news across categories) is verified fixed at HTTP level. All 14 image_url values return 2xx; dedup by source link is enforced; 6/7 categories have <24h-fresh AI content; on-demand generation still produces valid feuds with sources and working images. No further action needed on the backend."
+}

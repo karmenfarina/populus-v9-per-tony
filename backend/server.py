@@ -888,32 +888,35 @@ async def _generate_feud_for_category(cat: dict, LlmChat, UserMessage) -> Option
 
 RSS_FEEDS: dict = {
     'politica': [
-        ('ANSA Politica', 'https://www.ansa.it/sito/ansit_rss.xml'),
         ('Repubblica Politica', 'https://www.repubblica.it/rss/politica/rss2.0.xml'),
+        ('ANSA Politica', 'https://www.ansa.it/sito/notizie/politica/politica_rss.xml'),
+        ('Il Fatto Quotidiano', 'https://www.ilfattoquotidiano.it/politica/feed/'),
+        ('Corriere Politica', 'https://xml2.corriereobjects.it/rss/politica.xml'),
     ],
     'tv': [
-        ('Fanpage TV', 'https://www.fanpage.it/feed/'),
         ('TvBlog', 'https://www.tvblog.it/feed'),
+        ('ANSA Spettacolo', 'https://www.ansa.it/sito/notizie/cultura/cinema/cinema_rss.xml'),
     ],
     'musica': [
-        ('Rockol', 'https://www.rockol.it/rss/rockol.xml'),
-        ('Rockit', 'https://www.rockit.it/feed'),
+        ('Rolling Stone Italia', 'https://www.rollingstone.it/feed/'),
+        ('AllMusicItalia', 'https://www.allmusicitalia.it/feed'),
     ],
     'sport': [
         ('Gazzetta', 'https://www.gazzetta.it/rss/homepage.xml'),
         ('ANSA Sport', 'https://www.ansa.it/sito/notizie/sport/sport_rss.xml'),
+        ('Tuttosport', 'https://www.tuttosport.com/rss/calcio-serie-a.xml'),
     ],
     'cinema': [
         ('BadTaste', 'https://www.badtaste.it/feed/'),
-        ('ComingSoon', 'https://www.comingsoon.it/feed/'),
+        ('ANSA Cinema', 'https://www.ansa.it/sito/notizie/cultura/cinema/cinema_rss.xml'),
     ],
     'social': [
-        ('Fanpage Social', 'https://www.fanpage.it/feed/'),
-        ('DDay Social', 'https://www.dday.it/rss'),
+        ('DDay', 'https://www.dday.it/rss'),
+        ('GossipeTV', 'https://www.gossipetv.com/feed'),
     ],
     'gossip': [
-        ('Dagospia', 'https://www.dagospia.com/feed/'),
         ('Novella 2000', 'https://www.novella2000.it/feed/'),
+        ('GossipeTV', 'https://www.gossipetv.com/feed'),
     ],
 }
 
