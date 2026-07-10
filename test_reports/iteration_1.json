@@ -1,0 +1,63 @@
+{
+  "summary": "Backend fully green (8/8 pytest passing). Frontend UI renders auth screen correctly with all three tabs (EMAIL/GOOGLE/ANONIMO) and proper testIDs, but the anonymous login flow (and any auth on web) is BLOCKED by a critical bug: expo-secure-store is not supported on web and throws 'ExpoSecureStore.default.setValueWithKeyAsync is not a function'. This prevents landing on the home feed via the web preview, so end-to-end frontend flows (feed, categories, feud detail, voting, comments, profile/badge) could not be exercised via the preview URL.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "src/api.ts token storage",
+        "issue": "expo-secure-store is not available on Expo web; setItemAsync throws 'ExpoSecureStore.default.setValueWithKeyAsync is not a function' after tapping ENTRA COME ANONIMO, blocking login on web preview. Same failure will occur for email signup/login and Google auth persistence.",
+        "testID": "auth-anon-submit / ENTRA COME ANONIMO",
+        "priority": "CRITICAL"
+      }
+    ],
+    "integration_issues": [
+      {
+        "flow": "Anonymous login -> home feed",
+        "issue": "Login POST succeeds server-side (verified independently via pytest) but frontend never navigates to /(tabs) because SecureStore.setItemAsync rejects on web, so token is never persisted and AuthContext keeps user unauthenticated.",
+        "affected_testIDs": ["auth-anon-nickname-input", "auth-anon-submit"]
+      }
+    ],
+    "design_issues": [
+      {
+        "screen": "auth",
+        "issues": [
+          "Error banner correctly renders the raw exception text, which is good for debugging but should be a friendlier message once the bug is fixed."
+        ]
+      }
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_faide_backend.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "In /app/frontend/src/api.ts, replace expo-secure-store with a platform-aware storage: use @react-native-async-storage/async-storage (already in package.json) on web, or add Platform.OS === 'web' branch to fall back to AsyncStorage / localStorage. Recommended: create a small storage.ts that exports getItem/setItem/deleteItem using SecureStore on native and AsyncStorage on web.",
+    "After the storage fix, re-test full E2E flow: anonymous login -> home feed with category chips -> tap feud card -> vote A/B -> post comment (verify color-coded column) -> post reply -> Profilo tab shows nickname + badge state (locked <5, unlocked at 5).",
+    "Consider a friendlier user-facing error message on the auth screen instead of exposing the raw JS exception."
+  ],
+  "critical_code_review_comments": [
+    "server.py is ~560 lines and combines auth, feuds, comments, replies, AI generation, and seeding in one file; acceptable for MVP but should be split (routers/auth.py, routers/feuds.py, seed.py, ai.py) when it grows.",
+    "GET /api/feuds/{id}/comments does not require auth and works fine; POST correctly enforces 'must vote first'. Good.",
+    "compute_badge treats ties (majority == minority) as buon_senso which is reasonable; documented via unit path in test.",
+    "Google auth endpoint returns the raw external session_token as the API token; get_current_user handles that via user_sessions collection. OK but this means make_jwt is bypassed for Google users – documented in code.",
+    "_recompute_user_alignment iterates all votes on every vote (N+1 queries). Fine for MVP; consider aggregation pipeline later.",
+    "Frontend must guard SecureStore usage behind Platform.OS !== 'web' or use a cross-platform storage wrapper (see action_items)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_faide_backend.py (new)",
+    "/app/test_reports/iteration_1.json (new)"
+  ],
+  "success_rate": {
+    "backend": "100% (8/8)",
+    "frontend": "Blocked - auth screen renders correctly (100%) but post-login flows unreachable on web due to SecureStore bug"
+  },
+  "seed_data_creation": "Created several TEST_ anonymous users and one TEST_ email user via pytest; also cast votes and posted comments/replies on seeded feuds. All prefixed TEST_ per convention.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend is stable and covered by /app/backend/tests/test_faide_backend.py (pytest, 8 tests, all pass in ~2.5s). Frontend web preview cannot pass the auth screen until expo-secure-store is replaced/wrapped for web (AsyncStorage is already a dependency). After the fix, re-run the same UI script: ANONIMO tab -> fill auth-anon-nickname-input -> click ENTRA COME ANONIMO -> expect navigation to /(tabs) with category chips row (Tutte + 7 categories) and feud cards showing pct_a/pct_b. All expected testIDs already exist in components (auth-anon-nickname-input verified). If AI generation via /api/admin/generate-daily needs testing, hit it with count=1; it depends on Claude sonnet + EMERGENT_LLM_KEY availability.",
+  "rca_of_issue": "Root cause of frontend block: /app/frontend/src/api.ts imports 'expo-secure-store' and calls SecureStore.setItemAsync directly. expo-secure-store's web shim raises 'setValueWithKeyAsync is not a function' because the underlying native module isn't polyfilled for web. Reproduction: open https://team-pick.preview.emergentagent.com in a browser -> ANONIMO -> enter any nickname -> tap ENTRA COME ANONIMO -> red error banner appears; POST /api/auth/anonymous returns 200 (verified in tests) but token never saved -> user stays on /auth. Mitigation: implement a Platform-aware storage helper — on web use @react-native-async-storage/async-storage (or window.localStorage), on native keep SecureStore. This is a small isolated change confined to src/api.ts (and optionally AuthContext if it also touches storage)."
+}
