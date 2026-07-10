@@ -1,0 +1,136 @@
+{
+  "app_name": "Gossip Feuds (App di faide gossip)",
+  "personality": "5 Brutalist Mobile LIGHT (with dual-color split override for Team A/B mechanics)",
+  "personality_one_liner": "A sharp, tabloid-inspired brutalist interface that turns daily gossip into high-stakes, dual-color, split-screen battlegrounds.",
+  "color": {
+    "surface": "#F4F4F0",
+    "onSurface": "#0F0F0F",
+    "surfaceSecondary": "#FFFFFF",
+    "onSurfaceSecondary": "#0F0F0F",
+    "surfaceTertiary": "#EAEAEA",
+    "onSurfaceTertiary": "#0F0F0F",
+    "surfaceInverse": "#0F0F0F",
+    "onSurfaceInverse": "#F4F4F0",
+    "brand": "#0F0F0F",
+    "brandPrimary": "#FF3B30",
+    "onBrandPrimary": "#FFFFFF",
+    "brandSecondary": "#FFE600",
+    "onBrandSecondary": "#0F0F0F",
+    "brandTertiary": "#C2C2C2",
+    "onBrandTertiary": "#0F0F0F",
+    "success": "#00E676",
+    "onSuccess": "#0F0F0F",
+    "warning": "#FFE600",
+    "onWarning": "#0F0F0F",
+    "error": "#FF3B30",
+    "onError": "#FFFFFF",
+    "info": "#111111",
+    "onInfo": "#FFFFFF",
+    "border": "#0F0F0F",
+    "borderStrong": "#0F0F0F",
+    "divider": "#0F0F0F"
+  },
+  "typography": {
+    "displayFontFamily": "Bebas Neue",
+    "textFontFamily": "Space Grotesk",
+    "scale": {
+      "sm": 12,
+      "base": 14,
+      "lg": 16,
+      "xl": 20,
+      "2xl": 24
+    }
+  },
+  "spacing": {
+    "rule": "Use rigid grids, hard alignment, exposed structure, and visible spacing systems. Never use soft floating cards.",
+    "xs": 4,
+    "sm": 8,
+    "md": 12,
+    "lg": 16,
+    "xl": 24,
+    "2xl": 32,
+    "3xl": 48
+  },
+  "radius_tokens": {
+    "sm": 0,
+    "md": 0,
+    "lg": 0,
+    "pill": 0
+  },
+  "shadow_tier": "0",
+  "navigation": "bottom_tabs",
+  "icon_set": "Phosphor",
+  "glassmorphism": {
+    "enabled": "false",
+    "do's": ["Use flat, solid background layers instead of glass to maintain the raw brutalist aesthetic."],
+    "dont's": ["Never use blur or glassmorphism. It clashes with the stark brutalist poster system."]
+  },
+  "platform_libraries": {
+    "glass": {
+      "ios": "expo-glass-effect",
+      "android": "expo-blur",
+      "low_end_android_fallback": "solid surfaceSecondary"
+    },
+    "image": "expo-image",
+    "blur": "expo-blur",
+    "bottom_sheet": "@gorhom/bottom-sheet",
+    "animation": "react-native-reanimated",
+    "gesture": "react-native-gesture-handler"
+  },
+  "screens": [
+    {
+      "name": "Home (Daily Feuds)",
+      "purpose": "A stark, magazine-like feed showing daily controversies divided by category, inviting immediate side-picking.",
+      "states": {
+        "loading": "Centered high-contrast spinner with large 'CARICAMENTO...' mono text.",
+        "empty": "Brutalist empty state: 'NESSUNA FAIDA OGGI.' in oversized display type.",
+        "error": "Harsh red block with black text: 'ERRORE DI CONNESSIONE' and a sharp retry button."
+      },
+      "layout": "Vertical feed of full-width cards. Each card has a 2pt black border. Top half features a news photo with a gradient-to-dark scrim and the controversy title in Bebas Neue. The bottom half is a 50/50 horizontal split button: Left side is brandPrimary (Team A) and right side is brandSecondary (Team B). Percentages are displayed in massive mono typography overlaid on the split button."
+    },
+    {
+      "name": "Feud Detail & Poll",
+      "purpose": "Provides the controversy context and facilitates the vote, leading into the split-screen battlefield comments.",
+      "states": {
+        "loading": "Standard Brutalist loader.",
+        "empty": "No comments yet. 'Schiarati per primo.' (Be the first to pick a side)",
+        "error": "Standard Brutalist error."
+      },
+      "layout": "Top section: High-impact editorial layout explaining the situation. Below the article, a massive interactive poll (split horizontally or diagonally). Once voted, the screen unlocks the Comments section. Comments are structurally divided into a 2-column grid (`flexDirection: 'row'`). Left column (`flex: 1`) exclusively houses Team A comments. Right column (`flex: 1`) exclusively houses Team B comments. Usernames take their voted team's color (brandPrimary or brandSecondary). Threads/Replies indent with a hard left border."
+    },
+    {
+      "name": "User Profile",
+      "purpose": "Showcases the user's voting history and displays their earned alignment badge (Bastian Contrario vs Buon Senso).",
+      "states": {
+        "loading": "Standard Brutalist loader.",
+        "empty": "No votes yet. 'NESSUN VOTO ESPRESSO.'",
+        "error": "Standard Brutalist error."
+      },
+      "layout": "Grid-based profile. Top section displays the user's earned Badge (large PNG graphic) with an oversized label. Middle section shows stats (Majority votes vs Minority votes) using large, stark typography. Bottom section is a strict list of past feuds the user participated in, color-coded by the side they chose."
+    }
+  ],
+  "images": {
+    "hero_feud_1": {
+      "url": "https://images.unsplash.com/photo-1561890244-e880c1e6d54e?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAxODF8MHwxfHNlYXJjaHw0fHxjZWxlYnJpdHklMjBnb3NzaXAlMjBuZXdzJTIwcGFwYXJhenppfGVufDB8fHx8MTc4MzY4MTM2NXww&ixlib=rb-4.1.0&q=85",
+      "alt": "Paparazzi photo of celebrities, suitable for gossip feuds"
+    },
+    "hero_feud_2": {
+      "url": "https://images.unsplash.com/photo-1635520356736-90cb46f73413?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2Mzl8MHwxfHNlYXJjaHwyfHx0diUyMHNob3clMjBtaWNyb3Bob25lJTIwbXVzaWMlMjBzdGFnZXxlbnwwfHx8fDE3ODM2ODEzNjV8MA&ixlib=rb-4.1.0&q=85",
+      "alt": "Microphone on stage, representing Music/TV controversies"
+    },
+    "badge_bastian_contrario": {
+      "url": "https://images.unsplash.com/photo-1614036417651-efe5912149d8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NzB8MHwxfHNlYXJjaHwyfHxnb2xkJTIwYmFkZ2UlMjBhY2hpZXZlbWVudCUyMG1lZGFsfGVufDB8fHx8MTc4MzY4MTM2Nnww&ixlib=rb-4.1.0&q=85",
+      "alt": "Yellow star badge acting as the Bastian Contrario / Buon Senso medal"
+    }
+  },
+  "instructions_to_main_agent": [
+    "Strictly follow the Brutalist Mobile LIGHT personality. No soft shadows, no border radii (0px everywhere), no glassmorphism. Use sharp 2pt black borders (#0F0F0F) to separate structural elements.",
+    "Implement a strict dual-color split UI mechanic. Team A is always Signal Red (brandPrimary) and Team B is Acid Yellow (brandSecondary).",
+    "Comments section MUST be built as two parallel, side-by-side columns taking 50% width each (`flexDirection: 'row'`). Left side for Pro-A, right side for Pro-B.",
+    "Color-code usernames in the comments based on their vote (Red or Yellow).",
+    "Font weights MUST NEVER EXCEED 500. Use font size (Bebas Neue for massive headlines, Space Grotesk for body) to create visual hierarchy, NOT weight.",
+    "Always apply a top-to-bottom linear gradient scrim (0% transparent to 70%+ surfaceInverse) when rendering text on top of the news/gossip hero images.",
+    "Ensure all interactive voting buttons provide immediate haptic feedback and use instant color flips (no slow cinematic fades) to match the Brutalist vibe.",
+    "For badge assignment, display the image provided in `images.badge_bastian_contrario` prominently on the user profile with harsh border framing."
+  ]
+}
