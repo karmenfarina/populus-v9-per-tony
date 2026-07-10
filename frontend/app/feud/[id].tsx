@@ -8,13 +8,14 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import { api, Comment, Feud, Reply } from "@/src/api";
+import { api, Comment, Feud, Reply, Sponsor } from "@/src/api";
 import { colors, spacing, font, sideColor, onSideColor } from "@/src/theme";
 
 export default function FeudDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const [feud, setFeud] = useState<Feud | null>(null);
+  const [sponsor, setSponsor] = useState<Sponsor | null>(null);
   const [sideA, setSideA] = useState<Comment[]>([]);
   const [sideB, setSideB] = useState<Comment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -29,8 +30,12 @@ export default function FeudDetail() {
   const loadAll = useCallback(async () => {
     const f = await api.feud(id!);
     setFeud(f.feud);
-    const c = await api.comments(id!);
+    const [c, s] = await Promise.all([
+      api.comments(id!),
+      api.sponsors(f.feud.category).catch(() => ({ sponsors: [] })),
+    ]);
     setSideA(c.side_a); setSideB(c.side_b);
+    if (s.sponsors && s.sponsors.length > 0) setSponsor(s.sponsors[0]);
   }, [id]);
 
   useEffect(() => {
@@ -116,6 +121,16 @@ export default function FeudDetail() {
             <Text style={styles.summary}>{feud.summary}</Text>
           </View>
 
+          {sponsor && (
+            <View style={styles.sponsorBox} testID="sponsor-banner">
+              <Text style={styles.sponsorLabel}>SPONSOR · {sponsor.sponsor.toUpperCase()}</Text>
+              <Text style={styles.sponsorHeadline}>{sponsor.headline}</Text>
+              <Pressable style={styles.sponsorCta}>
+                <Text style={styles.sponsorCtaTxt}>{sponsor.cta}</Text>
+              </Pressable>
+            </View>
+          )}
+
           <View style={styles.pollWrap}>
             <Text style={styles.question}>{feud.question}</Text>
             <View style={styles.pollSplit}>
@@ -125,9 +140,9 @@ export default function FeudDetail() {
                 disabled={voting || !!feud.my_vote}
                 style={[styles.pollHalf, { backgroundColor: colors.brandPrimary }, feud.my_vote === "B" && { opacity: 0.35 }]}
               >
-                <Text style={styles.pollPct}>{feud.pct_a}%</Text>
+                <Text style={styles.pollPct}>{feud.revealed ? `${feud.pct_a}%` : "?"}</Text>
                 <Text style={styles.pollName}>{feud.party_a}</Text>
-                <Text style={styles.pollVotes}>{feud.votes_a} voti</Text>
+                <Text style={styles.pollVotes}>{feud.revealed ? `${feud.votes_a} voti` : "voti nascosti"}</Text>
                 {feud.my_vote === "A" && <View style={styles.checkPill}><Ionicons name="checkmark" size={14} color={colors.brandPrimary} /></View>}
               </Pressable>
               <Pressable
@@ -136,13 +151,13 @@ export default function FeudDetail() {
                 disabled={voting || !!feud.my_vote}
                 style={[styles.pollHalf, { backgroundColor: colors.brandSecondary }, feud.my_vote === "A" && { opacity: 0.35 }]}
               >
-                <Text style={[styles.pollPct, { color: colors.onBrandSecondary }]}>{feud.pct_b}%</Text>
+                <Text style={[styles.pollPct, { color: colors.onBrandSecondary }]}>{feud.revealed ? `${feud.pct_b}%` : "?"}</Text>
                 <Text style={[styles.pollName, { color: colors.onBrandSecondary }]}>{feud.party_b}</Text>
-                <Text style={[styles.pollVotes, { color: colors.onBrandSecondary }]}>{feud.votes_b} voti</Text>
+                <Text style={[styles.pollVotes, { color: colors.onBrandSecondary }]}>{feud.revealed ? `${feud.votes_b} voti` : "voti nascosti"}</Text>
                 {feud.my_vote === "B" && <View style={[styles.checkPill, { backgroundColor: colors.onBrandSecondary }]}><Ionicons name="checkmark" size={14} color={colors.brandSecondary} /></View>}
               </Pressable>
             </View>
-            {!feud.my_vote && <Text style={styles.pollHint}>Vota per sbloccare i commenti.</Text>}
+            {!feud.my_vote && <Text style={styles.pollHint}>Vota per svelare i risultati e sbloccare i commenti.</Text>}
           </View>
 
           {error && <Text style={styles.err}>{error}</Text>}
@@ -290,6 +305,11 @@ const styles = StyleSheet.create({
   article: { padding: spacing.lg, borderBottomWidth: 2, borderColor: colors.border, backgroundColor: colors.surfaceSecondary },
   sectionKicker: { fontSize: font.sizes.sm, letterSpacing: 2, color: colors.brandPrimary, marginBottom: spacing.xs },
   summary: { fontSize: font.sizes.lg, lineHeight: 24, color: colors.onSurface },
+  sponsorBox: { padding: spacing.md, borderBottomWidth: 2, borderColor: colors.border, backgroundColor: colors.brandSecondary, gap: spacing.xs },
+  sponsorLabel: { fontSize: font.sizes.xs, letterSpacing: 2, color: colors.onBrandSecondary, opacity: 0.7 },
+  sponsorHeadline: { fontSize: font.sizes.lg, color: colors.onBrandSecondary, lineHeight: 22 },
+  sponsorCta: { alignSelf: "flex-start", borderWidth: 2, borderColor: colors.border, backgroundColor: colors.surfaceInverse, paddingVertical: spacing.xs, paddingHorizontal: spacing.md, marginTop: spacing.xs },
+  sponsorCtaTxt: { color: colors.onSurfaceInverse, fontSize: font.sizes.sm, letterSpacing: 2, fontWeight: "500" },
   pollWrap: { padding: spacing.lg, backgroundColor: colors.surfaceInverse, borderBottomWidth: 2, borderColor: colors.border },
   question: { color: colors.onSurfaceInverse, fontSize: font.sizes.xl, letterSpacing: 0.5, marginBottom: spacing.md, textAlign: "center" },
   pollSplit: { flexDirection: "row", borderWidth: 2, borderColor: colors.border },

@@ -55,6 +55,10 @@ export const api = {
   replies: (commentId: string) => request(`/comments/${commentId}/replies`),
   addReply: (commentId: string, text: string) =>
     request(`/comments/${commentId}/replies`, { method: 'POST', body: JSON.stringify({ text }) }),
+  sponsors: (category?: string) =>
+    request(`/sponsors${category && category !== 'all' ? `?category=${category}` : ''}`),
+  history: (filter: 'all' | 'majority' | 'minority' = 'all') =>
+    request(`/users/me/history?filter=${filter}`),
 };
 
 export type User = {
@@ -76,6 +80,27 @@ export type User = {
   } | null;
 };
 
+export type Sponsor = {
+  sponsor_id: string;
+  category: string;
+  sponsor: string;
+  headline: string;
+  cta: string;
+  image_url: string;
+};
+
+export type HistoryItem = {
+  feud_id: string;
+  title: string;
+  category_label: string;
+  party_a: string;
+  party_b: string;
+  side_voted: 'A' | 'B';
+  winning_side: 'A' | 'B' | null;
+  aligned: boolean;
+  voted_at: string;
+};
+
 export type Feud = {
   feud_id: string;
   category: string;
@@ -86,11 +111,12 @@ export type Feud = {
   summary: string;
   question: string;
   image_url: string;
-  votes_a: number;
-  votes_b: number;
+  votes_a: number | null;
+  votes_b: number | null;
   total_votes: number;
-  pct_a: number;
-  pct_b: number;
+  pct_a: number | null;
+  pct_b: number | null;
+  revealed: boolean;
   my_vote?: 'A' | 'B' | null;
 };
 

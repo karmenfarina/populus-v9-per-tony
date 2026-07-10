@@ -99,6 +99,7 @@ export default function HomeFeed() {
 }
 
 function FeudCard({ feud, onPress }: { feud: Feud; onPress: () => void }) {
+  const revealed = feud.revealed;
   return (
     <Pressable style={styles.card} onPress={onPress} testID={`feud-card-${feud.feud_id}`}>
       <ImageBackground source={{ uri: feud.image_url }} style={styles.cardImage}>
@@ -113,16 +114,16 @@ function FeudCard({ feud, onPress }: { feud: Feud; onPress: () => void }) {
       </ImageBackground>
       <View style={styles.splitRow}>
         <View style={[styles.splitHalf, { backgroundColor: colors.brandPrimary }]}>
-          <Text style={styles.splitPct}>{feud.pct_a}%</Text>
+          <Text style={styles.splitPct}>{revealed ? `${feud.pct_a}%` : "?"}</Text>
           <Text style={styles.splitLabel} numberOfLines={2}>{feud.party_a}</Text>
         </View>
         <View style={[styles.splitHalf, { backgroundColor: colors.brandSecondary }]}>
-          <Text style={[styles.splitPct, { color: colors.onBrandSecondary }]}>{feud.pct_b}%</Text>
+          <Text style={[styles.splitPct, { color: colors.onBrandSecondary }]}>{revealed ? `${feud.pct_b}%` : "?"}</Text>
           <Text style={[styles.splitLabel, { color: colors.onBrandSecondary }]} numberOfLines={2}>{feud.party_b}</Text>
         </View>
       </View>
       <View style={styles.cardFooter}>
-        <Text style={styles.cardFooterText}>{feud.total_votes} VOTI</Text>
+        <Text style={styles.cardFooterText}>{revealed ? `${feud.total_votes} VOTI` : "VOTA PER VEDERE"}</Text>
         <Text style={styles.cardFooterText}>APRI ›</Text>
       </View>
     </Pressable>

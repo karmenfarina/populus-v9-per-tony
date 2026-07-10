@@ -267,23 +267,44 @@ async def get_categories():
     return {'categories': CATEGORIES}
 
 
-def _attach_percentages(d: dict):
+def _attach_percentages(d: dict, revealed: bool = True):
     a = d.get('votes_a', 0)
     b = d.get('votes_b', 0)
     total = a + b
     d['total_votes'] = total
-    d['pct_a'] = round(100 * a / total) if total else 50
-    d['pct_b'] = 100 - d['pct_a'] if total else 50
+    if revealed:
+        d['pct_a'] = round(100 * a / total) if total else 50
+        d['pct_b'] = 100 - d['pct_a'] if total else 50
+        d['revealed'] = True
+    else:
+        d['pct_a'] = None
+        d['pct_b'] = None
+        d['votes_a'] = None
+        d['votes_b'] = None
+        d['revealed'] = False
+
+
+async def _user_voted_ids(user_id: str, feud_ids: List[str]) -> dict:
+    if not feud_ids:
+        return {}
+    cur = db.votes.find({'user_id': user_id, 'feud_id': {'$in': feud_ids}}, {'_id': 0})
+    votes = await cur.to_list(len(feud_ids))
+    return {v['feud_id']: v['side'] for v in votes}
 
 
 @api_router.get('/feuds')
-async def list_feuds(category: Optional[str] = None):
+async def list_feuds(category: Optional[str] = None, user: Optional[dict] = Depends(get_current_user_optional)):
     q = {}
     if category and category != 'all':
         q['category'] = category
     docs = await db.feuds.find(q, {'_id': 0}).sort('created_at', -1).to_list(200)
+    voted_map: dict = {}
+    if user and docs:
+        voted_map = await _user_voted_ids(user['user_id'], [d['feud_id'] for d in docs])
     for d in docs:
-        _attach_percentages(d)
+        my_vote = voted_map.get(d['feud_id']) if user else None
+        _attach_percentages(d, revealed=bool(my_vote))
+        d['my_vote'] = my_vote
     return {'feuds': docs}
 
 
@@ -292,12 +313,12 @@ async def get_feud(feud_id: str, user: Optional[dict] = Depends(get_current_user
     doc = await db.feuds.find_one({'feud_id': feud_id}, {'_id': 0})
     if not doc:
         raise HTTPException(status_code=404, detail='Faida non trovata')
-    _attach_percentages(doc)
+    my_vote = None
     if user:
         vote = await db.votes.find_one({'feud_id': feud_id, 'user_id': user['user_id']}, {'_id': 0})
-        doc['my_vote'] = vote.get('side') if vote else None
-    else:
-        doc['my_vote'] = None
+        my_vote = vote.get('side') if vote else None
+    _attach_percentages(doc, revealed=bool(my_vote))
+    doc['my_vote'] = my_vote
     return {'feud': doc}
 
 
@@ -341,9 +362,77 @@ async def vote_feud(feud_id: str, body: VoteBody, user: dict = Depends(get_curre
     await db.feuds.update_one({'feud_id': feud_id}, {'$inc': {inc_field: 1}})
     await _recompute_user_alignment(user['user_id'])
     updated = await db.feuds.find_one({'feud_id': feud_id}, {'_id': 0})
-    _attach_percentages(updated)
+    _attach_percentages(updated, revealed=True)
     updated['my_vote'] = body.side
     return {'feud': updated}
+
+
+# ----------------------- Sponsors -----------------------
+
+SEED_SPONSORS = [
+    {'category': 'politica', 'sponsor': 'IlPost', 'headline': 'Approfondimenti quotidiani sulla politica.', 'cta': 'ABBONATI', 'image_url': 'https://images.unsplash.com/photo-1541872703-74c5e44368f6?w=800'},
+    {'category': 'tv', 'sponsor': 'Infinity+', 'headline': 'Rivedi ogni puntata del reality del momento.', 'cta': 'GUARDA ORA', 'image_url': 'https://images.unsplash.com/photo-1585951237318-9ea5e175b891?w=800'},
+    {'category': 'musica', 'sponsor': 'Spotify', 'headline': 'La playlist ufficiale della faida.', 'cta': 'ASCOLTA', 'image_url': 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=800'},
+    {'category': 'sport', 'sponsor': 'DAZN', 'headline': 'Rivedi il derby integrale con moviola.', 'cta': 'REPLAY', 'image_url': 'https://images.unsplash.com/photo-1508098682722-e99c43a406b2?w=800'},
+    {'category': 'cinema', 'sponsor': 'Netflix', 'headline': 'Il film della polemica: guardalo stasera.', 'cta': 'GUARDA', 'image_url': 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=800'},
+    {'category': 'social', 'sponsor': 'TrendReport', 'headline': 'Analisi virali ogni 24 ore.', 'cta': 'ISCRIVITI', 'image_url': 'https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=800'},
+    {'category': 'gossip', 'sponsor': 'Chi Magazine', 'headline': 'Tutti i retroscena in edicola.', 'cta': 'SFOGLIA', 'image_url': 'https://images.unsplash.com/photo-1561890244-e880c1e6d54e?w=800'},
+]
+
+
+@api_router.get('/sponsors')
+async def get_sponsors(category: Optional[str] = None):
+    q = {}
+    if category and category != 'all':
+        q['category'] = category
+    docs = await db.sponsors.find(q, {'_id': 0}).to_list(50)
+    return {'sponsors': docs}
+
+
+async def seed_sponsors_if_empty():
+    count = await db.sponsors.count_documents({})
+    if count > 0:
+        return
+    for s in SEED_SPONSORS:
+        await db.sponsors.insert_one({'sponsor_id': new_id('spo'), **s, 'created_at': now_utc()})
+    logger.info(f"Seeded {len(SEED_SPONSORS)} sponsors")
+
+
+# ----------------------- Voting History -----------------------
+
+@api_router.get('/users/me/history')
+async def my_history(filter: str = 'all', user: dict = Depends(get_current_user)):
+    votes = await db.votes.find({'user_id': user['user_id']}, {'_id': 0}).sort('created_at', -1).to_list(1000)
+    items = []
+    for v in votes:
+        feud = await db.feuds.find_one({'feud_id': v['feud_id']}, {'_id': 0})
+        if not feud:
+            continue
+        a = feud.get('votes_a', 0)
+        b = feud.get('votes_b', 0)
+        if a == b:
+            winning_side = None
+            aligned = True  # tie counts as majority
+        else:
+            winning_side = 'A' if a > b else 'B'
+            aligned = (v['side'] == winning_side)
+        if filter == 'majority' and not aligned:
+            continue
+        if filter == 'minority' and aligned:
+            continue
+        items.append({
+            'feud_id': feud['feud_id'],
+            'title': feud['title'],
+            'category_label': feud['category_label'],
+            'party_a': feud['party_a'],
+            'party_b': feud['party_b'],
+            'side_voted': v['side'],
+            'winning_side': winning_side,
+            'aligned': aligned,
+            'voted_at': v['created_at'].isoformat() if isinstance(v['created_at'], datetime) else v['created_at'],
+        })
+    return {'history': items}
+
 
 
 @api_router.get('/feuds/{feud_id}/comments')
@@ -426,7 +515,7 @@ async def generate_daily(count: int = 3):
             if feud:
                 await db.feuds.insert_one(feud)
                 feud.pop('_id', None)
-                _attach_percentages(feud)
+                _attach_percentages(feud, revealed=True)
                 feud['created_at'] = feud['created_at'].isoformat()
                 created.append(feud)
         except Exception as e:
@@ -540,7 +629,45 @@ async def on_startup():
     await db.votes.create_index([('feud_id', 1), ('user_id', 1)], unique=True)
     await db.comments.create_index('feud_id')
     await db.replies.create_index('comment_id')
+    await db.sponsors.create_index('category')
     await seed_if_empty()
+    await seed_sponsors_if_empty()
+    # Start background daily generation task
+    import asyncio as _asyncio
+    _asyncio.create_task(_daily_generation_loop())
+
+
+async def _daily_generation_loop():
+    """Every hour, check if a daily AI generation has already run today (UTC). If not, run 2 fresh feuds."""
+    import asyncio as _asyncio
+    while True:
+        try:
+            today_key = now_utc().strftime('%Y-%m-%d')
+            meta = await db.system_meta.find_one({'key': 'last_daily_gen'}, {'_id': 0})
+            if not meta or meta.get('date') != today_key:
+                logger.info(f"Running daily AI generation for {today_key}")
+                try:
+                    from emergentintegrations.llm.chat import LlmChat, UserMessage
+                    # Rotate categories: pick 2 based on day-of-year
+                    day_idx = now_utc().timetuple().tm_yday
+                    cats = [CATEGORIES[day_idx % len(CATEGORIES)], CATEGORIES[(day_idx + 3) % len(CATEGORIES)]]
+                    for cat in cats:
+                        try:
+                            feud = await _generate_feud_for_category(cat, LlmChat, UserMessage)
+                            if feud:
+                                await db.feuds.insert_one(feud)
+                        except Exception as e:
+                            logger.warning(f"scheduler gen failed for {cat['id']}: {e}")
+                    await db.system_meta.update_one(
+                        {'key': 'last_daily_gen'},
+                        {'$set': {'key': 'last_daily_gen', 'date': today_key, 'at': now_utc()}},
+                        upsert=True,
+                    )
+                except Exception as e:
+                    logger.warning(f"scheduler LLM setup failed: {e}")
+        except Exception as e:
+            logger.warning(f"scheduler loop error: {e}")
+        await _asyncio.sleep(3600)  # check hourly
 
 
 @api_router.get('/')
