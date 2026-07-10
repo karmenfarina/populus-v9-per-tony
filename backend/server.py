@@ -668,17 +668,78 @@ async def add_reply(comment_id: str, body: ReplyBody, user: dict = Depends(get_c
     return {'reply': doc}
 
 
-def _image_for_category(cat_id: str) -> str:
+def _image_for_category(cat_id: str, seed: Optional[str] = None) -> str:
+    # Verified working Unsplash IDs (Feb 2026). Two options per category, chosen by seed hash for variety.
     mapping = {
-        'politica': 'https://images.unsplash.com/photo-1541872703-74c5e44368f6?w=1200',
-        'tv': 'https://images.unsplash.com/photo-1585951237318-9ea5e175b891?w=1200',
-        'musica': 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=1200',
-        'sport': 'https://images.unsplash.com/photo-1508098682722-e99c43a406b2?w=1200',
-        'cinema': 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=1200',
-        'social': 'https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=1200',
-        'gossip': 'https://images.unsplash.com/photo-1561890244-e880c1e6d54e?w=1200',
+        'politica': [
+            'https://images.unsplash.com/photo-1529107386315-e1a2ed48a620?w=1200',
+            'https://images.unsplash.com/photo-1585155770447-2f66e2a397b5?w=1200',
+        ],
+        'tv': [
+            'https://images.unsplash.com/photo-1522869635100-9f4c5e86aa37?w=1200',
+            'https://images.unsplash.com/photo-1593359677879-a4bb92f829d1?w=1200',
+        ],
+        'musica': [
+            'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=1200',
+            'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=1200',
+        ],
+        'sport': [
+            'https://images.unsplash.com/photo-1517649763962-0c623066013b?w=1200',
+            'https://images.unsplash.com/photo-1521412644187-c49fa049e84d?w=1200',
+        ],
+        'cinema': [
+            'https://images.unsplash.com/photo-1440404653325-ab127d49abc1?w=1200',
+            'https://images.unsplash.com/photo-1478720568477-152d9b164e26?w=1200',
+        ],
+        'social': [
+            'https://images.unsplash.com/photo-1611605698335-8b1569810432?w=1200',
+            'https://images.unsplash.com/photo-1611746872915-64382b5c76da?w=1200',
+        ],
+        'gossip': [
+            'https://images.unsplash.com/photo-1523419409543-a5e549c1faa8?w=1200',
+            'https://images.unsplash.com/photo-1516307365426-bea591f05011?w=1200',
+        ],
     }
-    return mapping.get(cat_id, mapping['gossip'])
+    options = mapping.get(cat_id, mapping['gossip'])
+    if not seed:
+        return options[0]
+    idx = sum(ord(c) for c in seed) % len(options)
+    return options[idx]
+
+
+def _image_from_entry(entry) -> Optional[str]:
+    """Try to extract a real image from an RSS entry (media:content, enclosures, media:thumbnail)."""
+    try:
+        for m in getattr(entry, 'media_content', []) or []:
+            url = m.get('url')
+            if url and url.startswith('http'):
+                return url
+    except Exception:
+        pass
+    try:
+        for m in getattr(entry, 'media_thumbnail', []) or []:
+            url = m.get('url')
+            if url and url.startswith('http'):
+                return url
+    except Exception:
+        pass
+    try:
+        for e in getattr(entry, 'enclosures', []) or []:
+            url = e.get('href') or e.get('url')
+            typ = (e.get('type') or '').lower()
+            if url and ('image' in typ or url.lower().endswith(('.jpg', '.jpeg', '.png', '.webp'))):
+                return url
+    except Exception:
+        pass
+    # Some feeds embed <img> in the summary
+    try:
+        summary = getattr(entry, 'summary', '') or ''
+        m = re.search(r'<img[^>]+src="([^"]+)"', summary)
+        if m:
+            return m.group(1)
+    except Exception:
+        pass
+    return None
 
 
 @api_router.post('/admin/generate-daily')
@@ -780,10 +841,26 @@ async def _generate_feud_for_category(cat: dict, LlmChat, UserMessage) -> Option
         logger.info(f"AI returned invalid source_index for {cat['id']}: {idx}, discarding")
         return None
 
-    sources: List[dict] = [headlines[idx]]
+    chosen = headlines[idx]
+
+    # Deduplication: skip if we already have a feud with this source link from the last 3 days
+    three_days_ago = now_utc() - timedelta(days=3)
+    dup = await db.feuds.find_one({
+        'sources.link': chosen['link'],
+        'created_at': {'$gte': three_days_ago},
+    }, {'_id': 0, 'feud_id': 1})
+    if dup:
+        logger.info(f"Duplicate source for {cat['id']}: {chosen['link']}, skipping generation")
+        return None
+
+    sources: List[dict] = [chosen]
     for i, h in enumerate(headlines[:6]):
         if i != idx and h not in sources and len(sources) < 3:
             sources.append(h)
+
+    # Prefer the real image from the chosen headline; fallback to category image
+    chosen_image = chosen.get('image')
+    image_url = chosen_image if chosen_image else _image_for_category(cat['id'], seed=chosen['link'])
 
     engagement = data.get('engagement_score')
     try:
@@ -799,7 +876,7 @@ async def _generate_feud_for_category(cat: dict, LlmChat, UserMessage) -> Option
         'party_b': (data.get('party_b') or 'Team B')[:60],
         'summary': data.get('summary') or '',
         'question': data.get('question') or 'Con chi ti schieri?',
-        'image_url': _image_for_category(cat['id']),
+        'image_url': image_url,
         'sources': sources,
         'engagement_score': engagement,
         'engagement_reason': data.get('engagement_reason') or '',
@@ -862,7 +939,12 @@ async def _fetch_headlines_for_category(cat_id: str, max_items: int = 6) -> List
                     title = (entry.get('title') or '').strip()
                     link = entry.get('link') or ''
                     if title and link:
-                        results.append({'title': title[:200], 'link': link, 'source': source_name})
+                        results.append({
+                            'title': title[:200],
+                            'link': link,
+                            'source': source_name,
+                            'image': _image_from_entry(entry),
+                        })
                     if len(results) >= max_items * 2:
                         break
             except Exception as e:
@@ -962,33 +1044,40 @@ async def on_startup():
 
 
 async def _daily_generation_loop():
-    """Every hour, check if a daily AI generation has already run today (UTC). If not, run 2 fresh feuds."""
+    """Every hour, ensure each category has at least one fresh feud from the last 24 hours.
+    Skip generation for categories that already have a fresh feud. This uses the RSS+dedup
+    logic so no duplicate stories will be inserted."""
     import asyncio as _asyncio
     while True:
         try:
-            today_key = now_utc().strftime('%Y-%m-%d')
-            meta = await db.system_meta.find_one({'key': 'last_daily_gen'}, {'_id': 0})
-            if not meta or meta.get('date') != today_key:
-                logger.info(f"Running daily AI generation for {today_key}")
+            try:
+                from emergentintegrations.llm.chat import LlmChat, UserMessage
+            except Exception as e:
+                logger.warning(f"scheduler LLM import failed: {e}")
+                await _asyncio.sleep(3600)
+                continue
+
+            one_day_ago = now_utc() - timedelta(hours=24)
+            for cat in CATEGORIES:
                 try:
-                    from emergentintegrations.llm.chat import LlmChat, UserMessage
-                    # Rotate categories: pick 2 based on day-of-year
-                    day_idx = now_utc().timetuple().tm_yday
-                    cats = [CATEGORIES[day_idx % len(CATEGORIES)], CATEGORIES[(day_idx + 3) % len(CATEGORIES)]]
-                    for cat in cats:
-                        try:
-                            feud = await _generate_feud_for_category(cat, LlmChat, UserMessage)
-                            if feud:
-                                await db.feuds.insert_one(feud)
-                        except Exception as e:
-                            logger.warning(f"scheduler gen failed for {cat['id']}: {e}")
-                    await db.system_meta.update_one(
-                        {'key': 'last_daily_gen'},
-                        {'$set': {'key': 'last_daily_gen', 'date': today_key, 'at': now_utc()}},
-                        upsert=True,
+                    fresh = await db.feuds.find_one(
+                        {'category': cat['id'], 'source': 'ai', 'created_at': {'$gte': one_day_ago}},
+                        {'_id': 0, 'feud_id': 1},
                     )
+                    if fresh:
+                        continue
+                    logger.info(f"scheduler: generating fresh feud for {cat['id']}")
+                    feud = await _generate_feud_for_category(cat, LlmChat, UserMessage)
+                    if feud:
+                        await db.feuds.insert_one(feud)
+                        logger.info(f"scheduler: inserted feud for {cat['id']}")
                 except Exception as e:
-                    logger.warning(f"scheduler LLM setup failed: {e}")
+                    logger.warning(f"scheduler gen failed for {cat['id']}: {e}")
+            await db.system_meta.update_one(
+                {'key': 'last_scheduler_run'},
+                {'$set': {'key': 'last_scheduler_run', 'at': now_utc()}},
+                upsert=True,
+            )
         except Exception as e:
             logger.warning(f"scheduler loop error: {e}")
         await _asyncio.sleep(3600)  # check hourly
