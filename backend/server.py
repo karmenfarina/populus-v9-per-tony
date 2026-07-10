@@ -1,4 +1,5 @@
-from fastapi import FastAPI, APIRouter, Header, HTTPException, Depends
+from fastapi import FastAPI, APIRouter, Header, HTTPException, Depends, Request
+from fastapi.responses import HTMLResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -10,6 +11,8 @@ import jwt
 import httpx
 import json
 import re
+import time
+import html as html_lib
 import feedparser
 from pathlib import Path
 from pydantic import BaseModel, Field, EmailStr
@@ -351,6 +354,79 @@ async def share_feud(feud_id: str):
     return {'feud': doc}
 
 
+@api_router.get('/share/{feud_id}/html', response_class=HTMLResponse)
+async def share_feud_html(feud_id: str, request: Request = None):
+    doc = await db.feuds.find_one({'feud_id': feud_id}, {'_id': 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail='Faida non trovata')
+    _attach_percentages(doc, revealed=True)
+    esc = html_lib.escape
+    title = esc(doc.get('title', 'Populus'))
+    summary = esc((doc.get('summary') or '')[:280])
+    party_a = esc(doc.get('party_a', 'A'))
+    party_b = esc(doc.get('party_b', 'B'))
+    image = esc(doc.get('image_url', ''))
+    pct_a = doc.get('pct_a', 50)
+    pct_b = doc.get('pct_b', 50)
+    total = doc.get('total_votes', 0)
+    category = esc(doc.get('category_label', ''))
+    canonical_url = str(request.url) if request is not None else ''
+    canonical_url = esc(canonical_url)
+    page = f"""<!doctype html>
+<html lang=\"it\"><head>
+<meta charset=\"utf-8\"/>
+<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"/>
+<title>{title} · Populus</title>
+<meta name=\"description\" content=\"{summary}\"/>
+<meta property=\"og:type\" content=\"article\"/>
+<meta property=\"og:site_name\" content=\"Populus\"/>
+<meta property=\"og:title\" content=\"{title}\"/>
+<meta property=\"og:description\" content=\"{summary}\"/>
+<meta property=\"og:image\" content=\"{image}\"/>
+<meta property=\"og:url\" content=\"{canonical_url}\"/>
+<meta name=\"twitter:card\" content=\"summary_large_image\"/>
+<meta name=\"twitter:title\" content=\"{title}\"/>
+<meta name=\"twitter:description\" content=\"{summary}\"/>
+<meta name=\"twitter:image\" content=\"{image}\"/>
+<style>
+  :root{{color-scheme:light}}
+  body{{margin:0;background:#F4F4F0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#0F0F0F}}
+  .wrap{{max-width:640px;margin:0 auto;padding:16px}}
+  .hdr{{background:#0F0F0F;color:#F4F4F0;padding:16px;border:2px solid #0F0F0F}}
+  .brand{{font-size:28px;font-weight:700;letter-spacing:2px}}
+  .kicker{{color:#FFE600;font-size:12px;letter-spacing:2px;margin-top:4px}}
+  .hero{{width:100%;aspect-ratio:16/10;object-fit:cover;border:2px solid #0F0F0F;border-top:none;display:block}}
+  .title{{font-size:26px;font-weight:700;line-height:1.15;margin:16px 0 8px}}
+  .summary{{font-size:16px;line-height:1.5;color:#0F0F0F}}
+  .split{{display:flex;margin-top:16px;border:2px solid #0F0F0F}}
+  .half{{flex:1;padding:20px;text-align:center}}
+  .half.a{{background:#FF3B30;color:#fff}}
+  .half.b{{background:#FFE600;color:#0F0F0F}}
+  .pct{{font-size:34px;font-weight:700;letter-spacing:1px}}
+  .name{{font-size:13px;letter-spacing:1px;margin-top:4px}}
+  .cta{{display:block;text-align:center;background:#0F0F0F;color:#F4F4F0;padding:16px;margin-top:16px;border:2px solid #0F0F0F;text-decoration:none;font-weight:700;letter-spacing:2px}}
+  .meta{{margin-top:12px;font-size:12px;letter-spacing:1px;color:#6E6E6E}}
+</style>
+</head><body>
+<div class=\"wrap\">
+  <div class=\"hdr\">
+    <div class=\"brand\">POPULUS</div>
+    <div class=\"kicker\">{category}</div>
+  </div>
+  <img class=\"hero\" src=\"{image}\" alt=\"{title}\"/>
+  <h1 class=\"title\">{title}</h1>
+  <p class=\"summary\">{summary}</p>
+  <div class=\"split\">
+    <div class=\"half a\"><div class=\"pct\">{pct_a}%</div><div class=\"name\">{party_a}</div></div>
+    <div class=\"half b\"><div class=\"pct\">{pct_b}%</div><div class=\"name\">{party_b}</div></div>
+  </div>
+  <div class=\"meta\">{total} VOTI · Con chi ti schieri?</div>
+  <a class=\"cta\" href=\"/\">APRI POPULUS ›</a>
+</div>
+</body></html>"""
+    return HTMLResponse(content=page)
+
+
 @api_router.get('/feuds/{feud_id}')
 async def get_feud(feud_id: str, user: Optional[dict] = Depends(get_current_user_optional)):
     doc = await db.feuds.find_one({'feud_id': feud_id}, {'_id': 0})
@@ -387,6 +463,60 @@ async def _recompute_user_alignment(user_id: str):
         {'user_id': user_id},
         {'$set': {'majority_votes': maj, 'minority_votes': minr, 'total_votes': maj + minr}},
     )
+
+
+# ----------------------- Moderation -----------------------
+
+BLOCKED_WORDS = {
+    # Slurs + hate — keep this list conservative but non-empty for MVP
+    'negro', 'frocio', 'finocchio', 'terrone', 'zingaro', 'ebreo di merda',
+    'checca', 'ricchione', 'crucco', 'polentone', 'marocchino di merda',
+    # Common Italian profanity/insults (strong)
+    'vaffanculo', 'stronzo', 'stronza', 'coglione', 'coglioni', 'puttana', 'troia',
+    'bastardo', 'bastarda', 'cazzo', 'cazzone', 'merda', 'porco dio', 'porca madonna',
+    'figlio di puttana', 'figlia di puttana', 'mongoloide', 'ritardato', 'handicappato',
+    'idiota di merda', 'schifoso', 'sfigato',
+    # Threats
+    'ti ammazzo', 'ti uccido', 'devi morire',
+}
+
+
+def _moderate_text(text: str) -> tuple[str, list[str]]:
+    """Return (cleaned_text, flagged_words). If flagged non-empty, caller should reject."""
+    original = (text or '').strip()
+    if not original:
+        return original, ['vuoto']
+    lower = original.lower()
+    hits = []
+    for word in BLOCKED_WORDS:
+        # match whole substring; use \b when word is single token to avoid false positives on unrelated substrings
+        if ' ' in word:
+            if word in lower:
+                hits.append(word)
+        else:
+            if re.search(r'\b' + re.escape(word) + r'\b', lower):
+                hits.append(word)
+    return original, hits
+
+
+async def _log_flagged(user_id: str, feud_id: str, text: str, hits: list[str]):
+    try:
+        await db.flagged_comments.insert_one({
+            'flag_id': new_id('flag'),
+            'user_id': user_id,
+            'feud_id': feud_id,
+            'text': text,
+            'hits': hits,
+            'created_at': now_utc(),
+        })
+    except Exception as e:
+        logger.warning(f"failed to log flagged comment: {e}")
+
+
+# ----------------------- RSS cache -----------------------
+
+_RSS_CACHE: dict = {}  # key: cat_id -> (expires_ts, results)
+_RSS_TTL_SECONDS = 30 * 60  # 30 minutes
 
 
 @api_router.post('/feuds/{feud_id}/vote')
@@ -493,9 +623,13 @@ async def add_comment(feud_id: str, body: CommentBody, user: dict = Depends(get_
     vote = await db.votes.find_one({'feud_id': feud_id, 'user_id': user['user_id']}, {'_id': 0})
     if not vote:
         raise HTTPException(status_code=400, detail='Devi prima votare')
+    clean_text, flagged = _moderate_text(body.text)
+    if flagged:
+        await _log_flagged(user['user_id'], feud_id, body.text, flagged)
+        raise HTTPException(status_code=400, detail=f"Commento bloccato: contiene termini non consentiti ({', '.join(flagged)})")
     doc = {
         'comment_id': new_id('cmt'), 'feud_id': feud_id, 'user_id': user['user_id'],
-        'nickname': user.get('nickname'), 'side': vote['side'], 'text': body.text.strip(),
+        'nickname': user.get('nickname'), 'side': vote['side'], 'text': clean_text,
         'created_at': now_utc(),
     }
     await db.comments.insert_one(doc)
@@ -519,10 +653,14 @@ async def add_reply(comment_id: str, body: ReplyBody, user: dict = Depends(get_c
         raise HTTPException(status_code=404, detail='Commento non trovato')
     vote = await db.votes.find_one({'feud_id': parent['feud_id'], 'user_id': user['user_id']}, {'_id': 0})
     side = vote['side'] if vote else parent['side']
+    clean_text, flagged = _moderate_text(body.text)
+    if flagged:
+        await _log_flagged(user['user_id'], parent['feud_id'], body.text, flagged)
+        raise HTTPException(status_code=400, detail=f"Risposta bloccata: contiene termini non consentiti ({', '.join(flagged)})")
     doc = {
         'reply_id': new_id('rep'), 'comment_id': comment_id, 'feud_id': parent['feud_id'],
         'user_id': user['user_id'], 'nickname': user.get('nickname'), 'side': side,
-        'text': body.text.strip(), 'created_at': now_utc(),
+        'text': clean_text, 'created_at': now_utc(),
     }
     await db.replies.insert_one(doc)
     doc.pop('_id', None)
@@ -671,6 +809,11 @@ RSS_FEEDS: dict = {
 
 
 async def _fetch_headlines_for_category(cat_id: str, max_items: int = 6) -> List[dict]:
+    # Cache hit
+    entry = _RSS_CACHE.get(cat_id)
+    if entry and entry[0] > time.time():
+        return entry[1][:max_items]
+
     feeds = RSS_FEEDS.get(cat_id, [])
     if not feeds:
         return []
@@ -702,6 +845,7 @@ async def _fetch_headlines_for_category(cat_id: str, max_items: int = 6) -> List
         out.append(r)
         if len(out) >= max_items:
             break
+    _RSS_CACHE[cat_id] = (time.time() + _RSS_TTL_SECONDS, out)
     return out
 
 

@@ -92,7 +92,7 @@ export default function FeudDetail() {
     if (!feud) return;
     try {
       const base = process.env.EXPO_PUBLIC_BACKEND_URL || "";
-      const url = `${base}/api/share/${feud.feud_id}`;
+      const url = `${base}/api/share/${feud.feud_id}/html`;
       await Share.share({
         title: feud.title,
         message: `${feud.title}\n\nCon chi ti schieri? ${feud.party_a} vs ${feud.party_b}\n${url}`,

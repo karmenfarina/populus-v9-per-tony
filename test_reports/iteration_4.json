@@ -1,0 +1,36 @@
+{
+  "summary": "Iteration 4 backend testing complete: 11/11 pytest cases pass for the OG HTML share endpoint, Italian comment/reply moderation, RSS cache, and regressions. GET /api/share/{id}/html returns 200 with content-type text/html and contains og:title/og:description/og:image/og:url/og:type, twitter:card=summary_large_image, twitter:title/image, plus the visible Populus preview (title, party_a, party_b, pct_a%/pct_b%, POPULUS header, APRI POPULUS CTA). Unknown feud_id -> 404. Clean comment 'Bel commento' returns 200 with comment doc (side derived from vote, cmt_ id). 'sei un coglione vaffanculo' -> 400 with detail 'Commento bloccato: contiene termini non consentiti (coglione, vaffanculo)'. Reply with 'stronzo, sei un idiota di merda' -> 400 'Risposta bloccata...'. Clean reply ok. db.flagged_comments record verified via direct Mongo read (flag_id, user_id, feud_id, text, hits populated). RSS cache: /api/admin/generate-daily?count=1 first=7.9s second=6.0s (both well under 60s; no re-fetch of RSS on second call). Regression: JSON /api/share/{id} still returns {feud: {...}} with revealed=true, and /api/search?q=Ferragni still returns >=1 hit.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_share_html_moderation.py",
+    "/app/test_reports/pytest/pytest_results.xml",
+    "/app/test_reports/iteration_4.json"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py /api/share/{feud_id}/html correctly html-escapes all interpolated fields (title, summary, party_a, party_b, image, category, canonical_url) via html.escape — no XSS via feud content.",
+    "og:url uses str(request.url) which reflects the incoming ingress URL — good for social crawlers.",
+    "BLOCKED_WORDS uses \\b word-boundary for single tokens and substring match for multi-word phrases — prevents false positives (e.g. 'bastard-like' words) while catching phrases like 'porco dio'.",
+    "_log_flagged is wrapped in try/except so a Mongo failure won't break the 400 response path — good.",
+    "_RSS_CACHE is process-local (in-memory dict). Under multiple gunicorn workers each worker has its own cache; acceptable for MVP but note for scale.",
+    "server.py is now 980 lines (was 836 in iter3). Splitting into modules (share/, moderation/, rss/, feuds/) is increasingly desirable. Non-blocking.",
+    "HTMLResponse doesn't explicitly set cache-control; social scrapers will re-fetch each time. Optional: add Cache-Control: public, max-age=300 for og:crawlers.",
+    "share_feud_html uses request: Request = None default — while FastAPI will inject it, having a mutable default of None is fine here but relies on FastAPI DI; explicit type without default would be cleaner.",
+    "Both /api/share/{feud_id} and /api/share/{feud_id}/html strip _id via projection — no ObjectId leaks."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_share_html_moderation.py (new, 11 tests)"
+  ],
+  "success_rate": {"backend": "100% (11/11)", "frontend": "not tested (per request)"},
+  "seed_data_creation": "Anonymous users TEST_M_* created via /api/auth/anonymous. Several clean comments + one flagged comment ('puttana troia TEST_...') inserted; corresponding db.flagged_comments doc created and verified. Also two calls to /api/admin/generate-daily?count=1 may have added up to 2 AI feuds.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 4 backend features all pass. Reusable regression file: /app/backend/tests/test_share_html_moderation.py (uses EXPO_PUBLIC_BACKEND_URL from env or defaults to team-pick.preview.emergentagent.com). Moderation error format: 'Commento bloccato: contiene termini non consentiti (word1, word2)' for comments and 'Risposta bloccata: ...' for replies. HTML share URL pattern: {BASE_URL}/api/share/{feud_id}/html. Flagged docs stored in db.flagged_comments with fields {flag_id, user_id, feud_id, text, hits, created_at}. Frontend was skipped per main agent's instruction — Share.share() now uses the /html URL and no new UI beyond that.",
+  "rca_of_issue": "N/A — no bugs found."
+}
