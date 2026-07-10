@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   View, Text, StyleSheet, ScrollView, Pressable, FlatList, RefreshControl,
-  ActivityIndicator, ImageBackground, Image,
+  ActivityIndicator, ImageBackground,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
@@ -47,18 +47,8 @@ export default function HomeFeed() {
   return (
     <SafeAreaView style={styles.safe} edges={["top"]} testID="home-screen">
       <View style={styles.header}>
-        <View style={styles.headerRow}>
-          <Image
-            source={require("../../assets/images/icon.png")}
-            style={styles.headerLogo}
-            resizeMode="contain"
-            testID="home-logo"
-          />
-          <View style={{ flex: 1 }}>
-            <Text style={styles.brand}>POPULUS</Text>
-            <Text style={styles.date}>{new Date().toLocaleDateString("it-IT", { day: "numeric", month: "long" }).toUpperCase()}</Text>
-          </View>
-        </View>
+        <Text style={styles.brand}>POPULUS</Text>
+        <Text style={styles.date}>{new Date().toLocaleDateString("it-IT", { day: "numeric", month: "long" }).toUpperCase()}</Text>
       </View>
 
       <View style={styles.chipRowWrap}>
@@ -143,8 +133,6 @@ function FeudCard({ feud, onPress }: { feud: Feud; onPress: () => void }) {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.surface },
   header: { paddingHorizontal: spacing.lg, paddingTop: spacing.sm, paddingBottom: spacing.md, borderBottomWidth: 2, borderColor: colors.border, backgroundColor: colors.surfaceInverse },
-  headerRow: { flexDirection: "row", alignItems: "center", gap: spacing.md },
-  headerLogo: { width: 52, height: 52, backgroundColor: colors.surface, borderWidth: 2, borderColor: colors.brandSecondary },
   brand: { color: colors.onSurfaceInverse, fontSize: font.sizes.xxxl, letterSpacing: 2, fontWeight: "500" },
   date: { color: colors.brandSecondary, fontSize: font.sizes.sm, letterSpacing: 2, marginTop: 2 },
   chipRowWrap: { height: 56, backgroundColor: colors.surfaceInverse, borderBottomWidth: 2, borderColor: colors.border },
