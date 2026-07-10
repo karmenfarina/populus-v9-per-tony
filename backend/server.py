@@ -137,8 +137,8 @@ class ReplyBody(BaseModel):
 
 def compute_badge(u: dict) -> Optional[dict]:
     total = u.get('total_votes', 0)
-    if total < 5:
-        return {'unlocked': False, 'progress': total, 'target': 5, 'label': 'Continua a votare per sbloccare la spilla'}
+    if total < 10:
+        return {'unlocked': False, 'progress': total, 'target': 10, 'label': 'Continua a votare per sbloccare la spilla'}
     maj = u.get('majority_votes', 0)
     minr = u.get('minority_votes', 0)
     if maj >= minr:
@@ -672,7 +672,7 @@ async def _daily_generation_loop():
 
 @api_router.get('/')
 async def root():
-    return {'message': 'App di faide gossip API', 'ok': True}
+    return {'message': 'Populus API', 'ok': True}
 
 
 app.include_router(api_router)

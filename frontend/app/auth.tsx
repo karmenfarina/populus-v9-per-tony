@@ -43,7 +43,7 @@ export default function AuthScreen() {
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
           <View style={styles.header} testID="auth-header">
-            <Text style={styles.brand}>APP DI FAIDE</Text>
+            <Text style={styles.brand}>POPULUS</Text>
             <Text style={styles.tagline}>Scegli il tuo schieramento.</Text>
           </View>
 

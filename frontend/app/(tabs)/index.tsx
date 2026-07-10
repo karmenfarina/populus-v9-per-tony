@@ -47,7 +47,7 @@ export default function HomeFeed() {
   return (
     <SafeAreaView style={styles.safe} edges={["top"]} testID="home-screen">
       <View style={styles.header}>
-        <Text style={styles.brand}>FAIDE</Text>
+        <Text style={styles.brand}>POPULUS</Text>
         <Text style={styles.date}>{new Date().toLocaleDateString("it-IT", { day: "numeric", month: "long" }).toUpperCase()}</Text>
       </View>
 
