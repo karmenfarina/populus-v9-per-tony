@@ -1,21 +1,17 @@
-import * as SecureStore from 'expo-secure-store';
+import { storage } from '@/src/utils/storage';
 
 const BASE = process.env.EXPO_PUBLIC_BACKEND_URL;
 export const TOKEN_KEY = 'faide_token';
 
 export async function getToken(): Promise<string | null> {
-  try {
-    return await SecureStore.getItemAsync(TOKEN_KEY);
-  } catch {
-    return null;
-  }
+  return (await storage.secureGet<string>(TOKEN_KEY, '')) || null;
 }
 
 export async function setToken(token: string | null) {
   if (token === null) {
-    await SecureStore.deleteItemAsync(TOKEN_KEY);
+    await storage.secureRemove(TOKEN_KEY);
   } else {
-    await SecureStore.setItemAsync(TOKEN_KEY, token);
+    await storage.secureSet(TOKEN_KEY, token);
   }
 }
 

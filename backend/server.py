@@ -219,7 +219,8 @@ async def google_session(body: GoogleSessionBody):
 
     existing = await db.users.find_one({'email': email}, {'_id': 0})
     if existing:
-        user_id = existing['user_id']; user = existing
+        user_id = existing['user_id']
+        user = existing
     else:
         user_id = new_id('user')
         user = {
@@ -267,7 +268,8 @@ async def get_categories():
 
 
 def _attach_percentages(d: dict):
-    a = d.get('votes_a', 0); b = d.get('votes_b', 0)
+    a = d.get('votes_a', 0)
+    b = d.get('votes_b', 0)
     total = a + b
     d['total_votes'] = total
     d['pct_a'] = round(100 * a / total) if total else 50
@@ -301,12 +303,14 @@ async def get_feud(feud_id: str, user: Optional[dict] = Depends(get_current_user
 
 async def _recompute_user_alignment(user_id: str):
     votes = await db.votes.find({'user_id': user_id}, {'_id': 0}).to_list(1000)
-    maj = 0; minr = 0
+    maj = 0
+    minr = 0
     for v in votes:
         feud = await db.feuds.find_one({'feud_id': v['feud_id']}, {'_id': 0})
         if not feud:
             continue
-        a = feud.get('votes_a', 0); b = feud.get('votes_b', 0)
+        a = feud.get('votes_a', 0)
+        b = feud.get('votes_b', 0)
         if a == b:
             maj += 1
             continue
