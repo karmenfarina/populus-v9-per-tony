@@ -705,40 +705,63 @@ async def generate_daily(count: int = 3):
 
 
 async def _generate_feud_for_category(cat: dict, LlmChat, UserMessage) -> Optional[dict]:
-    # Fetch real news headlines for this category from RSS feeds
-    headlines = await _fetch_headlines_for_category(cat['id'], max_items=6)
+    # Fetch a wider pool of real news headlines so the AI has room to pick the juiciest
+    headlines = await _fetch_headlines_for_category(cat['id'], max_items=12)
 
     chat = LlmChat(
         api_key=EMERGENT_LLM_KEY,
         session_id=f"gen-{cat['id']}-{uuid.uuid4().hex[:6]}",
         system_message=(
-            "Sei un editor italiano che trasforma notizie reali di cronaca in faide "
-            "(controversie a due parti) su cui gli utenti possono schierarsi. "
-            "Restituisci SOLO JSON valido, in italiano, senza commenti."
+            "Sei un editor italiano cinico e affilato, tipo tabloid, che trasforma notizie reali "
+            "in FAIDE — controversie a due parti su cui la gente si accalora. "
+            "Il tuo unico criterio è l'engagement: la notizia scelta deve provocare reazioni "
+            "emotive forti (rabbia, indignazione, ironia, gossip, tifo), dividere il pubblico in due, "
+            "e far venir voglia di commentare. Evita come la peste notizie tecniche, burocratiche, "
+            "adempimenti, dati economici astratti, dichiarazioni istituzionali generiche, "
+            "necrologi, cronaca meteo, o eventi che non hanno due parti chiaramente contrapposte. "
+            "Restituisci SOLO JSON valido, in italiano, senza commenti e senza testo extra."
         ),
     ).with_model('anthropic', 'claude-sonnet-4-6')
 
     if headlines:
-        sources_block = "\n".join([f"- {h['title']} (fonte: {h['source']}, {h['link']})" for h in headlines])
+        sources_block = "\n".join([f"[{i}] {h['title']} — fonte: {h['source']}" for i, h in enumerate(headlines)])
         prompt = (
-            f"Categoria: {cat['label']}.\n"
-            f"Ecco le notizie reali di oggi:\n{sources_block}\n\n"
-            "Scegli LA notizia più adatta a diventare una faida (deve avere due parti chiaramente contrapposte) "
-            "e trasformala in una controversia. "
-            "Rispondi con JSON esatto: "
-            '{"title": "titolo tabloid max 80 caratteri, in italiano", '
-            '"party_a": "nome primo contendente (persona/gruppo/opinione)", '
-            '"party_b": "nome secondo contendente", '
-            '"summary": "3-4 frasi che spiegano la controversia partendo dalla notizia scelta, in italiano", '
-            '"question": "domanda diretta al lettore, con chi ti schieri?", '
-            '"source_index": indice (0-based) della notizia scelta nell\'elenco fornito}'
+            f"Categoria: {cat['label']}.\n\n"
+            f"POOL DI NOTIZIE REALI DI OGGI:\n{sources_block}\n\n"
+            "COMPITO: scegli LA notizia che ha il coefficiente di engagement più alto. "
+            "Criteri, in ordine di importanza:\n"
+            "1. Deve avere DUE parti chiaramente contrapposte (persone, gruppi, opinioni, tifoserie).\n"
+            "2. Deve scatenare reazioni emotive forti: rabbia, indignazione, tifo, gossip, ironia.\n"
+            "3. Deve toccare l'opinione popolare o essere già virale sui social.\n"
+            "4. Preferisci scandali, litigi pubblici, gaffe, dichiarazioni divisive, "
+            "risultati contestati, presunti tradimenti, cause legali, retroscena piccanti.\n"
+            "5. Scarta senza pietà: comunicati istituzionali generici, dati statistici noiosi, "
+            "adempimenti amministrativi, notizie tecniche di nicchia, retorica ovvia.\n\n"
+            "Se NESSUNA notizia nel pool è abbastanza succosa, inventane una plausibile e attuale "
+            "coerente con la categoria (indica source_index = -1).\n\n"
+            "Il titolo deve essere DA TABLOID: incisivo, esplicito nel conflitto (usa 'contro', 'vs', "
+            "'attacca', 'smaschera', 'accusa', 'insulta', 'gela', 'demolisce'), max 90 caratteri.\n"
+            "Le due parti devono essere nomi propri o gruppi riconoscibili, non astrazioni.\n"
+            "La domanda finale deve essere provocatoria e schierante.\n\n"
+            "Rispondi SOLO con questo JSON:\n"
+            '{"title": "titolo tabloid max 90 caratteri", '
+            '"party_a": "primo contendente riconoscibile", '
+            '"party_b": "secondo contendente riconoscibile", '
+            '"summary": "3-4 frasi che spiegano la faida come farebbe un giornalista di gossip, senza edulcorare, con dettagli concreti", '
+            '"question": "domanda schierante e provocatoria, non neutra", '
+            '"source_index": indice della notizia scelta (-1 se hai inventato), '
+            '"engagement_score": numero da 1 a 10 che stimi per la faida che hai creato, '
+            '"engagement_reason": "una frase che spiega perché scatenerà reazioni"}'
         )
     else:
         prompt = (
-            f"Categoria: {cat['label']}. Non ho fonti RSS oggi. "
-            "Genera una faida plausibile italiana. Rispondi con JSON: "
-            '{"title": "...", "party_a": "...", "party_b": "...", '
-            '"summary": "...", "question": "..."}'
+            f"Categoria: {cat['label']}. Non ho notizie RSS oggi.\n"
+            "Inventa una faida plausibile, attuale, italiana, con altissimo potenziale di engagement: "
+            "due parti riconoscibili in conflitto pubblico, tema che scatena emozioni forti "
+            "(rabbia, gossip, tifo, indignazione). Titolo tabloid incisivo max 90 caratteri, "
+            "domanda provocatoria e schierante.\n"
+            'Rispondi SOLO con: {"title":"...","party_a":"...","party_b":"...","summary":"...",'
+            '"question":"...","engagement_score":numero 1-10,"engagement_reason":"..."}'
         )
 
     text = await chat.send_message(UserMessage(text=prompt))
@@ -755,21 +778,29 @@ async def _generate_feud_for_category(cat: dict, LlmChat, UserMessage) -> Option
         idx = data.get('source_index')
         if isinstance(idx, int) and 0 <= idx < len(headlines):
             sources.append(headlines[idx])
-        # attach the other 2 as extra references
-        for i, h in enumerate(headlines[:3]):
-            if i != idx and h not in sources:
-                sources.append(h)
+            # add up to 2 related headlines as extra references
+            for i, h in enumerate(headlines[:6]):
+                if i != idx and h not in sources and len(sources) < 3:
+                    sources.append(h)
+
+    engagement = data.get('engagement_score')
+    try:
+        engagement = int(engagement)
+    except Exception:
+        engagement = None
 
     return {
         'feud_id': new_id('feud'),
         'category': cat['id'], 'category_label': cat['label'],
-        'title': (data.get('title') or 'Faida senza titolo')[:120],
+        'title': (data.get('title') or 'Faida senza titolo')[:140],
         'party_a': (data.get('party_a') or 'Team A')[:60],
         'party_b': (data.get('party_b') or 'Team B')[:60],
         'summary': data.get('summary') or '',
         'question': data.get('question') or 'Con chi ti schieri?',
         'image_url': _image_for_category(cat['id']),
         'sources': sources,
+        'engagement_score': engagement,
+        'engagement_reason': data.get('engagement_reason') or '',
         'votes_a': 0, 'votes_b': 0, 'created_at': now_utc(), 'source': 'ai',
     }
 
