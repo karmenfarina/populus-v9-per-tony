@@ -59,6 +59,8 @@ export const api = {
     request(`/sponsors${category && category !== 'all' ? `?category=${category}` : ''}`),
   history: (filter: 'all' | 'majority' | 'minority' = 'all') =>
     request(`/users/me/history?filter=${filter}`),
+  search: (q: string) => request(`/search?q=${encodeURIComponent(q)}`),
+  share: (id: string) => request(`/share/${id}`),
 };
 
 export type User = {
@@ -118,6 +120,7 @@ export type Feud = {
   pct_b: number | null;
   revealed: boolean;
   my_vote?: 'A' | 'B' | null;
+  sources?: { title: string; link: string; source: string }[];
 };
 
 export type Comment = {

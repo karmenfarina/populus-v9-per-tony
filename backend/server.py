@@ -10,6 +10,7 @@ import jwt
 import httpx
 import json
 import re
+import feedparser
 from pathlib import Path
 from pydantic import BaseModel, Field, EmailStr
 from typing import List, Optional, Literal
@@ -308,6 +309,48 @@ async def list_feuds(category: Optional[str] = None, user: Optional[dict] = Depe
     return {'feuds': docs}
 
 
+@api_router.get('/search')
+async def search_feuds(q: str, user: Optional[dict] = Depends(get_current_user_optional)):
+    q = (q or '').strip()
+    if not q:
+        return {'feuds': []}
+    # Try text search first; fallback to regex if index missing
+    try:
+        cursor = db.feuds.find(
+            {'$text': {'$search': q}},
+            {'_id': 0, 'score': {'$meta': 'textScore'}},
+        ).sort([('score', {'$meta': 'textScore'})]).limit(50)
+        docs = await cursor.to_list(50)
+    except Exception:
+        rx = re.compile(re.escape(q), re.IGNORECASE)
+        docs = await db.feuds.find(
+            {'$or': [{'title': rx}, {'summary': rx}, {'party_a': rx}, {'party_b': rx}]},
+            {'_id': 0},
+        ).limit(50).to_list(50)
+    voted_map: dict = {}
+    if user and docs:
+        voted_map = await _user_voted_ids(user['user_id'], [d['feud_id'] for d in docs])
+    for d in docs:
+        d.pop('score', None)
+        my_vote = voted_map.get(d['feud_id']) if user else None
+        _attach_percentages(d, revealed=bool(my_vote))
+        d['my_vote'] = my_vote
+    return {'feuds': docs}
+
+
+@api_router.get('/share/{feud_id}')
+async def share_feud(feud_id: str):
+    """Public share endpoint — always revealed, no auth required, no my_vote."""
+    doc = await db.feuds.find_one({'feud_id': feud_id}, {'_id': 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail='Faida non trovata')
+    _attach_percentages(doc, revealed=True)
+    doc['my_vote'] = None
+    if isinstance(doc.get('created_at'), datetime):
+        doc['created_at'] = doc['created_at'].isoformat()
+    return {'feud': doc}
+
+
 @api_router.get('/feuds/{feud_id}')
 async def get_feud(feud_id: str, user: Optional[dict] = Depends(get_current_user_optional)):
     doc = await db.feuds.find_one({'feud_id': feud_id}, {'_id': 0})
@@ -524,24 +567,42 @@ async def generate_daily(count: int = 3):
 
 
 async def _generate_feud_for_category(cat: dict, LlmChat, UserMessage) -> Optional[dict]:
+    # Fetch real news headlines for this category from RSS feeds
+    headlines = await _fetch_headlines_for_category(cat['id'], max_items=6)
+
     chat = LlmChat(
         api_key=EMERGENT_LLM_KEY,
         session_id=f"gen-{cat['id']}-{uuid.uuid4().hex[:6]}",
         system_message=(
-            "Sei un editor italiano che crea faide/controversie dal mondo del gossip, tv, politica, musica, sport, cinema e social. "
+            "Sei un editor italiano che trasforma notizie reali di cronaca in faide "
+            "(controversie a due parti) su cui gli utenti possono schierarsi. "
             "Restituisci SOLO JSON valido, in italiano, senza commenti."
         ),
     ).with_model('anthropic', 'claude-sonnet-4-6')
 
-    prompt = (
-        f"Genera una faida attuale nella categoria '{cat['label']}'. "
-        "Restituisci un JSON con questi campi esatti: "
-        '{"title": "titolo tabloid massimo 60 caratteri", '
-        '"party_a": "nome primo contendente", '
-        '"party_b": "nome secondo contendente", '
-        '"summary": "spiegazione della controversia in 3-4 frasi, aggiornata", '
-        '"question": "domanda al lettore, con chi ti schieri?"}'
-    )
+    if headlines:
+        sources_block = "\n".join([f"- {h['title']} (fonte: {h['source']}, {h['link']})" for h in headlines])
+        prompt = (
+            f"Categoria: {cat['label']}.\n"
+            f"Ecco le notizie reali di oggi:\n{sources_block}\n\n"
+            "Scegli LA notizia più adatta a diventare una faida (deve avere due parti chiaramente contrapposte) "
+            "e trasformala in una controversia. "
+            "Rispondi con JSON esatto: "
+            '{"title": "titolo tabloid max 80 caratteri, in italiano", '
+            '"party_a": "nome primo contendente (persona/gruppo/opinione)", '
+            '"party_b": "nome secondo contendente", '
+            '"summary": "3-4 frasi che spiegano la controversia partendo dalla notizia scelta, in italiano", '
+            '"question": "domanda diretta al lettore, con chi ti schieri?", '
+            '"source_index": indice (0-based) della notizia scelta nell\'elenco fornito}'
+        )
+    else:
+        prompt = (
+            f"Categoria: {cat['label']}. Non ho fonti RSS oggi. "
+            "Genera una faida plausibile italiana. Rispondi con JSON: "
+            '{"title": "...", "party_a": "...", "party_b": "...", '
+            '"summary": "...", "question": "..."}'
+        )
+
     text = await chat.send_message(UserMessage(text=prompt))
     match = re.search(r'\{[\s\S]*\}', text)
     if not match:
@@ -550,6 +611,17 @@ async def _generate_feud_for_category(cat: dict, LlmChat, UserMessage) -> Option
         data = json.loads(match.group(0))
     except Exception:
         return None
+
+    sources: List[dict] = []
+    if headlines:
+        idx = data.get('source_index')
+        if isinstance(idx, int) and 0 <= idx < len(headlines):
+            sources.append(headlines[idx])
+        # attach the other 2 as extra references
+        for i, h in enumerate(headlines[:3]):
+            if i != idx and h not in sources:
+                sources.append(h)
+
     return {
         'feud_id': new_id('feud'),
         'category': cat['id'], 'category_label': cat['label'],
@@ -559,8 +631,78 @@ async def _generate_feud_for_category(cat: dict, LlmChat, UserMessage) -> Option
         'summary': data.get('summary') or '',
         'question': data.get('question') or 'Con chi ti schieri?',
         'image_url': _image_for_category(cat['id']),
+        'sources': sources,
         'votes_a': 0, 'votes_b': 0, 'created_at': now_utc(), 'source': 'ai',
     }
+
+
+# ----------------------- RSS News Ingestion -----------------------
+
+RSS_FEEDS: dict = {
+    'politica': [
+        ('ANSA Politica', 'https://www.ansa.it/sito/ansit_rss.xml'),
+        ('Repubblica Politica', 'https://www.repubblica.it/rss/politica/rss2.0.xml'),
+    ],
+    'tv': [
+        ('Fanpage TV', 'https://www.fanpage.it/feed/'),
+        ('TvBlog', 'https://www.tvblog.it/feed'),
+    ],
+    'musica': [
+        ('Rockol', 'https://www.rockol.it/rss/rockol.xml'),
+        ('Rockit', 'https://www.rockit.it/feed'),
+    ],
+    'sport': [
+        ('Gazzetta', 'https://www.gazzetta.it/rss/homepage.xml'),
+        ('ANSA Sport', 'https://www.ansa.it/sito/notizie/sport/sport_rss.xml'),
+    ],
+    'cinema': [
+        ('BadTaste', 'https://www.badtaste.it/feed/'),
+        ('ComingSoon', 'https://www.comingsoon.it/feed/'),
+    ],
+    'social': [
+        ('Fanpage Social', 'https://www.fanpage.it/feed/'),
+        ('DDay Social', 'https://www.dday.it/rss'),
+    ],
+    'gossip': [
+        ('Dagospia', 'https://www.dagospia.com/feed/'),
+        ('Novella 2000', 'https://www.novella2000.it/feed/'),
+    ],
+}
+
+
+async def _fetch_headlines_for_category(cat_id: str, max_items: int = 6) -> List[dict]:
+    feeds = RSS_FEEDS.get(cat_id, [])
+    if not feeds:
+        return []
+    results: List[dict] = []
+    async with httpx.AsyncClient(timeout=10.0, follow_redirects=True, headers={'User-Agent': 'PopulusBot/1.0'}) as hx:
+        for source_name, url in feeds:
+            try:
+                r = await hx.get(url)
+                if r.status_code != 200:
+                    continue
+                parsed = feedparser.parse(r.content)
+                for entry in parsed.entries[:max_items]:
+                    title = (entry.get('title') or '').strip()
+                    link = entry.get('link') or ''
+                    if title and link:
+                        results.append({'title': title[:200], 'link': link, 'source': source_name})
+                    if len(results) >= max_items * 2:
+                        break
+            except Exception as e:
+                logger.warning(f"RSS fetch failed for {url}: {e}")
+    # Dedup by title, cap to max_items
+    seen = set()
+    out = []
+    for r in results:
+        key = r['title'].lower()[:80]
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(r)
+        if len(out) >= max_items:
+            break
+    return out
 
 
 SEED_FEUDS = [
@@ -630,6 +772,11 @@ async def on_startup():
     await db.comments.create_index('feud_id')
     await db.replies.create_index('comment_id')
     await db.sponsors.create_index('category')
+    # Full-text index for search
+    try:
+        await db.feuds.create_index([('title', 'text'), ('summary', 'text'), ('party_a', 'text'), ('party_b', 'text')])
+    except Exception as e:
+        logger.warning(f"text index creation failed: {e}")
     await seed_if_empty()
     await seed_sponsors_if_empty()
     # Start background daily generation task

@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   View, Text, StyleSheet, ScrollView, Pressable, FlatList, RefreshControl,
-  ActivityIndicator, ImageBackground,
+  ActivityIndicator, ImageBackground, TextInput,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { Ionicons } from "@expo/vector-icons";
 import { api, Feud } from "@/src/api";
 import { colors, spacing, font } from "@/src/theme";
 
@@ -18,6 +19,9 @@ export default function HomeFeed() {
   const [feuds, setFeuds] = useState<Feud[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQ, setSearchQ] = useState("");
+  const [searching, setSearching] = useState(false);
 
   const load = useCallback(async (category: string) => {
     const res = await api.feuds(category);
@@ -36,19 +40,59 @@ export default function HomeFeed() {
 
   const onSelect = async (id: string) => {
     setSelected(id); setLoading(true);
+    setSearchOpen(false); setSearchQ("");
     try { await load(id); } finally { setLoading(false); }
   };
 
   const onRefresh = async () => {
     setRefreshing(true);
-    try { await load(selected); } finally { setRefreshing(false); }
+    try {
+      if (searchQ.trim()) {
+        const r = await api.search(searchQ.trim());
+        setFeuds(r.feuds);
+      } else {
+        await load(selected);
+      }
+    } finally { setRefreshing(false); }
+  };
+
+  const runSearch = async (q: string) => {
+    if (!q.trim()) { await load(selected); return; }
+    setSearching(true);
+    try {
+      const r = await api.search(q.trim());
+      setFeuds(r.feuds);
+    } finally { setSearching(false); }
   };
 
   return (
     <SafeAreaView style={styles.safe} edges={["top"]} testID="home-screen">
       <View style={styles.header}>
-        <Text style={styles.brand}>POPULUS</Text>
-        <Text style={styles.date}>{new Date().toLocaleDateString("it-IT", { day: "numeric", month: "long" }).toUpperCase()}</Text>
+        <View style={styles.headerTop}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.brand}>POPULUS</Text>
+            <Text style={styles.date}>{new Date().toLocaleDateString("it-IT", { day: "numeric", month: "long" }).toUpperCase()}</Text>
+          </View>
+          <Pressable onPress={() => setSearchOpen((v) => !v)} testID="search-toggle" style={styles.searchBtn}>
+            <Ionicons name={searchOpen ? "close" : "search"} size={22} color={colors.brandSecondary} />
+          </Pressable>
+        </View>
+        {searchOpen && (
+          <View style={styles.searchWrap}>
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Cerca faide..."
+              placeholderTextColor={colors.muted}
+              value={searchQ}
+              onChangeText={setSearchQ}
+              onSubmitEditing={() => runSearch(searchQ)}
+              returnKeyType="search"
+              autoFocus
+              testID="search-input"
+            />
+            {searching && <ActivityIndicator color={colors.brandSecondary} style={{ marginLeft: spacing.sm }} />}
+          </View>
+        )}
       </View>
 
       <View style={styles.chipRowWrap}>
@@ -133,6 +177,10 @@ function FeudCard({ feud, onPress }: { feud: Feud; onPress: () => void }) {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.surface },
   header: { paddingHorizontal: spacing.lg, paddingTop: spacing.sm, paddingBottom: spacing.md, borderBottomWidth: 2, borderColor: colors.border, backgroundColor: colors.surfaceInverse },
+  headerTop: { flexDirection: "row", alignItems: "center" },
+  searchBtn: { width: 44, height: 44, borderWidth: 2, borderColor: colors.brandSecondary, alignItems: "center", justifyContent: "center", backgroundColor: colors.surfaceInverse },
+  searchWrap: { flexDirection: "row", alignItems: "center", marginTop: spacing.sm },
+  searchInput: { flex: 1, borderWidth: 2, borderColor: colors.brandSecondary, backgroundColor: colors.surfaceInverse, color: colors.onSurfaceInverse, padding: spacing.sm, fontSize: font.sizes.base },
   brand: { color: colors.onSurfaceInverse, fontSize: font.sizes.xxxl, letterSpacing: 2, fontWeight: "500" },
   date: { color: colors.brandSecondary, fontSize: font.sizes.sm, letterSpacing: 2, marginTop: 2 },
   chipRowWrap: { height: 56, backgroundColor: colors.surfaceInverse, borderBottomWidth: 2, borderColor: colors.border },
