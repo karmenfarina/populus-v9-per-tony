@@ -737,32 +737,28 @@ async def _generate_feud_for_category(cat: dict, LlmChat, UserMessage) -> Option
             "risultati contestati, presunti tradimenti, cause legali, retroscena piccanti.\n"
             "5. Scarta senza pietà: comunicati istituzionali generici, dati statistici noiosi, "
             "adempimenti amministrativi, notizie tecniche di nicchia, retorica ovvia.\n\n"
-            "Se NESSUNA notizia nel pool è abbastanza succosa, inventane una plausibile e attuale "
-            "coerente con la categoria (indica source_index = -1).\n\n"
+            "REGOLA FERREA: NON INVENTARE nulla. Devi obbligatoriamente scegliere una notizia REALE "
+            "dal pool fornito. Se nessuna notizia del pool è abbastanza succosa, restituisci "
+            'esattamente {"skip": true, "reason": "motivo"} e nient\'altro.\n\n'
             "Il titolo deve essere DA TABLOID: incisivo, esplicito nel conflitto (usa 'contro', 'vs', "
-            "'attacca', 'smaschera', 'accusa', 'insulta', 'gela', 'demolisce'), max 90 caratteri.\n"
-            "Le due parti devono essere nomi propri o gruppi riconoscibili, non astrazioni.\n"
+            "'attacca', 'smaschera', 'accusa', 'insulta', 'gela', 'demolisce'), max 90 caratteri. "
+            "Ma tutti i fatti, i nomi e i dettagli DEVONO derivare dalla notizia scelta, non da tua fantasia.\n"
+            "Le due parti devono essere nomi propri o gruppi riconoscibili citati nella notizia.\n"
             "La domanda finale deve essere provocatoria e schierante.\n\n"
             "Rispondi SOLO con questo JSON:\n"
             '{"title": "titolo tabloid max 90 caratteri", '
-            '"party_a": "primo contendente riconoscibile", '
-            '"party_b": "secondo contendente riconoscibile", '
-            '"summary": "3-4 frasi che spiegano la faida come farebbe un giornalista di gossip, senza edulcorare, con dettagli concreti", '
+            '"party_a": "primo contendente riconoscibile citato nella notizia", '
+            '"party_b": "secondo contendente riconoscibile citato nella notizia", '
+            '"summary": "3-4 frasi che spiegano la faida partendo dalla notizia scelta, con dettagli concreti presi dalla notizia, senza inventare", '
             '"question": "domanda schierante e provocatoria, non neutra", '
-            '"source_index": indice della notizia scelta (-1 se hai inventato), '
+            '"source_index": indice (0-based) della notizia scelta nel pool (obbligatorio), '
             '"engagement_score": numero da 1 a 10 che stimi per la faida che hai creato, '
             '"engagement_reason": "una frase che spiega perché scatenerà reazioni"}'
         )
     else:
-        prompt = (
-            f"Categoria: {cat['label']}. Non ho notizie RSS oggi.\n"
-            "Inventa una faida plausibile, attuale, italiana, con altissimo potenziale di engagement: "
-            "due parti riconoscibili in conflitto pubblico, tema che scatena emozioni forti "
-            "(rabbia, gossip, tifo, indignazione). Titolo tabloid incisivo max 90 caratteri, "
-            "domanda provocatoria e schierante.\n"
-            'Rispondi SOLO con: {"title":"...","party_a":"...","party_b":"...","summary":"...",'
-            '"question":"...","engagement_score":numero 1-10,"engagement_reason":"..."}'
-        )
+        # No RSS available today: skip generation entirely rather than invent news
+        logger.info(f"No RSS headlines for {cat['id']}, skipping generation")
+        return None
 
     text = await chat.send_message(UserMessage(text=prompt))
     match = re.search(r'\{[\s\S]*\}', text)
@@ -773,15 +769,21 @@ async def _generate_feud_for_category(cat: dict, LlmChat, UserMessage) -> Option
     except Exception:
         return None
 
-    sources: List[dict] = []
-    if headlines:
-        idx = data.get('source_index')
-        if isinstance(idx, int) and 0 <= idx < len(headlines):
-            sources.append(headlines[idx])
-            # add up to 2 related headlines as extra references
-            for i, h in enumerate(headlines[:6]):
-                if i != idx and h not in sources and len(sources) < 3:
-                    sources.append(h)
+    # AI chose to skip
+    if data.get('skip') is True:
+        logger.info(f"AI skipped {cat['id']}: {data.get('reason', 'no juicy news')}")
+        return None
+
+    # Validate that a real source was chosen
+    idx = data.get('source_index')
+    if not isinstance(idx, int) or idx < 0 or idx >= len(headlines):
+        logger.info(f"AI returned invalid source_index for {cat['id']}: {idx}, discarding")
+        return None
+
+    sources: List[dict] = [headlines[idx]]
+    for i, h in enumerate(headlines[:6]):
+        if i != idx and h not in sources and len(sources) < 3:
+            sources.append(h)
 
     engagement = data.get('engagement_score')
     try:
