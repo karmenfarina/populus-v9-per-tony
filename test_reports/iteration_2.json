@@ -1,0 +1,32 @@
+{
+  "summary": "Frontend-only verification of Populus logo bug fix. Confirmed the scales-of-justice logo (icon.png) renders correctly on BOTH the auth screen (testID='auth-logo', 120x120, centered above 'POPULUS' brand) and the home tab header (testID='home-logo', 52x52 in top-left of the black header). Both <Image> elements resolve to a valid <img> in web preview with naturalWidth=1024, complete=true, HTTP 200 (350842 bytes) from https://team-pick.preview.emergentagent.com/assets/?unstable_path=./assets/images/icon.png. Anonymous login regression works: 9 feud cards rendered on home feed. Bug 'Non vedo il logo da nessuna parte' is resolved.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Home header", "issues": ["home-logo rendered box is 48x48 while style declares 52x52 (likely due to the 2px borderWidth eating into the layout box). Visually fine but if exact 52 needed, wrap Image in a View or use width/height that accounts for the border. Non-blocking."]}
+    ],
+    "react_native_issues": [
+      {"component": "Various (deprecation warning)", "issue": "Console warning: 'props.pointerEvents is deprecated. Use style.pointerEvents' — from an RN/Expo component (likely inside expo-router/react-native-safe-area-context or a Pressable). Not caused by the logo fix. Reference: emitted at runtime on auth->home transition."}
+    ]
+  },
+  "test_report_links": ["/app/test_reports/iteration_2.json"],
+  "action_items": [
+    "None required for the logo bug — it is fully fixed.",
+    "Optional: investigate 'props.pointerEvents is deprecated' warning (unrelated to this fix; likely third-party lib or a Pressable prop).",
+    "Optional: adjust home-logo sizing to compensate for the 2px border if pixel-perfect 52x52 is desired."
+  ],
+  "critical_code_review_comments": [
+    "auth.tsx and (tabs)/index.tsx correctly use Image from react-native with require('../assets/images/icon.png') — bundler resolves it and web preview serves the asset with HTTP 200.",
+    "Both Image tags have testID and resizeMode='contain' — good for testability and preserving aspect ratio.",
+    "adaptive-icon.png, favicon.png, icon.png are identical (350842 bytes) which is fine but a bit wasteful; consider generating adaptive-icon at correct foreground/background specs for Android."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (not tested per request)", "frontend": "100%"},
+  "seed_data_creation": "None (used anonymous login with fresh nickname per run: retest<timestamp>)",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Logo bug is verified fixed. Two <Image> instances (testID='auth-logo' 120x120 on auth screen; testID='home-logo' 52x52 in home tab header) both load icon.png successfully. Preview URL: https://team-pick.preview.emergentagent.com. Anonymous flow: tap [data-testid=auth-tab-anon], fill [data-testid=auth-anon-nickname-input], click [data-testid=auth-submit-button]. Note: first Playwright check for home-logo naturalWidth returned 0 due to a race condition — wait ~3-5s after home-screen loads before asserting on image dimensions.",
+  "rca_of_issue": "Original bug: icon.png/splash-image.png existed in /app/frontend/assets/images/ but were only referenced by app.json (native OS launcher/splash) — never rendered inside the running app UI. Fix: added <Image source={require('../assets/images/icon.png')}> to auth.tsx header (120x120 above POPULUS brand) and to (tabs)/index.tsx header (52x52 left of POPULUS title). Both render correctly in the Expo web preview and are served with 200 status."
+}
