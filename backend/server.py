@@ -18,6 +18,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field, EmailStr
 from typing import List, Optional, Literal
 from datetime import datetime, timezone, timedelta
+from media_extractor import resolve_media as _resolve_media
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -1141,6 +1142,50 @@ AGE_BUCKETS = [
 ]
 
 
+@api_router.post('/admin/backfill_media')
+async def admin_backfill_media(limit: int = 200, force: bool = False, _: bool = Depends(require_admin)):
+    """Re-run OG/YouTube extraction on existing feuds. By default only enriches
+    feuds that don't already have a media object; pass `force=true` to redo all."""
+    yt_key = os.environ.get('YOUTUBE_API_KEY')
+    q: dict = {}
+    if not force:
+        q = {'$or': [{'media': {'$exists': False}}, {'media': None}]}
+    feuds = await db.feuds.find(q, {'_id': 0}).to_list(limit)
+    updated = 0
+    for f in feuds:
+        src = None
+        srcs = f.get('sources') or []
+        for s in srcs:
+            if s.get('link'):
+                src = s['link']
+                break
+        if not src:
+            continue
+        party_a = (f.get('party_a') or '').strip()
+        party_b = (f.get('party_b') or '').strip()
+        search_hint = f"{party_a} {party_b}".strip() if (party_a or party_b) else None
+        try:
+            img, media = await _resolve_media(
+                title=f.get('title') or '',
+                source_url=src,
+                fallback_image=f.get('image_url'),
+                youtube_api_key=yt_key,
+                search_query=search_hint,
+            )
+        except Exception as e:
+            logger.warning(f"backfill media failed for {f.get('feud_id')}: {e}")
+            continue
+        update: dict = {}
+        if img and img != f.get('image_url'):
+            update['image_url'] = img
+        if media is not None:
+            update['media'] = media
+        if update:
+            await db.feuds.update_one({'feud_id': f['feud_id']}, {'$set': update})
+            updated += 1
+    return {'scanned': len(feuds), 'updated': updated}
+
+
 @api_router.post('/admin/cleanup_expired')
 async def admin_cleanup(_: bool = Depends(require_admin)):
     """Manually trigger expired-feud cleanup (also runs hourly via scheduler)."""
@@ -1346,6 +1391,25 @@ async def _generate_feud_for_category(cat: dict, LlmChat, UserMessage) -> Option
     chosen_image = chosen.get('image')
     image_url = chosen_image if chosen_image else _image_for_category(cat['id'], seed=chosen['link'])
 
+    # Media enrichment: OG image + YouTube/direct video for the detail page.
+    yt_key = os.environ.get('YOUTUBE_API_KEY')
+    party_a = (data.get('party_a') or '').strip()
+    party_b = (data.get('party_b') or '').strip()
+    search_hint = f"{party_a} {party_b}".strip() if (party_a or party_b) else None
+    try:
+        og_image, media_obj = await _resolve_media(
+            title=data.get('title') or '',
+            source_url=chosen['link'],
+            fallback_image=image_url,
+            youtube_api_key=yt_key,
+            search_query=search_hint,
+        )
+        if og_image:
+            image_url = og_image
+    except Exception as e:
+        logger.warning(f"media enrichment failed: {e}")
+        media_obj = None
+
     engagement = data.get('engagement_score')
     try:
         engagement = int(engagement)
@@ -1361,6 +1425,7 @@ async def _generate_feud_for_category(cat: dict, LlmChat, UserMessage) -> Option
         'summary': data.get('summary') or '',
         'question': data.get('question') or 'Con chi ti schieri?',
         'image_url': image_url,
+        'media': media_obj,
         'sources': sources,
         'engagement_score': engagement,
         'engagement_reason': data.get('engagement_reason') or '',

@@ -10,6 +10,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { api, ApiError, Comment, Feud, Reply, Sponsor } from "@/src/api";
 import { colors, spacing, font, sideColor, onSideColor } from "@/src/theme";
+import FeudMediaBlock from "@/src/components/FeudMediaBlock";
 
 export default function FeudDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -169,6 +170,19 @@ export default function FeudDetail() {
             <Text style={styles.sectionKicker}>LA FAIDA</Text>
             <Text style={styles.summary}>{feud.summary}</Text>
           </View>
+
+          {feud.media && (
+            <View style={styles.mediaSection} testID="feud-media-section">
+              <Text style={styles.sectionKicker}>
+                {feud.media.type === "youtube" || feud.media.type === "video" ? "VIDEO" : "IMMAGINE"}
+              </Text>
+              <FeudMediaBlock
+                media={feud.media}
+                fallbackImage={feud.image_url}
+                title={feud.title}
+              />
+            </View>
+          )}
 
           {feud.sources && feud.sources.length > 0 && (
             <View style={styles.sourcesBox} testID="sources-box">
@@ -376,6 +390,7 @@ const styles = StyleSheet.create({
   title: { color: "#FFFFFF", fontSize: font.sizes.xxxl, lineHeight: 36, letterSpacing: 0.5, fontWeight: "500" },
   article: { padding: spacing.lg, borderBottomWidth: 2, borderColor: colors.border, backgroundColor: colors.surfaceSecondary },
   sectionKicker: { fontSize: font.sizes.sm, letterSpacing: 2, color: colors.brandPrimary, marginBottom: spacing.xs },
+  mediaSection: { paddingHorizontal: spacing.lg, marginBottom: spacing.md },
   summary: { fontSize: font.sizes.lg, lineHeight: 24, color: colors.onSurface },
   sourcesBox: { padding: spacing.lg, borderBottomWidth: 2, borderColor: colors.border, backgroundColor: colors.surface, gap: spacing.sm },
   sourceItem: { borderWidth: 2, borderColor: colors.border, backgroundColor: colors.surfaceSecondary, padding: spacing.sm },

@@ -156,6 +156,21 @@ export type HistoryItem = {
   voted_at: string;
 };
 
+export type FeudMedia = {
+  type: 'youtube' | 'video' | 'image';
+  video_id?: string;
+  embed_url?: string;
+  watch_url?: string;
+  video_url?: string;
+  video_type?: string;
+  thumbnail?: string;
+  image_url?: string;
+  channel?: string;
+  video_title?: string;
+  source_domain?: string;
+  provenance?: string;
+};
+
 export type Feud = {
   feud_id: string;
   category: string;
@@ -166,6 +181,7 @@ export type Feud = {
   summary: string;
   question: string;
   image_url: string;
+  media?: FeudMedia | null;
   votes_a: number | null;
   votes_b: number | null;
   total_votes: number;
