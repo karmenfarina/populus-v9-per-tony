@@ -527,6 +527,8 @@ async def list_feuds(category: Optional[str] = None, user: Optional[dict] = Depe
     q = {}
     if category and category != 'all':
         q['category'] = category
+    # Only feuds from the last 24h appear in the live feed. Older ones live in the archive.
+    q['created_at'] = {'$gte': now_utc() - timedelta(hours=24)}
     docs = await db.feuds.find(q, {'_id': 0}).sort('created_at', -1).to_list(200)
     voted_map: dict = {}
     if user and docs:
@@ -536,6 +538,67 @@ async def list_feuds(category: Optional[str] = None, user: Optional[dict] = Depe
         _attach_percentages(d, revealed=bool(my_vote))
         d['my_vote'] = my_vote
     return {'feuds': docs}
+
+
+ARCHIVE_MAX_DAYS = 7
+
+
+@api_router.get('/feuds/archive/dates')
+async def archive_dates(category: Optional[str] = None):
+    """List available archive dates (last 7 days, excluding today's live window <24h).
+
+    Returns dates that have at least one feud in the given category (or across all).
+    """
+    now = now_utc()
+    since = now - timedelta(days=ARCHIVE_MAX_DAYS)
+    live_cutoff = now - timedelta(hours=24)
+    match: dict = {'created_at': {'$gte': since, '$lt': live_cutoff}}
+    if category and category != 'all':
+        match['category'] = category
+    pipeline = [
+        {'$match': match},
+        {'$group': {
+            '_id': {'$dateToString': {'format': '%Y-%m-%d', 'date': '$created_at'}},
+            'count': {'$sum': 1},
+        }},
+        {'$sort': {'_id': -1}},
+    ]
+    cursor = db.feuds.aggregate(pipeline)
+    rows = await cursor.to_list(ARCHIVE_MAX_DAYS + 1)
+    return {'dates': [{'date': r['_id'], 'count': r['count']} for r in rows]}
+
+
+@api_router.get('/feuds/archive')
+async def archive_feuds(
+    date: str,
+    category: Optional[str] = None,
+    user: Optional[dict] = Depends(get_current_user_optional),
+):
+    """Return feuds for a specific archive day (YYYY-MM-DD) within the last 7 days."""
+    try:
+        day = datetime.strptime(date, '%Y-%m-%d').replace(tzinfo=timezone.utc)
+    except ValueError:
+        raise HTTPException(status_code=400, detail='Data non valida (usa YYYY-MM-DD)')
+    now = now_utc()
+    earliest = now - timedelta(days=ARCHIVE_MAX_DAYS)
+    if day < earliest.replace(hour=0, minute=0, second=0, microsecond=0):
+        raise HTTPException(status_code=400, detail=f'Archivio limitato a {ARCHIVE_MAX_DAYS} giorni')
+    start = day
+    end = day + timedelta(days=1)
+    q: dict = {'created_at': {'$gte': start, '$lt': end}}
+    if category and category != 'all':
+        q['category'] = category
+    docs = await db.feuds.find(q, {'_id': 0}).sort('created_at', -1).to_list(200)
+    voted_map: dict = {}
+    if user and docs:
+        voted_map = await _user_voted_ids(user['user_id'], [d['feud_id'] for d in docs])
+    for d in docs:
+        my_vote = voted_map.get(d['feud_id']) if user else None
+        # Always reveal on archive — voting closed, results public.
+        _attach_percentages(d, revealed=True)
+        d['my_vote'] = my_vote
+        d['archived'] = True
+    return {'feuds': docs, 'date': date}
 
 
 @api_router.get('/search')

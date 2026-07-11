@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   View, Text, StyleSheet, ScrollView, Pressable, FlatList, RefreshControl,
-  ActivityIndicator, ImageBackground, TextInput,
+  ActivityIndicator, TextInput,
 } from "react-native";
-import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { api, Feud } from "@/src/api";
 import { useAuth } from "@/src/auth/AuthContext";
 import { colors, spacing, font } from "@/src/theme";
+import FeudCard from "@/src/components/FeudCard";
 
 const ALL_CAT = { id: "all", label: "Tutte" };
 
@@ -90,6 +90,9 @@ export default function HomeFeed() {
             <Text style={styles.brand}>POPULUS</Text>
             <Text style={styles.date}>{new Date().toLocaleDateString("it-IT", { day: "numeric", month: "long" }).toUpperCase()}</Text>
           </View>
+          <Pressable onPress={() => router.push(`/archive?category=${selected}`)} testID="archive-toggle" style={styles.archiveBtn}>
+            <Ionicons name="calendar-outline" size={22} color={colors.brandSecondary} />
+          </Pressable>
           <Pressable onPress={() => setSearchOpen((v) => !v)} testID="search-toggle" style={styles.searchBtn}>
             <Ionicons name={searchOpen ? "close" : "search"} size={22} color={colors.brandSecondary} />
           </Pressable>
@@ -159,43 +162,12 @@ export default function HomeFeed() {
   );
 }
 
-function FeudCard({ feud, onPress }: { feud: Feud; onPress: () => void }) {
-  const revealed = feud.revealed;
-  return (
-    <Pressable style={styles.card} onPress={onPress} testID={`feud-card-${feud.feud_id}`}>
-      <ImageBackground source={{ uri: feud.image_url }} style={styles.cardImage}>
-        <LinearGradient
-          colors={["rgba(0,0,0,0)", "rgba(0,0,0,0.85)"]}
-          style={StyleSheet.absoluteFill}
-        />
-        <View style={styles.cardImageContent}>
-          <Text style={styles.cardCat}>{feud.category_label.toUpperCase()}</Text>
-          <Text style={styles.cardTitle} numberOfLines={3}>{feud.title}</Text>
-        </View>
-      </ImageBackground>
-      <View style={styles.splitRow}>
-        <View style={[styles.splitHalf, { backgroundColor: colors.brandPrimary }]}>
-          <Text style={styles.splitPct}>{revealed ? `${feud.pct_a}%` : "?"}</Text>
-          <Text style={styles.splitLabel} numberOfLines={2}>{feud.party_a}</Text>
-        </View>
-        <View style={[styles.splitHalf, { backgroundColor: colors.brandSecondary }]}>
-          <Text style={[styles.splitPct, { color: colors.onBrandSecondary }]}>{revealed ? `${feud.pct_b}%` : "?"}</Text>
-          <Text style={[styles.splitLabel, { color: colors.onBrandSecondary }]} numberOfLines={2}>{feud.party_b}</Text>
-        </View>
-      </View>
-      <View style={styles.cardFooter}>
-        <Text style={styles.cardFooterText}>{revealed ? `${feud.total_votes} VOTI` : "VOTA PER VEDERE"}</Text>
-        <Text style={styles.cardFooterText}>APRI ›</Text>
-      </View>
-    </Pressable>
-  );
-}
-
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.surface },
   header: { paddingHorizontal: spacing.lg, paddingTop: spacing.sm, paddingBottom: spacing.md, borderBottomWidth: 2, borderColor: colors.border, backgroundColor: colors.surfaceInverse },
-  headerTop: { flexDirection: "row", alignItems: "center" },
+  headerTop: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   searchBtn: { width: 44, height: 44, borderWidth: 2, borderColor: colors.brandSecondary, alignItems: "center", justifyContent: "center", backgroundColor: colors.surfaceInverse },
+  archiveBtn: { width: 44, height: 44, borderWidth: 2, borderColor: colors.brandSecondary, alignItems: "center", justifyContent: "center", backgroundColor: colors.surfaceInverse },
   searchWrap: { flexDirection: "row", alignItems: "center", marginTop: spacing.sm },
   searchInput: { flex: 1, borderWidth: 2, borderColor: colors.brandSecondary, backgroundColor: colors.surfaceInverse, color: colors.onSurfaceInverse, padding: spacing.sm, fontSize: font.sizes.base },
   brand: { color: colors.onSurfaceInverse, fontSize: font.sizes.xxxl, letterSpacing: 2, fontWeight: "500" },
@@ -208,15 +180,4 @@ const styles = StyleSheet.create({
   chipTextActive: { color: colors.onBrandSecondary, fontWeight: "500" },
   center: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.xxl },
   empty: { fontSize: font.sizes.xl, color: colors.onSurface, letterSpacing: 1 },
-  card: { borderWidth: 2, borderColor: colors.border, backgroundColor: colors.surfaceSecondary },
-  cardImage: { height: 200, justifyContent: "flex-end" },
-  cardImageContent: { padding: spacing.md, gap: spacing.xs },
-  cardCat: { color: colors.brandSecondary, fontSize: font.sizes.sm, letterSpacing: 2 },
-  cardTitle: { color: "#FFFFFF", fontSize: font.sizes.xxl, letterSpacing: 0.5, fontWeight: "500", lineHeight: 28 },
-  splitRow: { flexDirection: "row", borderTopWidth: 2, borderColor: colors.border },
-  splitHalf: { flex: 1, paddingVertical: spacing.md, alignItems: "center" },
-  splitPct: { color: colors.onBrandPrimary, fontSize: font.sizes.xxl, fontWeight: "500", letterSpacing: 1 },
-  splitLabel: { color: colors.onBrandPrimary, fontSize: font.sizes.sm, letterSpacing: 1, textAlign: "center", marginTop: 2, paddingHorizontal: spacing.xs },
-  cardFooter: { flexDirection: "row", justifyContent: "space-between", padding: spacing.sm, borderTopWidth: 2, borderColor: colors.border, backgroundColor: colors.surfaceInverse },
-  cardFooterText: { color: colors.onSurfaceInverse, fontSize: font.sizes.sm, letterSpacing: 1 },
 });

@@ -72,6 +72,13 @@ export const api = {
   publicUser: (id: string) => request(`/users/${id}`),
   publicUserHistory: (id: string, filter: 'all' | 'majority' | 'minority' = 'all') =>
     request(`/users/${id}/history?filter=${filter}`),
+  archiveDates: (category?: string) =>
+    request(`/feuds/archive/dates${category && category !== 'all' ? `?category=${category}` : ''}`),
+  archiveFeuds: (date: string, category?: string) => {
+    const params = new URLSearchParams({ date });
+    if (category && category !== 'all') params.set('category', category);
+    return request(`/feuds/archive?${params.toString()}`);
+  },
 };
 
 export type User = {
