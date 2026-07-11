@@ -8,12 +8,14 @@ import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { api, Feud } from "@/src/api";
+import { useAuth } from "@/src/auth/AuthContext";
 import { colors, spacing, font } from "@/src/theme";
 
 const ALL_CAT = { id: "all", label: "Tutte" };
 
 export default function HomeFeed() {
   const router = useRouter();
+  const { user } = useAuth();
   const [cats, setCats] = useState<{ id: string; label: string }[]>([ALL_CAT]);
   const [selected, setSelected] = useState<string>("all");
   const [feuds, setFeuds] = useState<Feud[]>([]);
@@ -32,11 +34,26 @@ export default function HomeFeed() {
     (async () => {
       try {
         const c = await api.categories();
-        setCats([ALL_CAT, ...c.categories]);
-        await load("all");
+        const favs = user?.favorite_categories || [];
+        // Reorder: Tutte first, then favorites in the order the user picked them,
+        // then the remaining categories.
+        const favIds = new Set(favs);
+        const ordered: { id: string; label: string }[] = [ALL_CAT];
+        for (const id of favs) {
+          const found = c.categories.find((x: any) => x.id === id);
+          if (found) ordered.push(found);
+        }
+        for (const cat of c.categories) {
+          if (!favIds.has(cat.id)) ordered.push(cat);
+        }
+        setCats(ordered);
+        // Preselect the first favorite category if any, else "all"
+        const initial = favs[0] && c.categories.some((x: any) => x.id === favs[0]) ? favs[0] : "all";
+        setSelected(initial);
+        await load(initial);
       } finally { setLoading(false); }
     })();
-  }, [load]);
+  }, [load, user?.favorite_categories]);
 
   const onSelect = async (id: string) => {
     setSelected(id); setLoading(true);

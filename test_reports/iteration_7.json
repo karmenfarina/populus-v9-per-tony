@@ -1,0 +1,27 @@
+{
+  "summary": "Frontend-only test of Home feed favorite-categories ordering + preselection. Full happy path passed: fresh anonymous signup -> onboarding (selected SPORT then GOSSIP in that exact order, age 27, sex M, region Lombardia) -> home. Chip row order (testID category-chip-row) is exactly [chip-all, chip-sport, chip-gossip, chip-politica, chip-tv, chip-musica, chip-cinema, chip-social]. Active chip is chip-sport (background rgb(255,230,0) = brandSecondary yellow) while all others use inactive dark bg rgb(15,15,15). Feed initially shows only 2 SPORT feuds (both cards start with 'SPORT' category label). Clicking chip-all switches active state and loads 20 mixed-category feuds (CINEMA/GOSSIP/SOCIAL/MUSICA/POLITICA/etc.), confirming the reorder does not break normal filtering. Regression 'no favorites -> Tutte active + all feuds' cannot be reproduced via UI or backend (both enforce >=1 favorite at onboarding); verified defensively by code inspection at /app/frontend/app/(tabs)/index.tsx L50-52 where empty favs falls back to initial='all'. No console errors during the flow.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/test_reports/iteration_7.json"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "index.tsx L37-52: Correctly builds ordered chip list [ALL_CAT, ...favs in user-picked order, ...remaining categories not in favs]. Uses Set for O(1) dedup and preserves categories.find() order for favorites so the exact user selection order is respected.",
+    "index.tsx L51: Guards against a favorite id that no longer exists in the categories list via `c.categories.some(x => x.id === favs[0])` before preselecting -- safe against stale favorites.",
+    "index.tsx useEffect depends on `user?.favorite_categories` -- if the user profile is later updated (e.g., from onboarding re-entry) the chip row and initial category will re-derive correctly.",
+    "onboarding.tsx submits Array.from(selected) where selected is a Set -- Set preserves insertion order in JS, so tapping SPORT then GOSSIP sends favorite_categories=['sport','gossip'] in that order to the backend, which is exactly what the feature expects."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (not tested this iteration)", "frontend": "100% (all 3 UI expectations met + regression path verified via code)"},
+  "seed_data_creation": "One anonymous user created via UI (nickname TESTfav<timestamp>). No cleanup needed -- disposable anonymous data.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Home feed chip row testIDs are 'category-chip-row' (row) and 'chip-{id}' where id is one of {all, politica, tv, musica, sport, cinema, social, gossip}. Active chip is detected via background color: brandSecondary rgb(255,230,0) = active, surfaceInverse rgb(15,15,15) = inactive. Feud cards use testID='feud-card-{feud_id}' and their first text node is the uppercase category label -- useful to assert filter output. Onboarding categories preserve insertion order because they are stored in a JS Set; ordering guarantee holds as long as this stays a Set.",
+  "rca_of_issue": "N/A -- feature works as specified."
+}
