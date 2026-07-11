@@ -259,7 +259,7 @@ async def me(user: dict = Depends(get_current_user)):
     return {'user': _public_user(user)}
 
 
-VALID_CATEGORY_IDS = {'politica', 'tv', 'musica', 'sport', 'cinema', 'social', 'gossip'}
+VALID_CATEGORY_IDS = {'politica', 'tv', 'musica', 'sport', 'cinema', 'social', 'gossip', 'tech'}
 ITALIAN_REGIONS = {
     'Abruzzo', 'Basilicata', 'Calabria', 'Campania', 'Emilia-Romagna',
     'Friuli-Venezia Giulia', 'Lazio', 'Liguria', 'Lombardia', 'Marche',
@@ -306,6 +306,7 @@ CATEGORIES = [
     {'id': 'cinema', 'label': 'Cinema'},
     {'id': 'social', 'label': 'Social'},
     {'id': 'gossip', 'label': 'Gossip'},
+    {'id': 'tech', 'label': 'Tech'},
 ]
 
 
@@ -593,6 +594,7 @@ SEED_SPONSORS = [
     {'category': 'cinema', 'sponsor': 'Netflix', 'headline': 'Il film della polemica: guardalo stasera.', 'cta': 'GUARDA', 'image_url': 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=800'},
     {'category': 'social', 'sponsor': 'TrendReport', 'headline': 'Analisi virali ogni 24 ore.', 'cta': 'ISCRIVITI', 'image_url': 'https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=800'},
     {'category': 'gossip', 'sponsor': 'Chi Magazine', 'headline': 'Tutti i retroscena in edicola.', 'cta': 'SFOGLIA', 'image_url': 'https://images.unsplash.com/photo-1561890244-e880c1e6d54e?w=800'},
+    {'category': 'tech', 'sponsor': 'Amazon Prime Day', 'headline': 'Le offerte tech del giorno, prima di tutti.', 'cta': 'SCOPRI', 'image_url': 'https://images.unsplash.com/photo-1518770660439-4636190af475?w=800'},
 ]
 
 
@@ -606,12 +608,12 @@ async def get_sponsors(category: Optional[str] = None):
 
 
 async def seed_sponsors_if_empty():
-    count = await db.sponsors.count_documents({})
-    if count > 0:
-        return
+    # Upsert one seed sponsor per category (idempotent, safe to run at every startup).
     for s in SEED_SPONSORS:
-        await db.sponsors.insert_one({'sponsor_id': new_id('spo'), **s, 'created_at': now_utc()})
-    logger.info(f"Seeded {len(SEED_SPONSORS)} sponsors")
+        existing = await db.sponsors.find_one({'category': s['category']})
+        if not existing:
+            await db.sponsors.insert_one({'sponsor_id': new_id('spo'), **s, 'created_at': now_utc()})
+            logger.info(f"Seeded sponsor for category {s['category']}")
 
 
 # ----------------------- Voting History -----------------------
@@ -741,6 +743,11 @@ def _image_for_category(cat_id: str, seed: Optional[str] = None) -> str:
         'gossip': [
             'https://images.unsplash.com/photo-1523419409543-a5e549c1faa8?w=1200',
             'https://images.unsplash.com/photo-1516307365426-bea591f05011?w=1200',
+        ],
+        'tech': [
+            'https://images.unsplash.com/photo-1518770660439-4636190af475?w=1200',
+            'https://images.unsplash.com/photo-1550751827-4bd374c3f58b?w=1200',
+            'https://images.unsplash.com/photo-1517694712202-14dd9538aa97?w=1200',
         ],
     }
     options = mapping.get(cat_id, mapping['gossip'])
@@ -960,6 +967,13 @@ RSS_FEEDS: dict = {
     'gossip': [
         ('Novella 2000', 'https://www.novella2000.it/feed/'),
         ('GossipeTV', 'https://www.gossipetv.com/feed'),
+    ],
+    'tech': [
+        ('HDblog', 'https://www.hdblog.it/rss/'),
+        ('DDay', 'https://www.dday.it/rss'),
+        ("Tom's Hardware Italia", 'https://www.tomshw.it/feed/'),
+        ('SmartWorld', 'https://www.smartworld.it/feed'),
+        ('Everyeye Tech', 'https://www.everyeye.it/rss/tech.xml'),
     ],
 }
 

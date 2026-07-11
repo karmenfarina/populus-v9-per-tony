@@ -1,0 +1,38 @@
+{
+  "summary": "Full-stack validation of the new 'Tech' (8th) category on Populus/Faide. Backend: 12/12 pytest cases PASS in /app/backend/tests/test_tech_category.py — (1) GET /api/categories returns exactly the 8 IDs in order [politica, tv, musica, sport, cinema, social, gossip, tech] with tech.label='Tech'; (2) GET /api/feuds?category=tech returns >=1 feud with source='ai', sources[0] populated, reachable image_url (HTTP 200); (3) GET /api/sponsors?category=tech returns exactly 1 sponsor with sponsor='Amazon Prime Day' & cta='SCOPRI'; (4) PATCH /api/auth/me/profile accepts 'tech' as valid favorite_category (200) AND persists via GET /auth/me, still rejects invalid values (400); (5) Regression: politica, tv, musica, sport, cinema, social, gossip each return >=1 feud. Frontend: Two fresh anonymous signups (tt53968399 & tp12104585) — (a) onboarding step 1 now shows all 8 chips including cat-tech (chip_count=9 on home = TUTTE + 8); tapping cat-tech + advancing all 3 steps works; (b) Home chip-tech visible & tappable, filtering to Tech renders the AI-generated feud card 'Google smaschera le pubblicità IA...' with the correct Unsplash tech hero (1200x801, loaded); (c) Feud detail sponsor-banner shows 'SPONSOR · AMAZON PRIME DAY / Le offerte tech del giorno, prima di tutti. / SCOPRI'; (d) Profile MODIFICA modal contains all 8 prefs-cat-* including prefs-cat-tech (initially white rgb(255,255,255) → red rgb(255,59,48) on tick), prefs-save persists 'tech' to backend and pref-chip-tech appears in prefs-section. No red-screen, only 1 non-blocking RN Web warning ('props.pointerEvents is deprecated') that is unrelated to this feature.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Profile → MODIFICA modal", "issues": ["The 8-chip grid on 390px viewport places the last row (Tech) near/below the visible fold; the modal sheet content is scrollable so it's reachable, but the tech chip requires a small scroll into view. Minor UX polish: consider making the sheet taller or the grid denser so all 8 chips fit above the fold."]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_tech_category.py",
+    "/app/test_reports/pytest/tech_results.xml",
+    "/tmp/onb_step1_tech.png",
+    "/tmp/home_tech_selected.png",
+    "/tmp/feud_detail_tech.png",
+    "/tmp/prefs_modal_tech.png",
+    "/tmp/profile_after_save.png"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py line 262 VALID_CATEGORY_IDS is a set (unordered) — fine for validation, but the ordered CATEGORIES list at line 301 is the single source of truth for FE ordering. Both include 'tech' and stay in sync. Good.",
+    "SEED_SPONSORS.seed_sponsors_if_empty is idempotent per-category on startup (upsert-one) — confirmed via the strict exactly-1 assertion in test_tech_sponsor.",
+    "_image_for_category has 3 Unsplash options for 'tech' (line 747); the served hero (photo-1550751827-4bd374c3f58b) loaded 1200x801 with HTTP 200 in browser.",
+    "Frontend has zero hard-coded category lists — all screens (index.tsx, onboarding.tsx, profile.tsx) read from GET /api/categories, so adding 'tech' server-side propagates automatically with no FE change needed. Confirmed by observing the new chip everywhere.",
+    "server.py is 1162 lines — over the 700-line soft limit. Consider modularization (feuds/sponsors/rss/scheduler routers) in a future refactor. Not a blocker for this feature."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_tech_category.py (new file, 12 pytest test cases)"
+  ],
+  "success_rate": {"backend": "100% (12/12)", "frontend": "100% (all 8 acceptance criteria)"},
+  "seed_data_creation": "3 fresh anonymous test users (nickname prefixes 'TEST_tech_*', 'tt*', 'tp*'); no production data touched.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "The 'Tech' category is fully wired end-to-end: backend categories list / RSS feeds / sponsor / AI-generated feud on tech, plus every FE surface (onboarding, home chip row, feud detail sponsor banner, profile prefs modal). TestIDs: cat-tech (onboarding), chip-tech (home), sponsor-banner (feud detail), prefs-cat-tech + pref-chip-tech (profile). The prefs modal grid places tech in the last row — need to scroll into view before clicking on 390px mobile viewport. Pytest suite for future regression: /app/backend/tests/test_tech_category.py (uses EXPO_PUBLIC_BACKEND_URL, no fixtures beyond fresh anon user).",
+  "rca_of_issue": "N/A — this iteration validated a feature addition. Only test-script hiccups fixed during the run: (1) backend endpoints return {feuds: [...]} / {sponsors: [...]} wrappers so the assertions had to unwrap the dict; (2) prefs-cat-tech chip is in the last row of the profile modal grid and required scrollIntoView on mobile viewport before .click(). Neither is a product bug."
+}
