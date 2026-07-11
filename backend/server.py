@@ -1178,7 +1178,9 @@ async def admin_backfill_media(limit: int = 200, force: bool = False, _: bool = 
         update: dict = {}
         if img and img != f.get('image_url'):
             update['image_url'] = img
-        if media is not None:
+        # When forcing, overwrite media (even with None) so obsolete entries
+        # created before the quality filter get cleared.
+        if force or media is not None:
             update['media'] = media
         if update:
             await db.feuds.update_one({'feud_id': f['feud_id']}, {'$set': update})

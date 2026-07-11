@@ -1,0 +1,30 @@
+{
+  "summary": "YouTube quality filter verified end-to-end. Backend: 11/11 unit + integration tests pass (1 skipped: Briatore E2E — filter correctly rejected all YouTube candidates because the exact 'gelato a 95 euro' video is not currently reachable via the real API). Rubric assertions confirmed deterministically: (a) 'Fratelli d'Italia - Inno di Mameli' on 'Just Italian Music' scores below MIN_RELEVANCE_SCORE=4; (b) 'Briatore contro il gelato a 95 euro' on 'Leggo', published <30d, scores >=8; (c) each negative-title token (karaoke/gameplay/inno di mameli) subtracts exactly 6 vs identical baseline. _youtube_search with mocked httpx correctly picks the news-channel news item over the off-topic F1 clip and the anthem/karaoke item. resolve_media E2E: FI/FdI query returns media=None (or a non-anthem, non-music-channel result). POST /api/admin/backfill_media?force=true&limit=50 completes; no feud has media.channel=='Just Italian Music' or a negative-token title after backfill; 5 feuds retain media.type=='youtube' (Meta, Ranucci/Rai, Briatore/Leggo, Milan, Gerry Scotti) — filter not too aggressive. Regressions pass: GET /api/feuds/{nonexistent} → 410, GET /api/users/{id}/history returns snapshot for the new vote, GET /api/feuds/archive/dates returns last-7-day window. Frontend (390x844, web preview): reject feud (feud_9618aa026447, Apple vs OpenAI) — feud-media-section is NOT rendered and the rest of the detail page renders correctly (title 'Meta smaschera... funzione AI ritirata', LA FAIDA summary, TECH kicker, INDIETRO button visible on the accept feud screenshot). Accept feud (feud_9695e67bcd18, Meta/Zuckerberg) — feud-media-section + feud-media-youtube both render, iframe src = 'https://www.youtube-nocookie.com/embed/h7mKbiaroaA?rel=0', channel 'Republic World' visible under the VIDEO block.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_youtube_quality_filter.py",
+    "/app/test_reports/pytest/yt_quality_filter.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "_score_video / _keywords_from: 'italia' and 'italiana' are in _STOPWORDS, which is correct — but the composite query builder in resolve_media picks top_topics by length, so very long stopwords could still slip through if user titles contain proper nouns matching stopwords. Current behavior is safe.",
+    "Backfill endpoint overwrites media=None on force=true (correct), but does not touch feuds beyond `limit`; when the collection grows past 50 the caller must page. Minor operational note, not a bug.",
+    "resolve_media builds queries then breaks on the first non-None yt result — good. Consider logging which query variant succeeded, currently only the reject case is logged.",
+    "MIN_RELEVANCE_SCORE=4 and MIN_KEYWORD_MATCHES=2 threshold constants are hard-coded; consider exposing via env vars for tuning without a redeploy.",
+    "Negative token list includes 'trailer ufficiale' — legitimate news items about a movie premiere could match. Acceptable for MVP; monitor false-rejects."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_youtube_quality_filter.py (new)"
+  ],
+  "success_rate": {"backend": "100% (11 passed, 1 skipped by design when YouTube has no matching result)", "frontend": "100%"},
+  "seed_data_creation": "One TEST_ user per pytest run for the regression vote/history assertion. No manual seed data required.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "YouTube quality filter constants: MIN_RELEVANCE_SCORE=4, MIN_KEYWORD_MATCHES=2 in media_extractor.py. Live YouTube feuds currently: feud_9695e67bcd18 (Meta/Zuckerberg, Republic World, video_id=h7mKbiaroaA), feud_f5b674bbd1b1 (Ranucci/Rai, Cristiano Niceta). Archive has feud_bd83bdb384dd (Briatore/Leggo) and feud_ef464a2ff3a3 (Milan). Live feuds without media (filter rejected): feud_d0312abf93bc, feud_9618aa026447, feud_2de4771b6d84. Admin token: populus-admin-42b8f3."
+}

@@ -5,7 +5,9 @@ import os
 import re
 import logging
 import asyncio
-from typing import Optional, Tuple
+import unicodedata
+from datetime import datetime, timezone, timedelta
+from typing import Optional, Tuple, Iterable
 from urllib.parse import urlparse, parse_qs, urljoin
 
 import httpx
@@ -20,6 +22,46 @@ _USER_AGENT = (
 
 _YOUTUBE_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be", "youtube-nocookie.com", "www.youtube-nocookie.com"}
 _YOUTUBE_ID_RE = re.compile(r"[a-zA-Z0-9_-]{11}")
+
+# --- Quality filter constants ---------------------------------------------
+
+# Italian + English stopwords + very short words we should not use as "signal".
+_STOPWORDS = {
+    'il','lo','la','i','gli','le','un','uno','una','di','a','da','in','con','su','per','tra','fra',
+    'e','ed','o','od','ma','se','non','ne','ci','si','vi','mi','ti','che','chi','cui','al','allo',
+    'alla','ai','agli','alle','del','dello','della','dei','degli','delle','dal','dallo','dalla','dai',
+    'dagli','dalle','nel','nello','nella','nei','negli','nelle','col','coi','sul','sullo','sulla',
+    'sui','sugli','sulle','anche','come','più','meno','molto','solo','ora','poi','ancora','così',
+    'the','of','and','or','a','an','to','in','on','with','for','by','from','is','are','was','vs','vs.',
+    'sono','era','è','ha','ho','hai','hanno','abbiamo','avete','avere','essere','fare',
+    'contro','tra','tutto','tutti','tutta','tutte','questo','questa','questi','queste','quel','quella',
+    'ancora','pure','sarà','stato','stata','stati','state','solo','ecco',
+    'faida','faide','news','notizia','video','oggi','ieri','sky','tg','italia','italiano','italiana',
+    'roma','milano','italy',
+}
+
+# Known Italian news outlets and general trustworthy channels — bonus if the
+# YouTube uploader looks like an editorial newsroom.
+_NEWS_CHANNEL_TOKENS = {
+    'rai', 'raiplay', 'raiuno', 'raidue', 'raitre', 'raisport', 'raicinema', 'tg1', 'tg2', 'tg3', 'tg5',
+    'tgla7', 'la7', 'sky', 'skytg24', 'tgcom24', 'tgcom', 'mediaset', 'canale5', 'italia1', 'rete4',
+    'fanpage', 'fanpage.it', 'corriere', 'corrieretv', 'repubblica', 'ansa', 'leggo', 'ilmessaggero',
+    'ilfattoquotidiano', 'lastampa', 'ilgiornale', 'agi', 'openonline', 'open', 'ilpost',
+    'dagospia', 'buzzitalia', 'tvblog', 'davidemaggio', 'gossipetv', 'novella2000', 'chi', 'diva',
+    'gazzetta', 'gazzettadellosport', 'sportmediaset', 'sportitalia', 'dazn', 'ottoemezzo',
+    'reuters', 'bloomberg', 'bbc', 'cnn', 'associated press', 'euronews',
+}
+
+# Substrings that strongly suggest the video is NOT news reporting (music, fan
+# content, memes, generic countdowns, karaoke, gameplay, etc.).
+_NEGATIVE_TITLE_TOKENS = {
+    'inno di mameli', 'inno nazionale', 'karaoke', 'lyrics', 'testo e traduzione', 'audio only',
+    'official audio', 'official video', 'gameplay', 'let\'s play', 'walkthrough', 'reaction',
+    'reazione a', 'trailer ufficiale', 'top 10', 'top 5', 'compilation', 'mashup', 'mixtape',
+    'best moments', 'meme', 'shitpost', 'skit', 'sketch',
+}
+
+# --------------------------------------------------------------------------
 
 
 def _domain(url: str) -> str:
@@ -55,6 +97,34 @@ def _extract_youtube_id(url: str) -> Optional[str]:
         if _YOUTUBE_ID_RE.fullmatch(pid):
             return pid
     return None
+
+
+def _normalize(text: str) -> str:
+    """Lowercase + strip accents/apostrophes/punctuation."""
+    if not text:
+        return ""
+    t = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
+    t = t.lower()
+    t = re.sub(r"[^a-z0-9\s]+", " ", t)
+    return re.sub(r"\s+", " ", t).strip()
+
+
+def _keywords_from(*sources: str, min_len: int = 4) -> set:
+    """Return a set of significant tokens (nouns/proper nouns) from the given
+    strings after normalization and stopword removal."""
+    out = set()
+    for s in sources:
+        if not s:
+            continue
+        for tok in _normalize(s).split():
+            if len(tok) < min_len:
+                continue
+            if tok in _STOPWORDS:
+                continue
+            if tok.isdigit() and len(tok) < 4:
+                continue
+            out.add(tok)
+    return out
 
 
 async def _fetch_html(url: str, timeout: float = 8.0) -> Optional[str]:
@@ -148,8 +218,110 @@ def _extract_og(html: str, base_url: str) -> dict:
     return result
 
 
-async def _youtube_search(query: str, api_key: str, timeout: float = 8.0) -> Optional[dict]:
-    """Return {video_id, title, thumbnail, channel} for the best embeddable match, or None."""
+MIN_RELEVANCE_SCORE = 4  # tuned empirically; see _score_video below.
+MIN_KEYWORD_MATCHES = 2   # a match must include at least this many distinct signal terms.
+
+
+def _score_video(
+    item: dict,
+    signal_keywords: set,
+    topic_keywords: Optional[set] = None,
+) -> Tuple[int, dict]:
+    """Return (score, detail) for a YouTube search item.
+
+    Scoring rubric — kept intentionally deterministic and inspectable:
+      +2 per distinct signal keyword found in the video title (capped at +6)
+      +1 per distinct signal keyword found in the description
+      +2 if the channel handle/title contains a known Italian news outlet token
+      +2 if the video was published within the last 30 days
+      +1 if published within 90 days
+      -6 if the video title matches any negative token (music/fan/gameplay/etc.)
+      -5 if `topic_keywords` is given and NONE of them appear in title+description
+         (this rejects videos that merely mention the same entities but are
+          about a different event, e.g. "Milan Inter Full Squad" vs the Ouédraogo
+          transfer story).
+    """
+    sn = item.get("snippet") or {}
+    title = sn.get("title") or ""
+    desc = sn.get("description") or ""
+    channel = sn.get("channelTitle") or ""
+    published = sn.get("publishedAt") or ""
+
+    title_norm = _normalize(title)
+    desc_norm = _normalize(desc)
+    channel_norm = _normalize(channel)
+    combined = title_norm + " " + desc_norm
+
+    # Fast-reject: heavy negative flag if the title contains known "not news" markers.
+    neg_hit = None
+    for neg in _NEGATIVE_TITLE_TOKENS:
+        if neg in title_norm:
+            neg_hit = neg
+            break
+
+    title_hits = {k for k in signal_keywords if k in title_norm}
+    desc_hits = {k for k in signal_keywords if k in desc_norm}
+    topic_hits = set()
+    topic_title_hits = set()
+    if topic_keywords:
+        topic_hits = {k for k in topic_keywords if k in combined}
+        topic_title_hits = {k for k in topic_keywords if k in title_norm}
+
+    score = 0
+    score += min(len(title_hits), 3) * 2
+    score += min(len(desc_hits), 3) * 1
+    if any(tok in channel_norm for tok in _NEWS_CHANNEL_TOKENS):
+        score += 2
+
+    if published:
+        try:
+            pub = datetime.fromisoformat(published.replace("Z", "+00:00"))
+            days = (datetime.now(timezone.utc) - pub).days
+            if days <= 30:
+                score += 2
+            elif days <= 90:
+                score += 1
+        except Exception:
+            pass
+
+    if neg_hit:
+        score -= 6
+
+    if topic_keywords:
+        # No event-specific term matched at all → likely off-topic.
+        if not topic_hits:
+            score -= 5
+        # Topic terms only in description (not title) → weaker relevance.
+        elif not topic_title_hits:
+            score -= 3
+
+    return score, {
+        "title_hits": sorted(title_hits),
+        "desc_hits": sorted(desc_hits),
+        "topic_hits": sorted(topic_hits),
+        "topic_title_hits": sorted(topic_title_hits),
+        "channel": channel,
+        "published": published,
+        "neg_hit": neg_hit,
+        "score": score,
+    }
+
+
+async def _youtube_search(
+    query: str,
+    api_key: str,
+    signal_keywords: Optional[set] = None,
+    topic_keywords: Optional[set] = None,
+    min_score: int = MIN_RELEVANCE_SCORE,
+    timeout: float = 10.0,
+) -> Optional[dict]:
+    """Return {video_id, title, thumbnail, channel, score, debug} for the best-scoring
+    embeddable YouTube video, or None if nothing clears `min_score`.
+
+    `signal_keywords` = full set of relevant tokens (title + parties + ...).
+    `topic_keywords`  = subset that describes the specific event (excludes party
+    names). If provided, videos that don't hit any topic keyword are downranked.
+    """
     if not api_key or not query:
         return None
     try:
@@ -160,10 +332,12 @@ async def _youtube_search(query: str, api_key: str, timeout: float = 8.0) -> Opt
                     "part": "snippet",
                     "q": query,
                     "type": "video",
-                    "maxResults": 5,
+                    "maxResults": 10,
                     "videoEmbeddable": "true",
                     "safeSearch": "moderate",
                     "relevanceLanguage": "it",
+                    "regionCode": "IT",
+                    "order": "relevance",
                     "key": api_key,
                 },
             )
@@ -174,19 +348,43 @@ async def _youtube_search(query: str, api_key: str, timeout: float = 8.0) -> Opt
             items = data.get("items") or []
             if not items:
                 return None
-            top = items[0]
-            vid = top.get("id", {}).get("videoId")
-            if not vid:
-                return None
-            sn = top.get("snippet", {})
-            thumbs = sn.get("thumbnails") or {}
-            thumb = (thumbs.get("high") or thumbs.get("medium") or thumbs.get("default") or {}).get("url")
-            return {
-                "video_id": vid,
-                "title": sn.get("title"),
-                "thumbnail": thumb or f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg",
-                "channel": sn.get("channelTitle"),
-            }
+
+        if signal_keywords is None:
+            signal_keywords = _keywords_from(query)
+
+        scored = []
+        for it in items:
+            score, detail = _score_video(it, signal_keywords, topic_keywords=topic_keywords)
+            hits = len(detail["title_hits"]) + len(detail["desc_hits"])
+            if hits < MIN_KEYWORD_MATCHES:
+                score -= 2
+                detail["score"] = score
+            scored.append((score, it, detail))
+
+        if not scored:
+            return None
+        scored.sort(key=lambda x: x[0], reverse=True)
+        best_score, best_item, best_detail = scored[0]
+        if best_score < min_score:
+            logger.info(
+                f"YT quality reject: q='{query[:60]}' best_score={best_score} "
+                f"title='{(best_item.get('snippet',{}).get('title') or '')[:60]}'"
+            )
+            return None
+        vid = best_item.get("id", {}).get("videoId")
+        if not vid:
+            return None
+        sn = best_item.get("snippet", {})
+        thumbs = sn.get("thumbnails") or {}
+        thumb = (thumbs.get("high") or thumbs.get("medium") or thumbs.get("default") or {}).get("url")
+        return {
+            "video_id": vid,
+            "title": sn.get("title"),
+            "thumbnail": thumb or f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg",
+            "channel": sn.get("channelTitle"),
+            "score": best_score,
+            "debug": best_detail,
+        }
     except Exception as e:
         logger.warning(f"YouTube search error: {e}")
         return None
@@ -255,18 +453,36 @@ async def resolve_media(
             "source_domain": domain,
             "provenance": "og_meta",
         }
-    # 3) YouTube search fallback
+    # 3) YouTube search fallback — with quality gate.
     elif enable_youtube_search and youtube_api_key:
-        # Try a targeted entity-based query first, then fall back to the raw title.
-        queries = []
+        entity_keywords = _keywords_from(search_query or "")
+        title_keywords = _keywords_from(title)
+        topic_keywords = title_keywords - entity_keywords
+        signal_keywords = title_keywords | entity_keywords
+
+        # Build queries from most specific to most generic. The composite query
+        # combines entity + top topic keywords so YouTube's ranker can pinpoint
+        # the exact event (e.g. "Milan Inter Ouédraogo" beats "Milan Inter").
+        # We list top 3 topic keywords by length (longer usually = more specific).
+        top_topics = sorted(topic_keywords, key=len, reverse=True)[:3]
+        queries: list = []
+        if search_query and top_topics:
+            queries.append(f"{search_query} {' '.join(top_topics)}")
         if search_query:
             queries.append(search_query)
-        queries.append(title)
+        if title:
+            queries.append(title)
+        # Deduplicate while preserving order.
+        seen = set()
+        queries = [q for q in queries if q and not (q in seen or seen.add(q))]
+
         yt = None
         for q in queries:
-            if not q:
-                continue
-            yt = await _youtube_search(q, youtube_api_key)
+            yt = await _youtube_search(
+                q, youtube_api_key,
+                signal_keywords=signal_keywords,
+                topic_keywords=topic_keywords or None,
+            )
             if yt:
                 break
         if yt:
