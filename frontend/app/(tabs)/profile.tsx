@@ -485,16 +485,21 @@ export default function Profile() {
       </Modal>
 
       <Modal visible={profileOpen} animationType="slide" transparent onRequestClose={() => setProfileOpen(false)}>
-        <View style={styles.modalBackdrop}>
-          <View style={[styles.modalSheet, { maxHeight: "92%" }]} testID="profile-edit-modal">
+        <Pressable style={styles.modalBackdrop} onPress={() => setProfileOpen(false)}>
+          <Pressable style={[styles.modalSheet, styles.modalSheetTall]} onPress={(e) => e.stopPropagation()} testID="profile-edit-modal">
             <View style={styles.modalHead}>
               <Text style={styles.modalTitle}>MODIFICA PROFILO</Text>
-              <Pressable onPress={() => setProfileOpen(false)} testID="profile-edit-close">
+              <Pressable onPress={() => setProfileOpen(false)} testID="profile-edit-close" hitSlop={10}>
                 <Ionicons name="close" size={26} color={colors.onSurfaceInverse} />
               </Pressable>
             </View>
             <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-              <ScrollView contentContainerStyle={styles.modalBody}>
+              <ScrollView
+                style={{ flex: 1 }}
+                contentContainerStyle={styles.modalBody}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
+              >
                 <Text style={styles.editSectionTitle}>FOTO ({photos.length}/7)</Text>
                 <View style={styles.photosGrid}>
                   {loadingPhotos ? (
@@ -574,8 +579,8 @@ export default function Profile() {
                 {savingDetails ? <ActivityIndicator color={colors.onBrandPrimary} /> : <Text style={styles.prefsSaveTxt}>SALVA</Text>}
               </Pressable>
             </KeyboardAvoidingView>
-          </View>
-        </View>
+          </Pressable>
+        </Pressable>
       </Modal>
     </SafeAreaView>
   );
@@ -654,6 +659,7 @@ const styles = StyleSheet.create({
   prefEmpty: { fontSize: font.sizes.base, color: colors.muted },
   modalBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
   modalSheet: { backgroundColor: colors.surface, borderTopWidth: 2, borderColor: colors.border, maxHeight: "85%" },
+  modalSheetTall: { height: "92%", maxHeight: "92%" },
   modalHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: spacing.lg, borderBottomWidth: 2, borderColor: colors.border, backgroundColor: colors.surfaceInverse },
   modalTitle: { color: colors.onSurfaceInverse, fontSize: font.sizes.xl, letterSpacing: 2, fontWeight: "500" },
   modalBody: { padding: spacing.lg, gap: spacing.md },

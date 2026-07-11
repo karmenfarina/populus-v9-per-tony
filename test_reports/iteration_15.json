@@ -1,0 +1,26 @@
+{
+  "summary": "Frontend-only regression on the profile-edit modal fix in /app/frontend/app/(tabs)/profile.tsx. Flow (email signup -> 3-step onboarding -> Profilo tab -> avatar tap -> modal) PASSED all 10 assertions. Signed up tester<ts>@test.dev / Testing123!, completed onboarding (category=Politica, age=28, sex=M, first region), landed on profile-screen. Tapping profile-avatar opened profile-edit-modal with modalSheetTall applied (measured height=776.46px = 92% of 844 viewport). All required children rendered at non-zero heights (bio-input=90px, each of 5 social-input-*=36px, photo-add-library/photo-add-camera=90px, profile-edit-save=57px, profile-edit-close=28x26) confirming the KeyboardAvoidingView flex-collapse bug is fixed. Filling bio='Test bio' + social-input-instagram='@myhandle' and tapping profile-edit-save closed the modal and profile-bio in header shows 'Test bio'. Alt entry via profile-edit-button opens the same modal with bio pre-loaded='Test bio'. profile-edit-close (X) dismisses the modal. No red-screen errors, no React Native runtime warnings related to the modal.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [
+    "None for this bug fix — the profile-edit modal now renders with correct height and all form fields are visible/interactable. Regression test coverage is sufficient."
+  ],
+  "critical_code_review_comments": [
+    "profile.tsx is now ~677 lines — still under the 700-line soft cap but growing; consider extracting ProfileEditModal into its own component in a future refactor.",
+    "The fix pattern (modalSheetTall height:'92%' + inner ScrollView style={flex:1} + KeyboardAvoidingView with matching flex:1 + Pressable backdrop with stopPropagation on the sheet) is a solid RN Web + native compatible approach. Same pattern should be applied to the prefs-modal (modalSheet with only maxHeight) to prevent similar regressions if that modal ever gets tall content.",
+    "The console emitted one non-blocking warning: 'props.pointerEvents is deprecated. Use style.pointerEvents' — likely from a third-party dependency or an internal component; not caused by the fix but worth tracking."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (not tested this iteration per request)", "frontend": "100% (10/10 assertions passed)"},
+  "seed_data_creation": "Per-run email account (tester<ts>@test.dev, nickname tester<ts>, password Testing123!). No persistent seed created.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Preview URL: https://team-pick.preview.emergentagent.com. Profile-edit modal is the second Modal in /app/frontend/app/(tabs)/profile.tsx (line 487). It uses modalSheet + modalSheetTall (height:92%). Interactive testIDs: profile-avatar (opens modal), profile-edit-button (also opens modal), profile-edit-modal (sheet), profile-edit-close (X), photo-add-library, photo-add-camera, bio-input, social-input-{instagram,tiktok,twitter,youtube,website}, profile-edit-save, profile-bio (header). Note on web preview: Playwright is_visible() sometimes returns False for elements inside the Modal because RN Web Modal reports bounding-rect positions relative to the document (top~911) even though the modal renders as a fixed overlay — this is a web-preview artifact, not a bug. Use scroll_into_view_if_needed() + click(force=True) or dispatch element.click() to interact with elements below the viewport fold.",
+  "rca_of_issue": "Original bug: modalSheet had only maxHeight:'85%' (no explicit height). Inside was a KeyboardAvoidingView with flex:1 and its child ScrollView. When flex parent has an unconstrained (max-)height with no explicit height, RN Web/flex resolves the child's flex:1 to 0, collapsing form fields to zero height — only the modal head (MODIFICA PROFILO + close X) and the sticky SALVA footer remained visible. Fix (verified this iteration): (a) new modalSheetTall style adds height:'92%' + maxHeight:'92%' giving the sheet a resolved height; (b) ScrollView gets style={flex:1} so it fills available space between head and SALVA footer; (c) keyboardShouldPersistTaps='handled' so taps inside inputs don't dismiss keyboard prematurely; (d) backdrop wrapped in Pressable + sheet uses onPress={e=>e.stopPropagation()} so tapping outside closes the modal but taps inside are preserved. All measurements from this run confirm the fix (modal 776px, all inner children non-zero heights)."
+}
