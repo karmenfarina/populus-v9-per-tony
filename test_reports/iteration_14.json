@@ -1,0 +1,26 @@
+{
+  "summary": "Frontend-only regression for the redesigned anon-banner block on /(tabs)/profile.tsx. Both flows PASS 27/27. (A) Anonymous flow: signup with fresh nickname → lands on /(tabs) home → tap Profilo tab → profile-screen renders with the new prominent anon-banner block containing lock icon, 'PROFILO BLOCCATO' heading, body text mentioning foto/descrizione/link, and red 'REGISTRATI ORA ›' button (testID=anon-register-btn). profile-edit-button and prefs-section are correctly NOT rendered. Tapping anon-register-btn logs out and navigates to /auth where all 3 tabs (email/google/anon) are visible. (B) Registration regression: signed up email account, completed 3-step onboarding (categories → age+sex → region), reached Profilo tab: anon-banner NOT visible, profile-edit-button visible, prefs-section visible with 8 chips. Opening profile-edit-modal shows all inputs (bio-input, social-input-{instagram,tiktok,twitter,youtube,website}, photo-add-library, photo-add-camera, profile-edit-save). Filling bio 'Testo di prova' + instagram 'myuser' and tapping profile-edit-save closes modal and profile-bio displays 'Testo di prova' correctly.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [
+    "None for this feature. The redesigned anon-banner block is working exactly as specified and the registered profile-edit flow remains unaffected."
+  ],
+  "critical_code_review_comments": [
+    "profile.tsx is ~670 lines — approaching the 700-line soft cap. Extracting the ProfileEdit modal + Prefs modal into separate components would improve maintainability, but not blocking.",
+    "The anonBanner UI is well-structured: uses SafeAreaView-aware SafeAreaProvider, proper testIDs, accessible touch target (padding md + button padding). Lock icon + heading + body + CTA follow the 8pt grid.",
+    "logout() then router.replace('/auth') sequence in anon-register-btn correctly clears the token before navigation — verified auth screen reloads with 3 tabs and no residual state."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (not tested this iteration)", "frontend": "100% (27/27 checks passed)"},
+  "seed_data_creation": "Per-run anonymous nicknames (tst<ts>) and registered accounts (reg_<ts>@test.dev, nickname reg<ts>). No persistent seed created.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Preview URL: https://team-pick.preview.emergentagent.com. Anonymous profile has: anon-banner (block with lock, heading, body, CTA), NO profile-edit-button, NO prefs-section. anon-register-btn logs out + routes to /auth. Registered profile has: profile-edit-button, prefs-section, and edit-modal with bio-input + 5 social-input-{key} + photo-add-{library,camera} + profile-edit-save. After save, profile-bio shows on header.",
+  "rca_of_issue": "N/A — no bugs found. Redesign verified end-to-end on mobile viewport 390x844."
+}

@@ -270,8 +270,21 @@ export default function Profile() {
           {!isAnonymous && user.bio ? <Text style={styles.headerBio} testID="profile-bio">{user.bio}</Text> : null}
           {isAnonymous ? (
             <View style={styles.anonBanner} testID="anon-banner">
-              <Ionicons name="information-circle-outline" size={14} color={colors.brandSecondary} />
-              <Text style={styles.anonBannerTxt}>Registrati per personalizzare il tuo profilo.</Text>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                <Ionicons name="lock-closed-outline" size={16} color={colors.brandSecondary} />
+                <Text style={styles.anonBannerTxt}>PROFILO BLOCCATO</Text>
+              </View>
+              <Text style={styles.anonBannerBody}>
+                Come utente anonimo non puoi aggiungere foto, descrizione o link.
+                Registrati con un account per personalizzare tutto.
+              </Text>
+              <Pressable
+                onPress={async () => { await logout(); router.replace("/auth"); }}
+                testID="anon-register-btn"
+                style={styles.anonRegisterBtn}
+              >
+                <Text style={styles.anonRegisterTxt}>REGISTRATI ORA ›</Text>
+              </Pressable>
             </View>
           ) : (
             <Pressable onPress={openProfileEdit} testID="profile-edit-button" style={styles.headerEditBtn}>
@@ -580,8 +593,11 @@ const styles = StyleSheet.create({
   headerBio: { fontSize: font.sizes.base, color: colors.onSurfaceInverse, lineHeight: 20, borderLeftWidth: 2, borderColor: colors.brandSecondary, paddingLeft: spacing.sm },
   headerEditBtn: { flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start", borderWidth: 2, borderColor: colors.brandSecondary, paddingHorizontal: spacing.sm, paddingVertical: 6 },
   headerEditTxt: { fontSize: font.sizes.xs, letterSpacing: 1, fontWeight: "500", color: colors.brandSecondary },
-  anonBanner: { flexDirection: "row", alignItems: "center", gap: 6, borderWidth: 2, borderColor: colors.brandSecondary, paddingHorizontal: spacing.sm, paddingVertical: 6, alignSelf: "flex-start" },
-  anonBannerTxt: { color: colors.brandSecondary, fontSize: font.sizes.xs, letterSpacing: 1, fontWeight: "500" },
+  anonBanner: { borderWidth: 2, borderColor: colors.brandSecondary, padding: spacing.md, gap: spacing.sm, backgroundColor: "rgba(255,230,0,0.08)" },
+  anonBannerTxt: { color: colors.brandSecondary, fontSize: font.sizes.sm, letterSpacing: 2, fontWeight: "500" },
+  anonBannerBody: { color: colors.onSurfaceInverse, fontSize: font.sizes.sm, lineHeight: 18 },
+  anonRegisterBtn: { alignSelf: "flex-start", backgroundColor: colors.brandPrimary, borderWidth: 2, borderColor: colors.brandSecondary, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
+  anonRegisterTxt: { color: colors.onBrandPrimary, fontSize: font.sizes.base, letterSpacing: 2, fontWeight: "500" },
   editSectionTitle: { fontSize: font.sizes.sm, letterSpacing: 2, fontWeight: "500", color: colors.brandPrimary },
   photosGrid: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, marginTop: spacing.xs },
   photoBox: { width: 90, height: 90, borderWidth: 2, borderColor: colors.border, position: "relative", overflow: "hidden", backgroundColor: colors.surfaceSecondary },
