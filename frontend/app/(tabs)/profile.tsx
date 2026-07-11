@@ -37,6 +37,7 @@ export default function Profile() {
   const [savingDetails, setSavingDetails] = useState(false);
   const [detailsError, setDetailsError] = useState<string | null>(null);
   const [primaryPhotoData, setPrimaryPhotoData] = useState<string | null>(null);
+  const isAnonymous = user?.auth_provider === "anonymous";
 
   const loadHistory = useCallback(async (f: Filter) => {
     setLoadingH(true);
@@ -233,18 +234,30 @@ export default function Profile() {
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.header}>
           <View style={styles.headerRow}>
-            <Pressable onPress={openProfileEdit} testID="profile-avatar" style={styles.avatarWrap}>
-              {primaryPhotoData ? (
-                <Image source={{ uri: `data:image/jpeg;base64,${primaryPhotoData}` }} style={styles.avatarImg} />
-              ) : (
-                <View style={[styles.avatarImg, styles.avatarPlaceholder]}>
-                  <Ionicons name="person" size={40} color={colors.brandSecondary} />
-                </View>
-              )}
-              <View style={styles.avatarEditBadge}>
-                <Ionicons name="camera" size={12} color={colors.onBrandPrimary} />
+            {isAnonymous ? (
+              <View style={styles.avatarWrap}>
+                {primaryPhotoData ? (
+                  <Image source={{ uri: `data:image/jpeg;base64,${primaryPhotoData}` }} style={styles.avatarImg} />
+                ) : (
+                  <View style={[styles.avatarImg, styles.avatarPlaceholder]}>
+                    <Ionicons name="person" size={40} color={colors.brandSecondary} />
+                  </View>
+                )}
               </View>
-            </Pressable>
+            ) : (
+              <Pressable onPress={openProfileEdit} testID="profile-avatar" style={styles.avatarWrap}>
+                {primaryPhotoData ? (
+                  <Image source={{ uri: `data:image/jpeg;base64,${primaryPhotoData}` }} style={styles.avatarImg} />
+                ) : (
+                  <View style={[styles.avatarImg, styles.avatarPlaceholder]}>
+                    <Ionicons name="person" size={40} color={colors.brandSecondary} />
+                  </View>
+                )}
+                <View style={styles.avatarEditBadge}>
+                  <Ionicons name="camera" size={12} color={colors.onBrandPrimary} />
+                </View>
+              </Pressable>
+            )}
             <View style={{ flex: 1 }}>
               <Text style={styles.brand}>PROFILO</Text>
               <Text style={styles.nickname} testID="profile-nickname">@{user.nickname}</Text>
@@ -254,11 +267,18 @@ export default function Profile() {
               </Text>
             </View>
           </View>
-          {user.bio ? <Text style={styles.headerBio} testID="profile-bio">{user.bio}</Text> : null}
-          <Pressable onPress={openProfileEdit} testID="profile-edit-button" style={styles.headerEditBtn}>
-            <Ionicons name="pencil" size={14} color={colors.brandSecondary} />
-            <Text style={styles.headerEditTxt}>MODIFICA PROFILO</Text>
-          </Pressable>
+          {!isAnonymous && user.bio ? <Text style={styles.headerBio} testID="profile-bio">{user.bio}</Text> : null}
+          {isAnonymous ? (
+            <View style={styles.anonBanner} testID="anon-banner">
+              <Ionicons name="information-circle-outline" size={14} color={colors.brandSecondary} />
+              <Text style={styles.anonBannerTxt}>Registrati per personalizzare il tuo profilo.</Text>
+            </View>
+          ) : (
+            <Pressable onPress={openProfileEdit} testID="profile-edit-button" style={styles.headerEditBtn}>
+              <Ionicons name="pencil" size={14} color={colors.brandSecondary} />
+              <Text style={styles.headerEditTxt}>MODIFICA PROFILO</Text>
+            </Pressable>
+          )}
         </View>
 
         <View style={styles.badgeBlock} testID="profile-badge">
@@ -300,29 +320,31 @@ export default function Profile() {
           </View>
         </View>
 
-        <View style={styles.prefsSection} testID="prefs-section">
-          <View style={styles.prefsHeadRow}>
-            <Text style={styles.prefsTitle}>ARGOMENTI PREFERITI</Text>
-            <Pressable onPress={openPrefs} testID="prefs-edit-button" style={styles.prefsEditBtn}>
-              <Ionicons name="pencil" size={14} color={colors.onSurface} />
-              <Text style={styles.prefsEditTxt}>MODIFICA</Text>
-            </Pressable>
+        {!isAnonymous && (
+          <View style={styles.prefsSection} testID="prefs-section">
+            <View style={styles.prefsHeadRow}>
+              <Text style={styles.prefsTitle}>ARGOMENTI PREFERITI</Text>
+              <Pressable onPress={openPrefs} testID="prefs-edit-button" style={styles.prefsEditBtn}>
+                <Ionicons name="pencil" size={14} color={colors.onSurface} />
+                <Text style={styles.prefsEditTxt}>MODIFICA</Text>
+              </Pressable>
+            </View>
+            <View style={styles.prefsChipsRow}>
+              {(user.favorite_categories && user.favorite_categories.length > 0) ? (
+                user.favorite_categories.map((id) => {
+                  const label = cats.find((c) => c.id === id)?.label || id;
+                  return (
+                    <View key={id} style={styles.prefChip} testID={`pref-chip-${id}`}>
+                      <Text style={styles.prefChipTxt}>{label}</Text>
+                    </View>
+                  );
+                })
+              ) : (
+                <Text style={styles.prefEmpty}>Nessuna preferenza impostata.</Text>
+              )}
+            </View>
           </View>
-          <View style={styles.prefsChipsRow}>
-            {(user.favorite_categories && user.favorite_categories.length > 0) ? (
-              user.favorite_categories.map((id) => {
-                const label = cats.find((c) => c.id === id)?.label || id;
-                return (
-                  <View key={id} style={styles.prefChip} testID={`pref-chip-${id}`}>
-                    <Text style={styles.prefChipTxt}>{label}</Text>
-                  </View>
-                );
-              })
-            ) : (
-              <Text style={styles.prefEmpty}>Nessuna preferenza impostata.</Text>
-            )}
-          </View>
-        </View>
+        )}
 
         <View style={styles.historyHeader}>
           <Text style={styles.historyTitle}>STORICO VOTI</Text>
@@ -558,6 +580,8 @@ const styles = StyleSheet.create({
   headerBio: { fontSize: font.sizes.base, color: colors.onSurfaceInverse, lineHeight: 20, borderLeftWidth: 2, borderColor: colors.brandSecondary, paddingLeft: spacing.sm },
   headerEditBtn: { flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start", borderWidth: 2, borderColor: colors.brandSecondary, paddingHorizontal: spacing.sm, paddingVertical: 6 },
   headerEditTxt: { fontSize: font.sizes.xs, letterSpacing: 1, fontWeight: "500", color: colors.brandSecondary },
+  anonBanner: { flexDirection: "row", alignItems: "center", gap: 6, borderWidth: 2, borderColor: colors.brandSecondary, paddingHorizontal: spacing.sm, paddingVertical: 6, alignSelf: "flex-start" },
+  anonBannerTxt: { color: colors.brandSecondary, fontSize: font.sizes.xs, letterSpacing: 1, fontWeight: "500" },
   editSectionTitle: { fontSize: font.sizes.sm, letterSpacing: 2, fontWeight: "500", color: colors.brandPrimary },
   photosGrid: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, marginTop: spacing.xs },
   photoBox: { width: 90, height: 90, borderWidth: 2, borderColor: colors.border, position: "relative", overflow: "hidden", backgroundColor: colors.surfaceSecondary },

@@ -232,6 +232,9 @@ async def anonymous(body: AnonymousBody):
         'user_id': user_id, 'email': None, 'nickname': body.nickname,
         'auth_provider': 'anonymous', 'created_at': now_utc(),
         'majority_votes': 0, 'minority_votes': 0, 'total_votes': 0,
+        # Anonymous users skip onboarding and see all categories by default
+        'onboarding_completed': True,
+        'favorite_categories': [],
     }
     await db.users.insert_one(user)
     return {'token': make_jwt(user_id), 'user': _public_user(user)}
@@ -288,8 +291,14 @@ ITALIAN_REGIONS = {
 }
 
 
+def _reject_if_anonymous(user: dict):
+    if user.get('auth_provider') == 'anonymous':
+        raise HTTPException(status_code=403, detail='Personalizzazione riservata agli account registrati')
+
+
 @api_router.patch('/auth/me/profile')
 async def update_profile(body: ProfileBody, user: dict = Depends(get_current_user)):
+    _reject_if_anonymous(user)
     invalid = [c for c in body.favorite_categories if c not in VALID_CATEGORY_IDS]
     if invalid:
         raise HTTPException(status_code=400, detail=f"Categorie non valide: {', '.join(invalid)}")
@@ -351,6 +360,7 @@ def _sanitize_social_links(sl: Optional[dict]) -> dict:
 
 @api_router.patch('/auth/me/details')
 async def update_details(body: DetailsBody, user: dict = Depends(get_current_user)):
+    _reject_if_anonymous(user)
     updates: dict = {}
     if body.bio is not None:
         updates['bio'] = body.bio.strip()[:200]
@@ -374,6 +384,7 @@ def _strip_data_url(s: str) -> str:
 
 @api_router.post('/auth/me/photos')
 async def upload_photo(body: PhotoUploadBody, user: dict = Depends(get_current_user)):
+    _reject_if_anonymous(user)
     current_count = await db.user_photos.count_documents({'user_id': user['user_id']})
     if current_count >= MAX_PHOTOS:
         raise HTTPException(status_code=400, detail=f'Massimo {MAX_PHOTOS} foto totali')
@@ -410,6 +421,7 @@ async def my_photos(user: dict = Depends(get_current_user)):
 
 @api_router.patch('/auth/me/photos/{photo_id}/primary')
 async def set_primary_photo(photo_id: str, user: dict = Depends(get_current_user)):
+    _reject_if_anonymous(user)
     photo = await db.user_photos.find_one({'photo_id': photo_id, 'user_id': user['user_id']}, {'_id': 0})
     if not photo:
         raise HTTPException(status_code=404, detail='Foto non trovata')
@@ -419,6 +431,7 @@ async def set_primary_photo(photo_id: str, user: dict = Depends(get_current_user
 
 @api_router.delete('/auth/me/photos/{photo_id}')
 async def delete_photo(photo_id: str, user: dict = Depends(get_current_user)):
+    _reject_if_anonymous(user)
     photo = await db.user_photos.find_one({'photo_id': photo_id, 'user_id': user['user_id']}, {'_id': 0})
     if not photo:
         raise HTTPException(status_code=404, detail='Foto non trovata')

@@ -1,0 +1,40 @@
+{
+  "summary": "Backend + Frontend test for anonymous customization restrictions. Backend: 7/7 pytest tests passed (anon signup returns onboarding_completed=true & favorite_categories=[]; anon receives 403 with detail 'Personalizzazione riservata agli account registrati' on PATCH /auth/me/details, POST /auth/me/photos, PATCH /auth/me/profile; registered email user still 200 on details+profile). Frontend: found and fixed a RED-SCREEN crash in profile.tsx ('isAnonymous is not defined') by adding const isAnonymous = user?.auth_provider === 'anonymous'. After fix all UI expectations pass: anon skips onboarding, lands on (tabs) home with 'Tutte' chip active and all 9 chips visible (Tutte + 8 categories); anon profile shows anon-banner with 'Registrati per personalizzare il tuo profilo.' and hides profile-edit-button + prefs-section; registered user sees both profile-edit-button and prefs-section (regression OK).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "app/(tabs)/profile.tsx",
+        "issue": "Referenced variable 'isAnonymous' was used on lines 237, 270, 323 but never declared, causing a React red-screen 'ReferenceError: isAnonymous is not defined' the moment an anonymous user opened the Profilo tab. Testing agent fixed by adding const isAnonymous = user?.auth_provider === 'anonymous' at the top of the component.",
+        "testID": "profile-screen",
+        "priority": "CRITICAL"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_anonymous_restrictions.py",
+    "/app/test_reports/pytest/anonymous_restrictions.xml"
+  ],
+  "action_items": [
+    "Main agent: confirm the fix applied in profile.tsx (isAnonymous derived from user.auth_provider). No further action needed for this feature.",
+    "Note: /app/backend/tests/test_profile_customization.py (from iter 12) still uses an anonymous user to hit PATCH /auth/me/details and POST /auth/me/photos — those tests will now legitimately fail with 403. Main agent should migrate that suite to a registered email user or explicitly mark expected 403 assertions."
+  ],
+  "critical_code_review_comments": [
+    "profile.tsx (655 lines) is now well above the 700-line soft cap once modals grow; consider extracting the ProfileEdit modal and the Prefs modal into separate components.",
+    "The anon guard on the backend uses a helper _reject_if_anonymous() applied to details/photos/profile endpoints — good. Verify also PATCH /photos/{id}/primary and DELETE /photos/{id} are covered (they are, per grep of server.py lines 424/434).",
+    "index.tsx auth-gate correctly relies on user.onboarding_completed — anonymous now has this=true at signup, so no client-side branching needed for the redirect. Clean design."
+  ],
+  "updated_files": [
+    "/app/frontend/app/(tabs)/profile.tsx (added `const isAnonymous = user?.auth_provider === 'anonymous';` inside Profile component)",
+    "/app/backend/tests/test_anonymous_restrictions.py (new pytest module, 7 tests)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "seed_data_creation": "Per-run anonymous nicknames (tst*) and email accounts prefixed TEST_reg_* / reg_* — no persistent seed required.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Preview URL: https://team-pick.preview.emergentagent.com. Anonymous auth returns a bearer token; user object now carries onboarding_completed=true & favorite_categories=[]. Endpoints returning 403 for anon: PATCH /auth/me/details, POST /auth/me/photos, PATCH /photos/{id}/primary, DELETE /photos/{id}, PATCH /auth/me/profile. Frontend routes: auth screen at '/', onboarding at '/onboarding' (registered only), home at '/(tabs)', profile at '/profile'.",
+  "rca_of_issue": "RCA of red-screen bug: profile.tsx used `isAnonymous` in 3 places (avatar block, banner/edit toggle, prefs-section guard) but the constant was never declared inside the Profile() component. On any anonymous session opening the Profilo tab, React threw ReferenceError before the SafeAreaView could render, showing Expo's red-box. Mitigation: derive isAnonymous from user.auth_provider once at the top of the component. Reproduction: (1) POST /api/auth/anonymous with any nickname, (2) navigate to /profile in the web preview → red screen with 'isAnonymous is not defined' before the fix; screen renders correctly after."
+}
