@@ -63,6 +63,13 @@ export const api = {
   share: (id: string) => request(`/share/${id}`),
   updateProfile: (body: { age: number; sex: 'F'|'M'|'other'|'na'; region: string; favorite_categories: string[] }) =>
     request('/auth/me/profile', { method: 'PATCH', body: JSON.stringify(body) }),
+  updateDetails: (body: { bio?: string; social_links?: Record<string, string> }) =>
+    request('/auth/me/details', { method: 'PATCH', body: JSON.stringify(body) }),
+  myPhotos: () => request('/auth/me/photos'),
+  uploadPhoto: (data: string) => request('/auth/me/photos', { method: 'POST', body: JSON.stringify({ data }) }),
+  setPrimaryPhoto: (id: string) => request(`/auth/me/photos/${id}/primary`, { method: 'PATCH' }),
+  deletePhoto: (id: string) => request(`/auth/me/photos/${id}`, { method: 'DELETE' }),
+  publicUser: (id: string) => request(`/users/${id}`),
 };
 
 export type User = {
@@ -78,6 +85,10 @@ export type User = {
   region?: string | null;
   favorite_categories?: string[];
   onboarding_completed?: boolean;
+  bio?: string | null;
+  social_links?: { instagram?: string; tiktok?: string; twitter?: string; youtube?: string; website?: string };
+  primary_photo_id?: string | null;
+  photos_count?: number;
   badge: {
     unlocked: boolean;
     type?: 'buon_senso' | 'bastian_contrario';
@@ -87,6 +98,20 @@ export type User = {
     progress?: number;
     target?: number;
   } | null;
+};
+
+export type UserPhoto = { photo_id: string; data: string; position: number; is_primary?: boolean; created_at?: string };
+export type PublicUser = {
+  user_id: string;
+  nickname: string;
+  bio?: string | null;
+  social_links?: User['social_links'];
+  primary_photo_id?: string | null;
+  photos: UserPhoto[];
+  total_votes: number;
+  majority_votes: number;
+  minority_votes: number;
+  badge: User['badge'];
 };
 
 export type Sponsor = {

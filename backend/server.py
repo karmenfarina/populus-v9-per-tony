@@ -141,6 +141,15 @@ class ProfileBody(BaseModel):
     favorite_categories: List[str] = Field(min_length=1)
 
 
+class DetailsBody(BaseModel):
+    bio: Optional[str] = Field(default=None, max_length=200)
+    social_links: Optional[dict] = None  # {instagram, tiktok, twitter, youtube, website}
+
+
+class PhotoUploadBody(BaseModel):
+    data: str = Field(min_length=40)  # base64 data (with or without prefix)
+
+
 class VoteBody(BaseModel):
     side: Literal['A', 'B']
 
@@ -179,6 +188,10 @@ def _public_user(u: dict) -> dict:
         'region': u.get('region'),
         'favorite_categories': u.get('favorite_categories', []),
         'onboarding_completed': bool(u.get('onboarding_completed', False)),
+        'bio': u.get('bio'),
+        'social_links': u.get('social_links', {}),
+        'primary_photo_id': u.get('primary_photo_id'),
+        'photos_count': u.get('photos_count', 0),
         'badge': compute_badge(u),
     }
 
@@ -295,6 +308,139 @@ async def update_profile(body: ProfileBody, user: dict = Depends(get_current_use
     )
     updated = await db.users.find_one({'user_id': user['user_id']}, {'_id': 0})
     return {'user': _public_user(updated)}
+
+
+ALLOWED_SOCIAL_KEYS = {'instagram', 'tiktok', 'twitter', 'youtube', 'website'}
+MAX_PHOTOS = 7
+
+
+def _sanitize_social_links(sl: Optional[dict]) -> dict:
+    if not isinstance(sl, dict):
+        return {}
+    out = {}
+    for k, v in sl.items():
+        if k not in ALLOWED_SOCIAL_KEYS:
+            continue
+        v = (v or '').strip()
+        if not v:
+            continue
+        if len(v) > 200:
+            v = v[:200]
+        # tolerate handles without scheme
+        if not re.match(r'^https?://', v, re.IGNORECASE) and not v.startswith('@'):
+            v = 'https://' + v
+        out[k] = v
+    return out
+
+
+@api_router.patch('/auth/me/details')
+async def update_details(body: DetailsBody, user: dict = Depends(get_current_user)):
+    updates: dict = {}
+    if body.bio is not None:
+        updates['bio'] = body.bio.strip()[:200]
+    if body.social_links is not None:
+        updates['social_links'] = _sanitize_social_links(body.social_links)
+    if not updates:
+        raise HTTPException(status_code=400, detail='Nessun campo da aggiornare')
+    updates['details_updated_at'] = now_utc()
+    await db.users.update_one({'user_id': user['user_id']}, {'$set': updates})
+    updated = await db.users.find_one({'user_id': user['user_id']}, {'_id': 0})
+    return {'user': _public_user(updated)}
+
+
+def _strip_data_url(s: str) -> str:
+    if s.startswith('data:'):
+        idx = s.find(',')
+        if idx > 0:
+            return s[idx + 1:]
+    return s
+
+
+@api_router.post('/auth/me/photos')
+async def upload_photo(body: PhotoUploadBody, user: dict = Depends(get_current_user)):
+    current_count = await db.user_photos.count_documents({'user_id': user['user_id']})
+    if current_count >= MAX_PHOTOS:
+        raise HTTPException(status_code=400, detail=f'Massimo {MAX_PHOTOS} foto totali')
+    data = _strip_data_url(body.data.strip())
+    if len(data) > 3_500_000:  # ~2.5MB decoded upper bound
+        raise HTTPException(status_code=400, detail='Foto troppo grande (max ~2.5MB)')
+    photo_id = new_id('ph')
+    doc = {
+        'photo_id': photo_id,
+        'user_id': user['user_id'],
+        'data': data,
+        'position': current_count,
+        'created_at': now_utc(),
+    }
+    await db.user_photos.insert_one(doc)
+    updates: dict = {'photos_count': current_count + 1}
+    if current_count == 0:
+        updates['primary_photo_id'] = photo_id
+    await db.users.update_one({'user_id': user['user_id']}, {'$set': updates})
+    return {'photo_id': photo_id, 'primary_photo_id': updates.get('primary_photo_id', user.get('primary_photo_id'))}
+
+
+@api_router.get('/auth/me/photos')
+async def my_photos(user: dict = Depends(get_current_user)):
+    docs = await db.user_photos.find(
+        {'user_id': user['user_id']}, {'_id': 0}
+    ).sort('position', 1).to_list(MAX_PHOTOS + 1)
+    for d in docs:
+        if isinstance(d.get('created_at'), datetime):
+            d['created_at'] = d['created_at'].isoformat()
+        d['is_primary'] = (d['photo_id'] == user.get('primary_photo_id'))
+    return {'photos': docs, 'primary_photo_id': user.get('primary_photo_id')}
+
+
+@api_router.patch('/auth/me/photos/{photo_id}/primary')
+async def set_primary_photo(photo_id: str, user: dict = Depends(get_current_user)):
+    photo = await db.user_photos.find_one({'photo_id': photo_id, 'user_id': user['user_id']}, {'_id': 0})
+    if not photo:
+        raise HTTPException(status_code=404, detail='Foto non trovata')
+    await db.users.update_one({'user_id': user['user_id']}, {'$set': {'primary_photo_id': photo_id}})
+    return {'primary_photo_id': photo_id}
+
+
+@api_router.delete('/auth/me/photos/{photo_id}')
+async def delete_photo(photo_id: str, user: dict = Depends(get_current_user)):
+    photo = await db.user_photos.find_one({'photo_id': photo_id, 'user_id': user['user_id']}, {'_id': 0})
+    if not photo:
+        raise HTTPException(status_code=404, detail='Foto non trovata')
+    await db.user_photos.delete_one({'photo_id': photo_id, 'user_id': user['user_id']})
+    remaining = await db.user_photos.find({'user_id': user['user_id']}, {'_id': 0}).sort('position', 1).to_list(MAX_PHOTOS)
+    new_primary = None
+    if user.get('primary_photo_id') == photo_id:
+        new_primary = remaining[0]['photo_id'] if remaining else None
+    updates = {'photos_count': len(remaining)}
+    if new_primary is not None or user.get('primary_photo_id') == photo_id:
+        updates['primary_photo_id'] = new_primary
+    await db.users.update_one({'user_id': user['user_id']}, {'$set': updates})
+    return {'ok': True, 'primary_photo_id': updates.get('primary_photo_id', user.get('primary_photo_id'))}
+
+
+@api_router.get('/users/{user_id}')
+async def public_user(user_id: str):
+    u = await db.users.find_one({'user_id': user_id}, {'_id': 0})
+    if not u:
+        raise HTTPException(status_code=404, detail='Utente non trovato')
+    photos = await db.user_photos.find(
+        {'user_id': user_id}, {'_id': 0, 'user_id': 0}
+    ).sort('position', 1).to_list(MAX_PHOTOS + 1)
+    for p in photos:
+        if isinstance(p.get('created_at'), datetime):
+            p['created_at'] = p['created_at'].isoformat()
+    return {
+        'user_id': u['user_id'],
+        'nickname': u.get('nickname'),
+        'bio': u.get('bio'),
+        'social_links': u.get('social_links', {}),
+        'primary_photo_id': u.get('primary_photo_id'),
+        'photos': photos,
+        'total_votes': u.get('total_votes', 0),
+        'majority_votes': u.get('majority_votes', 0),
+        'minority_votes': u.get('minority_votes', 0),
+        'badge': compute_badge(u),
+    }
 
 
 @api_router.post('/auth/logout')
@@ -1208,6 +1354,8 @@ async def on_startup():
     await db.comments.create_index('feud_id')
     await db.replies.create_index('comment_id')
     await db.sponsors.create_index('category')
+    await db.user_photos.create_index('user_id')
+    await db.user_photos.create_index([('user_id', 1), ('position', 1)])
     # Full-text index for search
     try:
         await db.feuds.create_index([('title', 'text'), ('summary', 'text'), ('party_a', 'text'), ('party_b', 'text')])

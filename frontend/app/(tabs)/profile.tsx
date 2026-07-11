@@ -1,13 +1,20 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Modal } from "react-native";
+import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Modal, TextInput, Image, KeyboardAvoidingView, Platform } from "react-native";
+import * as ImagePicker from "expo-image-picker";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useAuth } from "@/src/auth/AuthContext";
-import { api, HistoryItem } from "@/src/api";
+import { api, HistoryItem, UserPhoto } from "@/src/api";
 import { colors, spacing, font, sideColor } from "@/src/theme";
 
 type Filter = "all" | "majority" | "minority";
+type Socials = { instagram: string; tiktok: string; twitter: string; youtube: string; website: string };
+const EMPTY_SOCIALS: Socials = { instagram: "", tiktok: "", twitter: "", youtube: "", website: "" };
+const SOCIAL_KEYS: (keyof Socials)[] = ["instagram", "tiktok", "twitter", "youtube", "website"];
+const SOCIAL_LABELS: Record<keyof Socials, string> = {
+  instagram: "Instagram", tiktok: "TikTok", twitter: "X (Twitter)", youtube: "YouTube", website: "Sito web",
+};
 
 export default function Profile() {
   const { user, logout, refreshMe } = useAuth();
@@ -20,6 +27,15 @@ export default function Profile() {
   const [editSel, setEditSel] = useState<Set<string>>(new Set());
   const [savingPrefs, setSavingPrefs] = useState(false);
   const [prefsError, setPrefsError] = useState<string | null>(null);
+  // Profile customization
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [photos, setPhotos] = useState<UserPhoto[]>([]);
+  const [loadingPhotos, setLoadingPhotos] = useState(false);
+  const [bio, setBio] = useState<string>("");
+  const [socials, setSocials] = useState<Socials>(EMPTY_SOCIALS);
+  const [savingDetails, setSavingDetails] = useState(false);
+  const [detailsError, setDetailsError] = useState<string | null>(null);
+  const [primaryPhotoData, setPrimaryPhotoData] = useState<string | null>(null);
 
   const loadHistory = useCallback(async (f: Filter) => {
     setLoadingH(true);
@@ -42,6 +58,82 @@ export default function Profile() {
       } catch {}
     })();
   }, []);
+
+  const loadPhotos = useCallback(async () => {
+    setLoadingPhotos(true);
+    try {
+      const r = await api.myPhotos();
+      const list: UserPhoto[] = r.photos || [];
+      setPhotos(list);
+      const primary = list.find((p) => p.photo_id === r.primary_photo_id) || list[0];
+      setPrimaryPhotoData(primary?.data || null);
+    } finally { setLoadingPhotos(false); }
+  }, []);
+
+  useEffect(() => {
+    loadPhotos();
+  }, [loadPhotos]);
+
+  const openProfileEdit = () => {
+    setDetailsError(null);
+    setBio(user?.bio || "");
+    const sl = user?.social_links || {};
+    setSocials({
+      instagram: (sl as any).instagram || "",
+      tiktok: (sl as any).tiktok || "",
+      twitter: (sl as any).twitter || "",
+      youtube: (sl as any).youtube || "",
+      website: (sl as any).website || "",
+    });
+    setProfileOpen(true);
+  };
+
+  const pickPhoto = async () => {
+    if (photos.length >= 7) { setDetailsError("Massimo 7 foto totali"); return; }
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) { setDetailsError("Serve il permesso alla libreria foto"); return; }
+    const res = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.7,
+      base64: true,
+      allowsEditing: true,
+      aspect: [1, 1],
+    });
+    if (res.canceled || !res.assets[0]) return;
+    const base64 = res.assets[0].base64;
+    if (!base64) { setDetailsError("Impossibile leggere l'immagine"); return; }
+    try {
+      await api.uploadPhoto(base64);
+      await loadPhotos();
+      await refreshMe();
+    } catch (e: any) { setDetailsError(e?.message || "Errore upload"); }
+  };
+
+  const setPrimary = async (photoId: string) => {
+    try {
+      await api.setPrimaryPhoto(photoId);
+      await loadPhotos();
+      await refreshMe();
+    } catch (e: any) { setDetailsError(e?.message || "Errore"); }
+  };
+
+  const deletePhoto = async (photoId: string) => {
+    try {
+      await api.deletePhoto(photoId);
+      await loadPhotos();
+      await refreshMe();
+    } catch (e: any) { setDetailsError(e?.message || "Errore"); }
+  };
+
+  const saveDetails = async () => {
+    setSavingDetails(true); setDetailsError(null);
+    try {
+      await api.updateDetails({ bio: bio.trim(), social_links: socials });
+      await refreshMe();
+      setProfileOpen(false);
+    } catch (e: any) { setDetailsError(e?.message || "Errore salvataggio"); }
+    finally { setSavingDetails(false); }
+  };
 
   const openPrefs = () => {
     setPrefsError(null);
@@ -101,12 +193,33 @@ export default function Profile() {
     <SafeAreaView style={styles.safe} edges={["top"]} testID="profile-screen">
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.header}>
-          <Text style={styles.brand}>PROFILO</Text>
-          <Text style={styles.nickname} testID="profile-nickname">@{user.nickname}</Text>
-          <Text style={styles.provider}>
-            {user.auth_provider === "email" ? "Email" : user.auth_provider === "google" ? "Google" : "Anonimo"}
-            {user.email ? ` · ${user.email}` : ""}
-          </Text>
+          <View style={styles.headerRow}>
+            <Pressable onPress={openProfileEdit} testID="profile-avatar" style={styles.avatarWrap}>
+              {primaryPhotoData ? (
+                <Image source={{ uri: `data:image/jpeg;base64,${primaryPhotoData}` }} style={styles.avatarImg} />
+              ) : (
+                <View style={[styles.avatarImg, styles.avatarPlaceholder]}>
+                  <Ionicons name="person" size={40} color={colors.brandSecondary} />
+                </View>
+              )}
+              <View style={styles.avatarEditBadge}>
+                <Ionicons name="camera" size={12} color={colors.onBrandPrimary} />
+              </View>
+            </Pressable>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.brand}>PROFILO</Text>
+              <Text style={styles.nickname} testID="profile-nickname">@{user.nickname}</Text>
+              <Text style={styles.provider}>
+                {user.auth_provider === "email" ? "Email" : user.auth_provider === "google" ? "Google" : "Anonimo"}
+                {user.email ? ` · ${user.email}` : ""}
+              </Text>
+            </View>
+          </View>
+          {user.bio ? <Text style={styles.headerBio} testID="profile-bio">{user.bio}</Text> : null}
+          <Pressable onPress={openProfileEdit} testID="profile-edit-button" style={styles.headerEditBtn}>
+            <Ionicons name="pencil" size={14} color={colors.brandSecondary} />
+            <Text style={styles.headerEditTxt}>MODIFICA PROFILO</Text>
+          </Pressable>
         </View>
 
         <View style={styles.badgeBlock} testID="profile-badge">
@@ -296,6 +409,94 @@ export default function Profile() {
           </View>
         </View>
       </Modal>
+
+      <Modal visible={profileOpen} animationType="slide" transparent onRequestClose={() => setProfileOpen(false)}>
+        <View style={styles.modalBackdrop}>
+          <View style={[styles.modalSheet, { maxHeight: "92%" }]} testID="profile-edit-modal">
+            <View style={styles.modalHead}>
+              <Text style={styles.modalTitle}>MODIFICA PROFILO</Text>
+              <Pressable onPress={() => setProfileOpen(false)} testID="profile-edit-close">
+                <Ionicons name="close" size={26} color={colors.onSurfaceInverse} />
+              </Pressable>
+            </View>
+            <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+              <ScrollView contentContainerStyle={styles.modalBody}>
+                <Text style={styles.editSectionTitle}>FOTO ({photos.length}/7)</Text>
+                <View style={styles.photosGrid}>
+                  {loadingPhotos ? (
+                    <ActivityIndicator color={colors.brandPrimary} />
+                  ) : (
+                    <>
+                      {photos.map((p) => {
+                        const isPrimary = p.photo_id === user.primary_photo_id;
+                        return (
+                          <View key={p.photo_id} style={styles.photoBox} testID={`photo-${p.photo_id}`}>
+                            <Image source={{ uri: `data:image/jpeg;base64,${p.data}` }} style={styles.photoImg} />
+                            {isPrimary && (
+                              <View style={styles.primaryBadge}>
+                                <Ionicons name="star" size={12} color={colors.onBrandSecondary} />
+                              </View>
+                            )}
+                            <View style={styles.photoActions}>
+                              {!isPrimary && (
+                                <Pressable onPress={() => setPrimary(p.photo_id)} testID={`photo-set-primary-${p.photo_id}`} style={styles.photoAct}>
+                                  <Ionicons name="star-outline" size={14} color={colors.onSurface} />
+                                </Pressable>
+                              )}
+                              <Pressable onPress={() => deletePhoto(p.photo_id)} testID={`photo-delete-${p.photo_id}`} style={[styles.photoAct, { backgroundColor: colors.brandPrimary }]}>
+                                <Ionicons name="trash" size={14} color={colors.onBrandPrimary} />
+                              </Pressable>
+                            </View>
+                          </View>
+                        );
+                      })}
+                      {photos.length < 7 && (
+                        <Pressable onPress={pickPhoto} testID="photo-add-button" style={[styles.photoBox, styles.photoAdd]}>
+                          <Ionicons name="add" size={36} color={colors.onSurface} />
+                          <Text style={styles.photoAddTxt}>AGGIUNGI</Text>
+                        </Pressable>
+                      )}
+                    </>
+                  )}
+                </View>
+
+                <Text style={[styles.editSectionTitle, { marginTop: spacing.md }]}>BIO ({bio.length}/200)</Text>
+                <TextInput
+                  value={bio}
+                  onChangeText={(t) => setBio(t.slice(0, 200))}
+                  placeholder="Racconta chi sei..."
+                  placeholderTextColor={colors.muted}
+                  multiline
+                  style={styles.bioInput}
+                  testID="bio-input"
+                />
+
+                <Text style={[styles.editSectionTitle, { marginTop: spacing.md }]}>SOCIAL</Text>
+                {SOCIAL_KEYS.map((k) => (
+                  <View key={k} style={styles.socialField}>
+                    <Text style={styles.socialFieldLabel}>{SOCIAL_LABELS[k]}</Text>
+                    <TextInput
+                      value={socials[k]}
+                      onChangeText={(t) => setSocials((s) => ({ ...s, [k]: t }))}
+                      placeholder={k === "website" ? "esempio.it" : `@handle o url`}
+                      placeholderTextColor={colors.muted}
+                      autoCapitalize="none"
+                      keyboardType="url"
+                      style={styles.socialInput}
+                      testID={`social-input-${k}`}
+                    />
+                  </View>
+                ))}
+
+                {detailsError && <Text style={styles.prefsErr} testID="details-error">{detailsError}</Text>}
+              </ScrollView>
+              <Pressable onPress={saveDetails} disabled={savingDetails} testID="profile-edit-save" style={styles.prefsSaveBtn}>
+                {savingDetails ? <ActivityIndicator color={colors.onBrandPrimary} /> : <Text style={styles.prefsSaveTxt}>SALVA</Text>}
+              </Pressable>
+            </KeyboardAvoidingView>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -303,7 +504,28 @@ export default function Profile() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.surface },
   content: { paddingBottom: spacing.xxxl },
-  header: { padding: spacing.lg, backgroundColor: colors.surfaceInverse, borderBottomWidth: 2, borderColor: colors.border },
+  header: { padding: spacing.lg, backgroundColor: colors.surfaceInverse, borderBottomWidth: 2, borderColor: colors.border, gap: spacing.md },
+  headerRow: { flexDirection: "row", alignItems: "center", gap: spacing.md },
+  avatarWrap: { position: "relative" },
+  avatarImg: { width: 80, height: 80, borderWidth: 2, borderColor: colors.brandSecondary, backgroundColor: colors.surfaceInverse },
+  avatarPlaceholder: { alignItems: "center", justifyContent: "center" },
+  avatarEditBadge: { position: "absolute", right: -4, bottom: -4, width: 22, height: 22, borderRadius: 11, backgroundColor: colors.brandPrimary, borderWidth: 2, borderColor: colors.surfaceInverse, alignItems: "center", justifyContent: "center" },
+  headerBio: { fontSize: font.sizes.base, color: colors.onSurfaceInverse, lineHeight: 20, borderLeftWidth: 2, borderColor: colors.brandSecondary, paddingLeft: spacing.sm },
+  headerEditBtn: { flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start", borderWidth: 2, borderColor: colors.brandSecondary, paddingHorizontal: spacing.sm, paddingVertical: 6 },
+  headerEditTxt: { fontSize: font.sizes.xs, letterSpacing: 1, fontWeight: "500", color: colors.brandSecondary },
+  editSectionTitle: { fontSize: font.sizes.sm, letterSpacing: 2, fontWeight: "500", color: colors.brandPrimary },
+  photosGrid: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, marginTop: spacing.xs },
+  photoBox: { width: 90, height: 90, borderWidth: 2, borderColor: colors.border, position: "relative", overflow: "hidden", backgroundColor: colors.surfaceSecondary },
+  photoImg: { width: "100%", height: "100%" },
+  primaryBadge: { position: "absolute", top: 4, left: 4, width: 20, height: 20, backgroundColor: colors.brandSecondary, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.border },
+  photoActions: { position: "absolute", bottom: 4, right: 4, flexDirection: "row", gap: 4 },
+  photoAct: { width: 26, height: 26, borderWidth: 2, borderColor: colors.border, backgroundColor: colors.surface, alignItems: "center", justifyContent: "center" },
+  photoAdd: { alignItems: "center", justifyContent: "center", gap: 4, backgroundColor: colors.surfaceSecondary, borderStyle: "dashed" },
+  photoAddTxt: { fontSize: 10, letterSpacing: 1, color: colors.onSurface, fontWeight: "500" },
+  bioInput: { borderWidth: 2, borderColor: colors.border, padding: spacing.sm, minHeight: 90, fontSize: font.sizes.base, color: colors.onSurface, backgroundColor: colors.surfaceSecondary, textAlignVertical: "top" },
+  socialField: { gap: 4 },
+  socialFieldLabel: { fontSize: font.sizes.xs, letterSpacing: 1, color: colors.muted },
+  socialInput: { borderWidth: 2, borderColor: colors.border, padding: spacing.sm, fontSize: font.sizes.base, color: colors.onSurface, backgroundColor: colors.surfaceSecondary },
   brand: { color: colors.onSurfaceInverse, fontSize: font.sizes.xxxl, letterSpacing: 2, fontWeight: "500" },
   nickname: { color: colors.brandSecondary, fontSize: font.sizes.xl, marginTop: spacing.sm },
   provider: { color: colors.onSurfaceInverse, fontSize: font.sizes.sm, opacity: 0.7, marginTop: spacing.xs },

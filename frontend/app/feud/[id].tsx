@@ -266,10 +266,13 @@ function CommentItem({
   replyText: string; setReplyText: (v: string) => void;
   onSubmitReply: () => void; canReply: boolean;
 }) {
+  const router = useRouter();
   const isReplying = replyingTo === c.comment_id;
   return (
     <View style={cs.item} testID={`comment-${c.comment_id}`}>
-      <Text style={[cs.nick, { color: sideColor(c.side) }]}>@{c.nickname}</Text>
+      <Pressable onPress={() => router.push(`/user/${c.user_id}`)} testID={`comment-user-${c.user_id}`}>
+        <Text style={[cs.nick, { color: sideColor(c.side) }]}>@{c.nickname}</Text>
+      </Pressable>
       <Text style={cs.text}>{c.text}</Text>
       <View style={cs.actions}>
         <Pressable onPress={onToggle}>
@@ -287,7 +290,9 @@ function CommentItem({
         <View style={cs.replies}>
           {expanded.map((r) => (
             <View key={r.reply_id} style={cs.reply}>
-              <Text style={[cs.nick, { color: sideColor(r.side), fontSize: font.sizes.xs }]}>@{r.nickname}</Text>
+              <Pressable onPress={() => router.push(`/user/${r.user_id}`)}>
+                <Text style={[cs.nick, { color: sideColor(r.side), fontSize: font.sizes.xs }]}>@{r.nickname}</Text>
+              </Pressable>
               <Text style={[cs.text, { fontSize: font.sizes.xs }]}>{r.text}</Text>
             </View>
           ))}
