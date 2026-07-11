@@ -1,12 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import {
   View, Text, StyleSheet, Pressable, ActivityIndicator, ScrollView, Image, Linking,
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { api, PublicUser } from "@/src/api";
-import { colors, spacing, font } from "@/src/theme";
+import { api, PublicUser, HistoryItem } from "@/src/api";
+import { colors, spacing, font, sideColor } from "@/src/theme";
 
 const SOCIAL_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
   instagram: "logo-instagram",
@@ -23,6 +23,8 @@ const SOCIAL_LABELS: Record<string, string> = {
   website: "Sito",
 };
 
+type HFilter = "all" | "majority" | "minority";
+
 export default function UserPublicScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
@@ -30,6 +32,9 @@ export default function UserPublicScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [idx, setIdx] = useState(0);
+  const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [loadingH, setLoadingH] = useState(false);
+  const [filter, setFilter] = useState<HFilter>("all");
 
   useEffect(() => {
     if (!id) return;
@@ -37,13 +42,26 @@ export default function UserPublicScreen() {
       try {
         const r = await api.publicUser(id);
         setProfile(r);
-        // Start on primary photo
         const pIdx = r.photos.findIndex((p: any) => p.photo_id === r.primary_photo_id);
         setIdx(pIdx >= 0 ? pIdx : 0);
       } catch (e: any) { setError(e?.message || "Errore"); }
       finally { setLoading(false); }
     })();
   }, [id]);
+
+  const loadHistory = useCallback(async (uid: string, f: HFilter) => {
+    setLoadingH(true);
+    try {
+      const r = await api.publicUserHistory(uid, f);
+      setHistory(r.history || []);
+    } catch { setHistory([]); }
+    finally { setLoadingH(false); }
+  }, []);
+
+  useEffect(() => {
+    if (!id) return;
+    loadHistory(id, filter);
+  }, [id, filter, loadHistory]);
 
   if (loading) {
     return (
@@ -149,6 +167,74 @@ export default function UserPublicScreen() {
               ))}
             </View>
           )}
+
+          <View style={styles.section} testID="public-history-section">
+            <Text style={styles.sectionTitle}>STORICO VOTI</Text>
+            <View style={styles.filterRow}>
+              {(["all", "majority", "minority"] as HFilter[]).map((f) => (
+                <Pressable
+                  key={f}
+                  onPress={() => setFilter(f)}
+                  testID={`public-filter-${f}`}
+                  style={[
+                    styles.filterChip,
+                    filter === f && (
+                      f === "majority" ? { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary } :
+                      f === "minority" ? { backgroundColor: colors.brandSecondary, borderColor: colors.brandSecondary } :
+                      { backgroundColor: colors.surfaceInverse, borderColor: colors.surfaceInverse }
+                    ),
+                  ]}
+                >
+                  <Text style={[
+                    styles.filterTxt,
+                    filter === f && (
+                      f === "minority" ? { color: colors.onBrandSecondary } : { color: "#FFFFFF" }
+                    ),
+                  ]}>
+                    {f === "all" ? "TUTTI" : f === "majority" ? "MAGGIORANZA" : "MINORANZA"}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+
+            {loadingH ? (
+              <View style={{ paddingVertical: spacing.lg, alignItems: "center" }}>
+                <ActivityIndicator color={colors.brandPrimary} />
+              </View>
+            ) : history.length === 0 ? (
+              <Text style={styles.emptyH} testID="public-history-empty">
+                Nessun voto in questa categoria.
+              </Text>
+            ) : (
+              <View style={styles.historyList}>
+                {history.map((h) => {
+                  const votedName = h.side_voted === "A" ? h.party_a : h.party_b;
+                  return (
+                    <Pressable
+                      key={h.feud_id + h.voted_at}
+                      style={styles.historyItem}
+                      onPress={() => router.push(`/feud/${h.feud_id}`)}
+                      testID={`public-history-${h.feud_id}`}
+                    >
+                      <View style={[styles.sideBar, { backgroundColor: sideColor(h.side_voted) }]} />
+                      <View style={{ flex: 1, padding: spacing.sm }}>
+                        <Text style={styles.hCat}>{h.category_label.toUpperCase()}</Text>
+                        <Text style={styles.hTitle} numberOfLines={2}>{h.title}</Text>
+                        <View style={styles.hMetaRow}>
+                          <Text style={[styles.hVoted, { color: sideColor(h.side_voted) }]} numberOfLines={1}>
+                            Ha votato: {votedName}
+                          </Text>
+                          <Text style={[styles.hBadge, h.aligned ? styles.hBadgeMaj : styles.hBadgeMin]}>
+                            {h.aligned ? "MAGGIORANZA" : "MINORANZA"}
+                          </Text>
+                        </View>
+                      </View>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            )}
+          </View>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -183,4 +269,18 @@ const styles = StyleSheet.create({
   socialRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, borderWidth: 2, borderColor: colors.border, padding: spacing.sm, backgroundColor: colors.surfaceSecondary },
   socialLabel: { fontSize: font.sizes.sm, letterSpacing: 1, color: colors.onSurface, fontWeight: "500" },
   socialUrl: { fontSize: font.sizes.xs, color: colors.muted, marginTop: 2 },
+  filterRow: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.xs },
+  filterChip: { flex: 1, borderWidth: 2, borderColor: colors.border, paddingVertical: spacing.sm, alignItems: "center", backgroundColor: colors.surfaceSecondary },
+  filterTxt: { fontSize: font.sizes.xs, letterSpacing: 1, color: colors.onSurface, fontWeight: "500" },
+  emptyH: { paddingVertical: spacing.lg, color: colors.muted, fontSize: font.sizes.base, textAlign: "center" },
+  historyList: { gap: spacing.sm, marginTop: spacing.sm },
+  historyItem: { flexDirection: "row", borderWidth: 2, borderColor: colors.border, backgroundColor: colors.surfaceSecondary, overflow: "hidden" },
+  sideBar: { width: 8 },
+  hCat: { fontSize: font.sizes.xs, letterSpacing: 2, color: colors.muted },
+  hTitle: { fontSize: font.sizes.base, color: colors.onSurface, marginTop: 2, lineHeight: 18 },
+  hMetaRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: spacing.xs, flexWrap: "wrap", gap: spacing.xs },
+  hVoted: { fontSize: font.sizes.xs, fontWeight: "500", flexShrink: 1 },
+  hBadge: { fontSize: font.sizes.xs, letterSpacing: 1, paddingHorizontal: 6, paddingVertical: 2, borderWidth: 1, borderColor: colors.border },
+  hBadgeMaj: { backgroundColor: colors.brandPrimary, color: colors.onBrandPrimary },
+  hBadgeMin: { backgroundColor: colors.brandSecondary, color: colors.onBrandSecondary },
 });

@@ -1,0 +1,29 @@
+{
+  "summary": "Testing for two features: (1) removed standalone 'PROFILO' title from own profile header; (2) new public voting history endpoint + UI on user profile pages. Backend: 7/7 pytest tests PASS in /app/backend/tests/test_public_history.py (404 for unknown user, all/majority/minority filters with 3-vote sample, sorted newest first, item shape validated, /users/me/history regression preserved). Frontend: all mobile-viewport assertions PASS — profile-screen renders, profile-nickname is the first prominent text in the header (no standalone 'PROFILO' title above it), profile-edit-button visible; public /user/<id> renders public-user-screen and public-history-section with 3 history items showing category label + title + 'Ha votato: <party>' + MAGGIORANZA badge; MAGGIORANZA filter shows all 3 items (all aligned), MINORANZA filter shows public-history-empty with 0 items; clicking a history item navigates to /feud/<id>. Regression: clicking comment-user-<id> in feud detail navigates to /user/<id> and the public-history-section renders correctly for that user.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_public_history.py",
+    "/app/test_reports/pytest/public_history_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Backend: /users/me/history is declared BEFORE /users/{user_id}/history so FastAPI route ordering is correct — /me does not get shadowed. Verified by test_my_history_still_works.",
+    "Backend duplication: the body of /users/me/history and /users/{user_id}/history is ~30 lines of identical vote->feud aggregation logic. Consider extracting to a helper (e.g., _build_history_for(user_id, filter)) to keep DRY.",
+    "Public history endpoint returns votes for anonymous users too (no privacy toggle). If public exposure of voting history is a concern, consider adding a user-level 'private_history' flag; not blocking for MVP.",
+    "profile.tsx is still ~677 lines — approaching the 700-line soft cap. Extracting ProfileEditModal/PrefsModal into separate components is still a good future refactor.",
+    "user/[id].tsx: publicUserHistory uses catch-all `catch { setHistory([]) }` — silently masks errors. Consider surfacing a lightweight error state to the user, though empty-list behavior is acceptable UX."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (7/7 pytest)", "frontend": "100% (all assertions across profile header + public profile + regression)"},
+  "seed_data_creation": "Per-run signup accounts: histtest_<ts>@test.dev, histfe_<ts>@test.dev, histfe2_<ts>@test.dev, histrg_<ts>@test.dev (all password Testing123!). No persistent seed created; MongoDB accumulates test users — cleanup could be added later if desired.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Preview URL: https://team-pick.preview.emergentagent.com. Backend URL (external): same origin, /api prefix. Auth token storage on web is AsyncStorage which under the hood uses localStorage — set BOTH keys to be safe: localStorage.setItem('faide_token', JSON.stringify(token)) AND localStorage.setItem('@AsyncStorage:faide_token', JSON.stringify(token)). Feature-1 assertion technique: use DOM Range from profile-screen start up to profile-badge to slice header textContent, then regex for 'PROFILO' excluding 'MODIFICA PROFILO' and 'PROFILO BLOCCATO' (anonymous banner). Backend routes used: POST /api/auth/signup, PATCH /api/auth/me/profile, GET /api/feuds, POST /api/feuds/{id}/vote, POST /api/feuds/{id}/comments, GET /api/users/{user_id}/history (no auth), GET /api/users/me/history (Bearer). Public history endpoint file location: /app/backend/server.py lines 838-872. Frontend public profile: /app/frontend/app/user/[id].tsx (uses api.publicUserHistory at /app/frontend/src/api.ts:73).",
+  "rca_of_issue": "N/A — both features implemented correctly and verified. No bugs found."
+}

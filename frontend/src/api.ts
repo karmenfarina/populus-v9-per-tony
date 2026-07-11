@@ -70,6 +70,8 @@ export const api = {
   setPrimaryPhoto: (id: string) => request(`/auth/me/photos/${id}/primary`, { method: 'PATCH' }),
   deletePhoto: (id: string) => request(`/auth/me/photos/${id}`, { method: 'DELETE' }),
   publicUser: (id: string) => request(`/users/${id}`),
+  publicUserHistory: (id: string, filter: 'all' | 'majority' | 'minority' = 'all') =>
+    request(`/users/${id}/history?filter=${filter}`),
 };
 
 export type User = {

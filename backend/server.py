@@ -835,6 +835,44 @@ async def my_history(filter: str = 'all', user: dict = Depends(get_current_user)
 
 
 
+@api_router.get('/users/{user_id}/history')
+async def public_user_history(user_id: str, filter: str = 'all'):
+    u = await db.users.find_one({'user_id': user_id}, {'_id': 0, 'user_id': 1})
+    if not u:
+        raise HTTPException(status_code=404, detail='Utente non trovato')
+    votes = await db.votes.find({'user_id': user_id}, {'_id': 0}).sort('created_at', -1).to_list(1000)
+    items = []
+    for v in votes:
+        feud = await db.feuds.find_one({'feud_id': v['feud_id']}, {'_id': 0})
+        if not feud:
+            continue
+        a = feud.get('votes_a', 0)
+        b = feud.get('votes_b', 0)
+        if a == b:
+            winning_side = None
+            aligned = True
+        else:
+            winning_side = 'A' if a > b else 'B'
+            aligned = (v['side'] == winning_side)
+        if filter == 'majority' and not aligned:
+            continue
+        if filter == 'minority' and aligned:
+            continue
+        items.append({
+            'feud_id': feud['feud_id'],
+            'title': feud['title'],
+            'category_label': feud['category_label'],
+            'party_a': feud['party_a'],
+            'party_b': feud['party_b'],
+            'side_voted': v['side'],
+            'winning_side': winning_side,
+            'aligned': aligned,
+            'voted_at': v['created_at'].isoformat() if isinstance(v['created_at'], datetime) else v['created_at'],
+        })
+    return {'history': items}
+
+
+
 @api_router.get('/feuds/{feud_id}/comments')
 async def get_comments(feud_id: str):
     docs = await db.comments.find({'feud_id': feud_id}, {'_id': 0}).sort('created_at', -1).to_list(500)

@@ -259,7 +259,6 @@ export default function Profile() {
               </Pressable>
             )}
             <View style={{ flex: 1 }}>
-              <Text style={styles.brand}>PROFILO</Text>
               <Text style={styles.nickname} testID="profile-nickname">@{user.nickname}</Text>
               <Text style={styles.provider}>
                 {user.auth_provider === "email" ? "Email" : user.auth_provider === "google" ? "Google" : "Anonimo"}
@@ -617,7 +616,7 @@ const styles = StyleSheet.create({
   socialFieldLabel: { fontSize: font.sizes.xs, letterSpacing: 1, color: colors.muted },
   socialInput: { borderWidth: 2, borderColor: colors.border, padding: spacing.sm, fontSize: font.sizes.base, color: colors.onSurface, backgroundColor: colors.surfaceSecondary },
   brand: { color: colors.onSurfaceInverse, fontSize: font.sizes.xxxl, letterSpacing: 2, fontWeight: "500" },
-  nickname: { color: colors.brandSecondary, fontSize: font.sizes.xl, marginTop: spacing.sm },
+  nickname: { color: colors.brandSecondary, fontSize: font.sizes.xxl, fontWeight: "500" },
   provider: { color: colors.onSurfaceInverse, fontSize: font.sizes.sm, opacity: 0.7, marginTop: spacing.xs },
   badgeBlock: { alignItems: "center", padding: spacing.xl, borderBottomWidth: 2, borderColor: colors.border },
   badgeIcon: { width: 140, height: 140, borderWidth: 2, borderColor: colors.border, backgroundColor: colors.surfaceTertiary, alignItems: "center", justifyContent: "center" },
