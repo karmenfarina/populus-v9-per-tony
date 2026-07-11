@@ -15,6 +15,7 @@ export default function Index() {
   }
 
   if (!user) return <Redirect href="/auth" />;
+  if (!user.onboarding_completed) return <Redirect href="/onboarding" />;
   return <Redirect href="/(tabs)" />;
 }
 

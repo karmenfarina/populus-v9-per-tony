@@ -127,6 +127,13 @@ class GoogleSessionBody(BaseModel):
     session_id: str
 
 
+class ProfileBody(BaseModel):
+    age: int = Field(ge=13, le=120)
+    sex: Literal['F', 'M', 'other', 'na']
+    region: str = Field(min_length=2, max_length=40)
+    favorite_categories: List[str] = Field(min_length=1)
+
+
 class VoteBody(BaseModel):
     side: Literal['A', 'B']
 
@@ -160,6 +167,11 @@ def _public_user(u: dict) -> dict:
         'majority_votes': u.get('majority_votes', 0),
         'minority_votes': u.get('minority_votes', 0),
         'total_votes': u.get('total_votes', 0),
+        'age': u.get('age'),
+        'sex': u.get('sex'),
+        'region': u.get('region'),
+        'favorite_categories': u.get('favorite_categories', []),
+        'onboarding_completed': bool(u.get('onboarding_completed', False)),
         'badge': compute_badge(u),
     }
 
@@ -245,6 +257,37 @@ async def google_session(body: GoogleSessionBody):
 @api_router.get('/auth/me')
 async def me(user: dict = Depends(get_current_user)):
     return {'user': _public_user(user)}
+
+
+VALID_CATEGORY_IDS = {'politica', 'tv', 'musica', 'sport', 'cinema', 'social', 'gossip'}
+ITALIAN_REGIONS = {
+    'Abruzzo', 'Basilicata', 'Calabria', 'Campania', 'Emilia-Romagna',
+    'Friuli-Venezia Giulia', 'Lazio', 'Liguria', 'Lombardia', 'Marche',
+    'Molise', 'Piemonte', 'Puglia', 'Sardegna', 'Sicilia', 'Toscana',
+    "Trentino-Alto Adige", 'Umbria', "Valle d'Aosta", 'Veneto', 'Altro',
+}
+
+
+@api_router.patch('/auth/me/profile')
+async def update_profile(body: ProfileBody, user: dict = Depends(get_current_user)):
+    invalid = [c for c in body.favorite_categories if c not in VALID_CATEGORY_IDS]
+    if invalid:
+        raise HTTPException(status_code=400, detail=f"Categorie non valide: {', '.join(invalid)}")
+    if body.region not in ITALIAN_REGIONS:
+        raise HTTPException(status_code=400, detail='Regione non valida')
+    await db.users.update_one(
+        {'user_id': user['user_id']},
+        {'$set': {
+            'age': body.age,
+            'sex': body.sex,
+            'region': body.region,
+            'favorite_categories': body.favorite_categories,
+            'onboarding_completed': True,
+            'profile_updated_at': now_utc(),
+        }},
+    )
+    updated = await db.users.find_one({'user_id': user['user_id']}, {'_id': 0})
+    return {'user': _public_user(updated)}
 
 
 @api_router.post('/auth/logout')

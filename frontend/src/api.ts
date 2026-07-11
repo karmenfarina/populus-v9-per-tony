@@ -61,6 +61,8 @@ export const api = {
     request(`/users/me/history?filter=${filter}`),
   search: (q: string) => request(`/search?q=${encodeURIComponent(q)}`),
   share: (id: string) => request(`/share/${id}`),
+  updateProfile: (body: { age: number; sex: 'F'|'M'|'other'|'na'; region: string; favorite_categories: string[] }) =>
+    request('/auth/me/profile', { method: 'PATCH', body: JSON.stringify(body) }),
 };
 
 export type User = {
@@ -71,6 +73,11 @@ export type User = {
   majority_votes: number;
   minority_votes: number;
   total_votes: number;
+  age?: number | null;
+  sex?: 'F' | 'M' | 'other' | 'na' | null;
+  region?: string | null;
+  favorite_categories?: string[];
+  onboarding_completed?: boolean;
   badge: {
     unlocked: boolean;
     type?: 'buon_senso' | 'bastian_contrario';

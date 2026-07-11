@@ -32,7 +32,9 @@ export default function AuthScreen() {
       } else if (mode === "google") {
         await loginWithGoogle();
       }
-      router.replace("/(tabs)");
+      // Route based on onboarding: index.tsx will handle deep redirect on next mount,
+      // but here we push explicitly for immediacy.
+      router.replace("/");
     } catch (e: any) {
       setError(e?.message || "Errore");
     } finally { setLoading(false); }
