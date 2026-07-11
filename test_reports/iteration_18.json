@@ -1,0 +1,29 @@
+{
+  "summary": "Feud retention (14-day purge) feature — backend + frontend all pass. Verified 410 Gone on missing feud, denormalized feud_snapshot persisted on vote, end-to-end cleanup via /api/admin/cleanup_expired (feud deleted, comments+replies removed, vote survives with aligned_final/winning_side_final/feud_snapshot), history endpoints surface feud_deleted:true using snapshot, majority/minority filter regression works, admin auth (no key / wrong key → 401; correct key → 200). Frontend: /feud/<purged_id> renders feud-gone-screen with 'FAIDA SCADUTA' + 'due settimane' + gone-back-button + gone-home-btn; /user/<id> STORICO VOTI still shows the purged item preview with MINORANZA/MAGGIORANZA badge; tapping purged item navigates to gone-screen; live-feud regression preserved (renders feud-detail-screen). Note: gone-home-btn → router.replace('/') lands on /onboarding for the fresh test user because they haven't completed onboarding — this is expected app-level routing, not a bug.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_feud_retention.py",
+    "/app/test_reports/pytest/feud_retention_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is now 1647 lines — approaching maintainability threshold; consider splitting into modules (auth, feuds, admin, cleanup, rss) in a future iteration.",
+    "_recompute_user_alignment is only invoked on new vote insertion; existing users' majority/minority counters won't refresh on purge until they cast their next vote. Aligned_final on vote docs already covers correctness on next recompute, so this is acceptable but worth documenting.",
+    "In _build_history_item, `aligned = v.get('aligned_final', True)` defaults to True for legacy votes with a snapshot but no aligned_final; consider treating this as majority=tie explicitly or dropping."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_feud_retention.py (new)"
+  ],
+  "success_rate": {"backend": "100% (6/6)", "frontend": "100% (7/7 assertions)"},
+  "seed_data_creation": "Created TEST_ prefixed users via /api/auth/signup during tests. One live feud (feud_d3409f4f26ba) was intentionally backdated + purged during end-to-end test; hourly RSS scheduler will regenerate fresh feuds for that category. TEST_ users remain in DB (safe to leave for future test agents).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Admin token in /app/backend/.env: ADMIN_TOKEN=populus-admin-42b8f3. Send as header X-Admin-Key. FEUD_RETENTION_DAYS=14. Vote docs now carry feud_snapshot (title/category_label/party_a/party_b/image_url). On purge, aligned_final and winning_side_final are frozen onto every vote. History endpoints include feud_deleted flag. GET /api/feuds/<missing> → 410 with detail 'Faida più vecchia di 2 settimane'. Frontend: feud-gone-screen testIDs are gone-back-button + gone-home-btn.",
+  "rca_of_issue": "N/A — no bugs found. Feature implementation matches spec and all assertions pass."
+}

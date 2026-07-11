@@ -720,7 +720,13 @@ async def share_feud_html(feud_id: str, request: Request = None):
 async def get_feud(feud_id: str, user: Optional[dict] = Depends(get_current_user_optional)):
     doc = await db.feuds.find_one({'feud_id': feud_id}, {'_id': 0})
     if not doc:
-        raise HTTPException(status_code=404, detail='Faida non trovata')
+        # Faide are purged from the DB after FEUD_RETENTION_DAYS days (see the
+        # scheduler cleanup task). Return 410 Gone so the frontend can render
+        # the "faida più vecchia di 2 settimane" screen.
+        raise HTTPException(
+            status_code=410,
+            detail='Faida più vecchia di 2 settimane',
+        )
     my_vote = None
     if user:
         vote = await db.votes.find_one({'feud_id': feud_id, 'user_id': user['user_id']}, {'_id': 0})
@@ -737,6 +743,12 @@ async def _recompute_user_alignment(user_id: str):
     for v in votes:
         feud = await db.feuds.find_one({'feud_id': v['feud_id']}, {'_id': 0})
         if not feud:
+            # Feud purged — use frozen aligned bit captured at purge time.
+            if 'aligned_final' in v:
+                if v['aligned_final']:
+                    maj += 1
+                else:
+                    minr += 1
             continue
         a = feud.get('votes_a', 0)
         b = feud.get('votes_b', 0)
@@ -819,6 +831,15 @@ async def vote_feud(feud_id: str, body: VoteBody, user: dict = Depends(get_curre
     await db.votes.insert_one({
         'vote_id': new_id('vote'), 'feud_id': feud_id, 'user_id': user['user_id'],
         'side': body.side, 'created_at': now_utc(),
+        # Denormalized snapshot — allows history to render feud preview even after
+        # the feud is purged from `feuds` (retention: 14 days).
+        'feud_snapshot': {
+            'title': feud.get('title'),
+            'category_label': feud.get('category_label'),
+            'party_a': feud.get('party_a'),
+            'party_b': feud.get('party_b'),
+            'image_url': feud.get('image_url'),
+        },
     })
     inc_field = 'votes_a' if body.side == 'A' else 'votes_b'
     await db.feuds.update_one({'feud_id': feud_id}, {'$inc': {inc_field: 1}})
@@ -863,14 +884,39 @@ async def seed_sponsors_if_empty():
 
 # ----------------------- Voting History -----------------------
 
-@api_router.get('/users/me/history')
-async def my_history(filter: str = 'all', user: dict = Depends(get_current_user)):
-    votes = await db.votes.find({'user_id': user['user_id']}, {'_id': 0}).sort('created_at', -1).to_list(1000)
-    items = []
-    for v in votes:
-        feud = await db.feuds.find_one({'feud_id': v['feud_id']}, {'_id': 0})
-        if not feud:
-            continue
+FEUD_RETENTION_DAYS = 14
+
+
+def _snapshot_from_vote(v: dict) -> Optional[dict]:
+    """Return the denormalized feud info stored on the vote (may be missing for
+    votes created before the snapshot column existed)."""
+    snap = v.get('feud_snapshot') or {}
+    if not snap.get('title'):
+        return None
+    return snap
+
+
+async def _build_history_item(v: dict) -> Optional[dict]:
+    """Assemble a single history entry for a vote — falls back to the
+    denormalized snapshot when the underlying feud has been purged."""
+    feud = await db.feuds.find_one({'feud_id': v['feud_id']}, {'_id': 0})
+    feud_deleted = feud is None
+    if feud_deleted:
+        snap = _snapshot_from_vote(v)
+        if not snap:
+            return None  # legacy vote without snapshot AND feud gone → skip
+        title = snap['title']
+        cat_label = snap['category_label']
+        party_a = snap['party_a']
+        party_b = snap['party_b']
+        # Winning side frozen at deletion time (if available) OR unknown.
+        winning_side = v.get('winning_side_final')
+        aligned = v.get('aligned_final', True)
+    else:
+        title = feud['title']
+        cat_label = feud['category_label']
+        party_a = feud['party_a']
+        party_b = feud['party_b']
         a = feud.get('votes_a', 0)
         b = feud.get('votes_b', 0)
         if a == b:
@@ -879,23 +925,38 @@ async def my_history(filter: str = 'all', user: dict = Depends(get_current_user)
         else:
             winning_side = 'A' if a > b else 'B'
             aligned = (v['side'] == winning_side)
-        if filter == 'majority' and not aligned:
-            continue
-        if filter == 'minority' and aligned:
-            continue
-        items.append({
-            'feud_id': feud['feud_id'],
-            'title': feud['title'],
-            'category_label': feud['category_label'],
-            'party_a': feud['party_a'],
-            'party_b': feud['party_b'],
-            'side_voted': v['side'],
-            'winning_side': winning_side,
-            'aligned': aligned,
-            'voted_at': v['created_at'].isoformat() if isinstance(v['created_at'], datetime) else v['created_at'],
-        })
-    return {'history': items}
+    return {
+        'feud_id': v['feud_id'],
+        'title': title,
+        'category_label': cat_label,
+        'party_a': party_a,
+        'party_b': party_b,
+        'side_voted': v['side'],
+        'winning_side': winning_side,
+        'aligned': aligned,
+        'feud_deleted': feud_deleted,
+        'voted_at': v['created_at'].isoformat() if isinstance(v['created_at'], datetime) else v['created_at'],
+    }
 
+
+async def _history_for_user(user_id: str, filter: str) -> list:
+    votes = await db.votes.find({'user_id': user_id}, {'_id': 0}).sort('created_at', -1).to_list(1000)
+    items = []
+    for v in votes:
+        it = await _build_history_item(v)
+        if not it:
+            continue
+        if filter == 'majority' and not it['aligned']:
+            continue
+        if filter == 'minority' and it['aligned']:
+            continue
+        items.append(it)
+    return items
+
+
+@api_router.get('/users/me/history')
+async def my_history(filter: str = 'all', user: dict = Depends(get_current_user)):
+    return {'history': await _history_for_user(user['user_id'], filter)}
 
 
 @api_router.get('/users/{user_id}/history')
@@ -903,36 +964,7 @@ async def public_user_history(user_id: str, filter: str = 'all'):
     u = await db.users.find_one({'user_id': user_id}, {'_id': 0, 'user_id': 1})
     if not u:
         raise HTTPException(status_code=404, detail='Utente non trovato')
-    votes = await db.votes.find({'user_id': user_id}, {'_id': 0}).sort('created_at', -1).to_list(1000)
-    items = []
-    for v in votes:
-        feud = await db.feuds.find_one({'feud_id': v['feud_id']}, {'_id': 0})
-        if not feud:
-            continue
-        a = feud.get('votes_a', 0)
-        b = feud.get('votes_b', 0)
-        if a == b:
-            winning_side = None
-            aligned = True
-        else:
-            winning_side = 'A' if a > b else 'B'
-            aligned = (v['side'] == winning_side)
-        if filter == 'majority' and not aligned:
-            continue
-        if filter == 'minority' and aligned:
-            continue
-        items.append({
-            'feud_id': feud['feud_id'],
-            'title': feud['title'],
-            'category_label': feud['category_label'],
-            'party_a': feud['party_a'],
-            'party_b': feud['party_b'],
-            'side_voted': v['side'],
-            'winning_side': winning_side,
-            'aligned': aligned,
-            'voted_at': v['created_at'].isoformat() if isinstance(v['created_at'], datetime) else v['created_at'],
-        })
-    return {'history': items}
+    return {'history': await _history_for_user(user_id, filter)}
 
 
 
@@ -1107,6 +1139,15 @@ AGE_BUCKETS = [
     ('55-64', 55, 65),
     ('65+', 65, 121),
 ]
+
+
+@api_router.post('/admin/cleanup_expired')
+async def admin_cleanup(_: bool = Depends(require_admin)):
+    """Manually trigger expired-feud cleanup (also runs hourly via scheduler)."""
+    before = await db.feuds.count_documents({})
+    await _cleanup_expired_feuds()
+    after = await db.feuds.count_documents({})
+    return {'purged': before - after, 'remaining': after}
 
 
 @api_router.get('/admin/stats')
@@ -1498,6 +1539,50 @@ async def on_startup():
     _asyncio.create_task(_daily_generation_loop())
 
 
+async def _cleanup_expired_feuds() -> None:
+    """Delete feuds (and related comments/replies) older than FEUD_RETENTION_DAYS.
+    Before removing each feud, freeze final `aligned_final`/`winning_side_final`
+    onto every vote so the voting history keeps rendering the preview + badge."""
+    cutoff = now_utc() - timedelta(days=FEUD_RETENTION_DAYS)
+    expired = await db.feuds.find({'created_at': {'$lt': cutoff}}, {'_id': 0}).to_list(500)
+    for f in expired:
+        fid = f['feud_id']
+        a = f.get('votes_a', 0)
+        b = f.get('votes_b', 0)
+        if a == b:
+            winning_side = None
+            tie = True
+        else:
+            winning_side = 'A' if a > b else 'B'
+            tie = False
+        # Freeze snapshot + alignment on each vote
+        votes_cur = db.votes.find({'feud_id': fid}, {'_id': 0, 'vote_id': 1, 'side': 1, 'feud_snapshot': 1})
+        async for v in votes_cur:
+            aligned = True if tie else (v['side'] == winning_side)
+            update: dict = {
+                'aligned_final': aligned,
+                'winning_side_final': winning_side,
+            }
+            if not v.get('feud_snapshot'):
+                update['feud_snapshot'] = {
+                    'title': f.get('title'),
+                    'category_label': f.get('category_label'),
+                    'party_a': f.get('party_a'),
+                    'party_b': f.get('party_b'),
+                    'image_url': f.get('image_url'),
+                }
+            await db.votes.update_one({'vote_id': v['vote_id']}, {'$set': update})
+        # Delete replies for comments of this feud, then comments, then the feud.
+        comments = await db.comments.find({'feud_id': fid}, {'_id': 0, 'comment_id': 1}).to_list(2000)
+        if comments:
+            comment_ids = [c['comment_id'] for c in comments]
+            await db.replies.delete_many({'comment_id': {'$in': comment_ids}})
+        await db.comments.delete_many({'feud_id': fid})
+        await db.feuds.delete_one({'feud_id': fid})
+    if expired:
+        logger.info(f"cleanup: purged {len(expired)} feuds older than {FEUD_RETENTION_DAYS} days")
+
+
 async def _daily_generation_loop():
     """Every hour, ensure each category has at least one fresh feud from the last 24 hours.
     Skip generation for categories that already have a fresh feud. This uses the RSS+dedup
@@ -1533,6 +1618,11 @@ async def _daily_generation_loop():
                 {'$set': {'key': 'last_scheduler_run', 'at': now_utc()}},
                 upsert=True,
             )
+            # Purge feuds older than the retention window (2 weeks).
+            try:
+                await _cleanup_expired_feuds()
+            except Exception as e:
+                logger.warning(f"cleanup error: {e}")
         except Exception as e:
             logger.warning(f"scheduler loop error: {e}")
         await _asyncio.sleep(3600)  # check hourly

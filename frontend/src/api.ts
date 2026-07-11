@@ -15,6 +15,16 @@ export async function setToken(token: string | null) {
   }
 }
 
+export class ApiError extends Error {
+  status: number;
+  detail: string;
+  constructor(status: number, detail: string) {
+    super(detail);
+    this.status = status;
+    this.detail = detail;
+  }
+}
+
 async function request<T = any>(path: string, opts: RequestInit = {}): Promise<T> {
   const token = await getToken();
   const headers: Record<string, string> = {
@@ -28,7 +38,8 @@ async function request<T = any>(path: string, opts: RequestInit = {}): Promise<T
   try { data = text ? JSON.parse(text) : null; } catch { data = text; }
   if (!res.ok) {
     const detail = (data && (data.detail || data.message)) || `HTTP ${res.status}`;
-    throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail));
+    const message = typeof detail === 'string' ? detail : JSON.stringify(detail);
+    throw new ApiError(res.status, message);
   }
   return data as T;
 }
@@ -141,6 +152,7 @@ export type HistoryItem = {
   side_voted: 'A' | 'B';
   winning_side: 'A' | 'B' | null;
   aligned: boolean;
+  feud_deleted?: boolean;
   voted_at: string;
 };
 

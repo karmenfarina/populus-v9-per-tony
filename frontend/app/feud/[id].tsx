@@ -8,7 +8,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import { api, Comment, Feud, Reply, Sponsor } from "@/src/api";
+import { api, ApiError, Comment, Feud, Reply, Sponsor } from "@/src/api";
 import { colors, spacing, font, sideColor, onSideColor } from "@/src/theme";
 
 export default function FeudDetail() {
@@ -23,6 +23,7 @@ export default function FeudDetail() {
   const [commentText, setCommentText] = useState("");
   const [posting, setPosting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [gone, setGone] = useState(false);
   const [expanded, setExpanded] = useState<Record<string, Reply[]>>({});
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
   const [replyText, setReplyText] = useState("");
@@ -41,7 +42,13 @@ export default function FeudDetail() {
   useEffect(() => {
     (async () => {
       try { await loadAll(); }
-      catch (e: any) { setError(e?.message || "Errore"); }
+      catch (e: any) {
+        if (e instanceof ApiError && (e.status === 410 || e.status === 404)) {
+          setGone(true);
+        } else {
+          setError(e?.message || "Errore");
+        }
+      }
       finally { setLoading(false); }
     })();
   }, [loadAll]);
@@ -104,6 +111,31 @@ export default function FeudDetail() {
     return (
       <SafeAreaView style={styles.safe} edges={["top"]}>
         <View style={styles.centerFill}><ActivityIndicator size="large" color={colors.brandPrimary} /></View>
+      </SafeAreaView>
+    );
+  }
+  if (gone) {
+    return (
+      <SafeAreaView style={styles.safe} edges={["top"]} testID="feud-gone-screen">
+        <View style={styles.topbar}>
+          <Pressable onPress={() => router.back()} style={styles.backBtn} testID="gone-back-button">
+            <Ionicons name="chevron-back" size={22} color={colors.onSurfaceInverse} />
+            <Text style={styles.backTxt}>INDIETRO</Text>
+          </Pressable>
+        </View>
+        <View style={styles.goneBox}>
+          <Ionicons name="hourglass-outline" size={64} color={colors.brandSecondary} />
+          <Text style={styles.goneTitle}>FAIDA SCADUTA</Text>
+          <Text style={styles.goneMsg}>
+            Errore: stai provando a visualizzare una faida che ha più di due settimane.
+          </Text>
+          <Text style={styles.goneHint}>
+            Le faide vengono conservate per 14 giorni. Dopo questo periodo la discussione e i commenti vengono rimossi definitivamente.
+          </Text>
+          <Pressable onPress={() => router.replace("/")} style={styles.goneBtn} testID="gone-home-btn">
+            <Text style={styles.goneBtnTxt}>TORNA ALLE FAIDE ATTIVE</Text>
+          </Pressable>
+        </View>
       </SafeAreaView>
     );
   }
@@ -376,4 +408,10 @@ const styles = StyleSheet.create({
   commentsRow: { flexDirection: "row" },
   commentsCol: { flex: 1, padding: spacing.sm, borderRightWidth: 1, borderColor: colors.border },
   noCmt: { color: colors.muted, fontSize: font.sizes.sm, textAlign: "center", padding: spacing.md },
+  goneBox: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.xxl, gap: spacing.md },
+  goneTitle: { color: colors.onSurface, fontSize: font.sizes.xxxl, letterSpacing: 2, fontWeight: "500" },
+  goneMsg: { color: colors.onSurface, fontSize: font.sizes.lg, textAlign: "center", lineHeight: 24 },
+  goneHint: { color: colors.muted, fontSize: font.sizes.sm, textAlign: "center", lineHeight: 18, marginTop: spacing.xs },
+  goneBtn: { marginTop: spacing.lg, paddingVertical: spacing.md, paddingHorizontal: spacing.xl, borderWidth: 2, borderColor: colors.onSurface, backgroundColor: colors.brandPrimary },
+  goneBtnTxt: { color: colors.onBrandPrimary, fontSize: font.sizes.base, letterSpacing: 2, fontWeight: "500" },
 });
