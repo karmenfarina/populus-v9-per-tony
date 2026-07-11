@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Modal, TextInput, Image, KeyboardAvoidingView, Platform } from "react-native";
 import * as ImagePicker from "expo-image-picker";
+import * as ImageManipulator from "expo-image-manipulator";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
@@ -88,19 +89,57 @@ export default function Profile() {
     setProfileOpen(true);
   };
 
-  const pickPhoto = async () => {
+  const pickPhoto = async (source: "library" | "camera") => {
     if (photos.length >= 7) { setDetailsError("Massimo 7 foto totali"); return; }
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) { setDetailsError("Serve il permesso alla libreria foto"); return; }
-    const res = await ImagePicker.launchImageLibraryAsync({
+    setDetailsError(null);
+    let perm;
+    if (source === "camera") {
+      perm = await ImagePicker.requestCameraPermissionsAsync();
+    } else {
+      perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    }
+    if (!perm.granted) {
+      if (!perm.canAskAgain) {
+        setDetailsError(
+          source === "camera"
+            ? "Permesso fotocamera negato. Aprilo dalle impostazioni."
+            : "Permesso libreria foto negato. Aprilo dalle impostazioni."
+        );
+      } else {
+        setDetailsError(
+          source === "camera" ? "Serve il permesso della fotocamera" : "Serve il permesso alla libreria foto"
+        );
+      }
+      return;
+    }
+    const opts: ImagePicker.ImagePickerOptions = {
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       quality: 0.7,
       base64: true,
       allowsEditing: true,
       aspect: [1, 1],
-    });
+    };
+    const res =
+      source === "camera"
+        ? await ImagePicker.launchCameraAsync(opts)
+        : await ImagePicker.launchImageLibraryAsync(opts);
     if (res.canceled || !res.assets[0]) return;
-    const base64 = res.assets[0].base64;
+    const asset = res.assets[0];
+    let base64 = asset.base64 || "";
+    // Client-side compression if too large: shrink long-edge to 1080, quality 0.6
+    // Threshold ~700_000 base64 chars ≈ ~500KB decoded.
+    if (base64.length > 700_000 && asset.uri) {
+      try {
+        const manipulated = await ImageManipulator.manipulateAsync(
+          asset.uri,
+          [{ resize: { width: 1080 } }],
+          { compress: 0.6, format: ImageManipulator.SaveFormat.JPEG, base64: true }
+        );
+        if (manipulated.base64) base64 = manipulated.base64;
+      } catch {
+        // fall through with original base64
+      }
+    }
     if (!base64) { setDetailsError("Impossibile leggere l'immagine"); return; }
     try {
       await api.uploadPhoto(base64);
@@ -451,10 +490,16 @@ export default function Profile() {
                         );
                       })}
                       {photos.length < 7 && (
-                        <Pressable onPress={pickPhoto} testID="photo-add-button" style={[styles.photoBox, styles.photoAdd]}>
-                          <Ionicons name="add" size={36} color={colors.onSurface} />
-                          <Text style={styles.photoAddTxt}>AGGIUNGI</Text>
-                        </Pressable>
+                        <>
+                          <Pressable onPress={() => pickPhoto("library")} testID="photo-add-library" style={[styles.photoBox, styles.photoAdd]}>
+                            <Ionicons name="images-outline" size={30} color={colors.onSurface} />
+                            <Text style={styles.photoAddTxt}>GALLERIA</Text>
+                          </Pressable>
+                          <Pressable onPress={() => pickPhoto("camera")} testID="photo-add-camera" style={[styles.photoBox, styles.photoAdd]}>
+                            <Ionicons name="camera-outline" size={30} color={colors.onSurface} />
+                            <Text style={styles.photoAddTxt}>FOTOCAMERA</Text>
+                          </Pressable>
+                        </>
                       )}
                     </>
                   )}
