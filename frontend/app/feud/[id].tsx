@@ -28,10 +28,14 @@ export default function FeudDetail() {
   const [expanded, setExpanded] = useState<Record<string, Reply[]>>({});
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
   const [replyText, setReplyText] = useState("");
+  const [activeSide, setActiveSide] = useState<"A" | "B">("A");
 
   const loadAll = useCallback(async () => {
     const f = await api.feud(id!);
     setFeud(f.feud);
+    // Default the comments tab to the user's chosen side; keep whatever the
+    // user has manually picked (only auto-set when we have no explicit choice).
+    if (f.feud?.my_vote) setActiveSide(f.feud.my_vote);
     const [c, s] = await Promise.all([
       api.comments(id!),
       api.sponsors(f.feud.category).catch(() => ({ sponsors: [] })),
@@ -267,36 +271,66 @@ export default function FeudDetail() {
             </View>
           )}
 
-          <View style={styles.commentsHeader}>
-            <View style={[styles.commentsHeaderHalf, { backgroundColor: colors.brandPrimary }]}>
-              <Text style={styles.commentsHeaderTxt}>PRO {feud.party_a.toUpperCase()}</Text>
-            </View>
-            <View style={[styles.commentsHeaderHalf, { backgroundColor: colors.brandSecondary }]}>
-              <Text style={[styles.commentsHeaderTxt, { color: colors.onBrandSecondary }]}>PRO {feud.party_b.toUpperCase()}</Text>
-            </View>
+          <View style={styles.commentsTabs} testID="comments-tabs">
+            <Pressable
+              onPress={() => setActiveSide("A")}
+              testID="comments-tab-a"
+              style={[
+                styles.commentsTab,
+                { backgroundColor: colors.brandPrimary },
+                activeSide !== "A" && styles.commentsTabDim,
+              ]}
+            >
+              <Text style={styles.commentsTabCount}>{sideA.length}</Text>
+              <Text style={styles.commentsTabLabel} numberOfLines={1}>
+                PRO {feud.party_a.toUpperCase()}
+              </Text>
+              {activeSide === "A" && <View style={styles.commentsTabIndicator} />}
+            </Pressable>
+            <Pressable
+              onPress={() => setActiveSide("B")}
+              testID="comments-tab-b"
+              style={[
+                styles.commentsTab,
+                { backgroundColor: colors.brandSecondary },
+                activeSide !== "B" && styles.commentsTabDim,
+              ]}
+            >
+              <Text style={[styles.commentsTabCount, { color: colors.onBrandSecondary }]}>{sideB.length}</Text>
+              <Text style={[styles.commentsTabLabel, { color: colors.onBrandSecondary }]} numberOfLines={1}>
+                PRO {feud.party_b.toUpperCase()}
+              </Text>
+              {activeSide === "B" && <View style={[styles.commentsTabIndicator, { backgroundColor: colors.onBrandSecondary }]} />}
+            </Pressable>
           </View>
 
-          <View style={styles.commentsRow}>
-            <View style={styles.commentsCol} testID="comments-col-a">
-              {sideA.length === 0 ? (
-                <Text style={styles.noCmt}>Nessun commento.</Text>
-              ) : sideA.map((c) => (
-                <CommentItem key={c.comment_id} c={c} expanded={expanded[c.comment_id]} onToggle={() => toggleReplies(c.comment_id)}
-                  replyingTo={replyingTo} setReplyingTo={setReplyingTo} replyText={replyText} setReplyText={setReplyText}
-                  onSubmitReply={() => submitReply(c.comment_id)} canReply={!!feud.my_vote}
+          <View style={styles.commentsList} testID={`comments-list-${activeSide.toLowerCase()}`}>
+            {(activeSide === "A" ? sideA : sideB).length === 0 ? (
+              <View style={styles.commentsEmpty}>
+                <Ionicons name="chatbubbles-outline" size={36} color={colors.muted} />
+                <Text style={styles.commentsEmptyTxt}>
+                  Ancora nessun commento per {activeSide === "A" ? feud.party_a : feud.party_b}.
+                </Text>
+                {feud.my_vote === activeSide && (
+                  <Text style={styles.commentsEmptyHint}>Sii il primo a scrivere!</Text>
+                )}
+              </View>
+            ) : (
+              (activeSide === "A" ? sideA : sideB).map((c) => (
+                <CommentItem
+                  key={c.comment_id}
+                  c={c}
+                  expanded={expanded[c.comment_id]}
+                  onToggle={() => toggleReplies(c.comment_id)}
+                  replyingTo={replyingTo}
+                  setReplyingTo={setReplyingTo}
+                  replyText={replyText}
+                  setReplyText={setReplyText}
+                  onSubmitReply={() => submitReply(c.comment_id)}
+                  canReply={!!feud.my_vote}
                 />
-              ))}
-            </View>
-            <View style={styles.commentsCol} testID="comments-col-b">
-              {sideB.length === 0 ? (
-                <Text style={styles.noCmt}>Nessun commento.</Text>
-              ) : sideB.map((c) => (
-                <CommentItem key={c.comment_id} c={c} expanded={expanded[c.comment_id]} onToggle={() => toggleReplies(c.comment_id)}
-                  replyingTo={replyingTo} setReplyingTo={setReplyingTo} replyText={replyText} setReplyText={setReplyText}
-                  onSubmitReply={() => submitReply(c.comment_id)} canReply={!!feud.my_vote}
-                />
-              ))}
-            </View>
+              ))
+            )}
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -314,66 +348,107 @@ function CommentItem({
 }) {
   const router = useRouter();
   const isReplying = replyingTo === c.comment_id;
+  const accent = sideColor(c.side);
   return (
     <View style={cs.item} testID={`comment-${c.comment_id}`}>
-      <Pressable onPress={() => router.push(`/user/${c.user_id}`)} testID={`comment-user-${c.user_id}`}>
-        <Text style={[cs.nick, { color: sideColor(c.side) }]}>@{c.nickname}</Text>
-      </Pressable>
-      <Text style={cs.text}>{c.text}</Text>
-      <View style={cs.actions}>
-        <Pressable onPress={onToggle}>
-          <Text style={cs.actionTxt}>
-            {expanded ? "↑" : `↓ ${c.reply_count ?? 0}`}
-          </Text>
-        </Pressable>
-        {canReply && (
-          <Pressable onPress={() => setReplyingTo(isReplying ? null : c.comment_id)} testID={`reply-btn-${c.comment_id}`}>
-            <Text style={cs.actionTxt}>{isReplying ? "annulla" : "rispondi"}</Text>
+      <View style={[cs.sideBar, { backgroundColor: accent }]} />
+      <View style={cs.body}>
+        <View style={cs.headRow}>
+          <Pressable
+            onPress={() => router.push(`/user/${c.user_id}`)}
+            testID={`comment-user-${c.user_id}`}
+            hitSlop={6}
+          >
+            <Text style={[cs.nick, { color: accent }]}>@{c.nickname}</Text>
           </Pressable>
+          {c.created_at ? (
+            <Text style={cs.time} numberOfLines={1}>{formatRelative(c.created_at)}</Text>
+          ) : null}
+        </View>
+        <Text style={cs.text}>{c.text}</Text>
+        <View style={cs.actions}>
+          <Pressable onPress={onToggle} hitSlop={6} testID={`replies-toggle-${c.comment_id}`}>
+            <Text style={cs.actionTxt}>
+              {expanded
+                ? `Nascondi risposte`
+                : `${c.reply_count ?? 0} ${(c.reply_count ?? 0) === 1 ? "risposta" : "risposte"}`}
+            </Text>
+          </Pressable>
+          {canReply && (
+            <Pressable onPress={() => setReplyingTo(isReplying ? null : c.comment_id)} testID={`reply-btn-${c.comment_id}`} hitSlop={6}>
+              <Text style={[cs.actionTxt, { color: accent }]}>{isReplying ? "annulla" : "rispondi"}</Text>
+            </Pressable>
+          )}
+        </View>
+        {expanded && expanded.length > 0 && (
+          <View style={cs.replies}>
+            {expanded.map((r) => {
+              const rAccent = sideColor(r.side);
+              return (
+                <View key={r.reply_id} style={cs.reply}>
+                  <View style={[cs.replySideBar, { backgroundColor: rAccent }]} />
+                  <View style={{ flex: 1 }}>
+                    <Pressable onPress={() => router.push(`/user/${r.user_id}`)}>
+                      <Text style={[cs.nick, { color: rAccent, fontSize: font.sizes.xs }]}>@{r.nickname}</Text>
+                    </Pressable>
+                    <Text style={[cs.text, { fontSize: font.sizes.sm, marginTop: 2 }]}>{r.text}</Text>
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+        )}
+        {isReplying && (
+          <View style={cs.replyInputWrap}>
+            <TextInput
+              style={cs.replyInput}
+              value={replyText}
+              onChangeText={setReplyText}
+              placeholder="Rispondi..."
+              placeholderTextColor={colors.muted}
+              multiline
+              testID={`reply-input-${c.comment_id}`}
+            />
+            <Pressable onPress={onSubmitReply} style={cs.replySend} testID={`reply-send-${c.comment_id}`}>
+              <Text style={cs.replySendTxt}>INVIA</Text>
+            </Pressable>
+          </View>
         )}
       </View>
-      {expanded && expanded.length > 0 && (
-        <View style={cs.replies}>
-          {expanded.map((r) => (
-            <View key={r.reply_id} style={cs.reply}>
-              <Pressable onPress={() => router.push(`/user/${r.user_id}`)}>
-                <Text style={[cs.nick, { color: sideColor(r.side), fontSize: font.sizes.xs }]}>@{r.nickname}</Text>
-              </Pressable>
-              <Text style={[cs.text, { fontSize: font.sizes.xs }]}>{r.text}</Text>
-            </View>
-          ))}
-        </View>
-      )}
-      {isReplying && (
-        <View style={cs.replyInputWrap}>
-          <TextInput
-            style={cs.replyInput}
-            value={replyText}
-            onChangeText={setReplyText}
-            placeholder="Rispondi..."
-            placeholderTextColor={colors.muted}
-            multiline
-            testID={`reply-input-${c.comment_id}`}
-          />
-          <Pressable onPress={onSubmitReply} style={cs.replySend} testID={`reply-send-${c.comment_id}`}>
-            <Text style={cs.replySendTxt}>INVIA</Text>
-          </Pressable>
-        </View>
-      )}
     </View>
   );
 }
 
+function formatRelative(iso: string): string {
+  try {
+    const t = new Date(iso).getTime();
+    const diff = Math.max(0, Date.now() - t);
+    const m = Math.floor(diff / 60000);
+    if (m < 1) return "ora";
+    if (m < 60) return `${m}m fa`;
+    const h = Math.floor(m / 60);
+    if (h < 24) return `${h}h fa`;
+    const d = Math.floor(h / 24);
+    if (d < 7) return `${d}g fa`;
+    return new Date(iso).toLocaleDateString("it-IT", { day: "2-digit", month: "short" });
+  } catch { return ""; }
+}
+
 const cs = StyleSheet.create({
-  item: { borderWidth: 2, borderColor: colors.border, padding: spacing.sm, backgroundColor: colors.surfaceSecondary, marginBottom: spacing.sm },
-  nick: { fontSize: font.sizes.sm, fontWeight: "500", marginBottom: 2, letterSpacing: 0.5 },
-  text: { fontSize: font.sizes.base, color: colors.onSurface, lineHeight: 18 },
-  actions: { flexDirection: "row", gap: spacing.md, marginTop: spacing.xs },
+  item: { flexDirection: "row", borderWidth: 2, borderColor: colors.border, backgroundColor: colors.surfaceSecondary, marginBottom: spacing.sm, overflow: "hidden" },
+  sideBar: { width: 6 },
+  body: { flex: 1, padding: spacing.md, gap: 4 },
+  headRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm },
+  nick: { fontSize: font.sizes.sm, fontWeight: "500", letterSpacing: 0.5 },
+  time: { fontSize: font.sizes.xs, color: colors.muted, letterSpacing: 0.5 },
+  text: { fontSize: font.sizes.base, color: colors.onSurface, lineHeight: 20, marginTop: 4 },
+  actions: { flexDirection: "row", gap: spacing.md, marginTop: spacing.sm },
   actionTxt: { fontSize: font.sizes.xs, color: colors.muted, letterSpacing: 1 },
   replies: { marginTop: spacing.sm, paddingLeft: spacing.sm, borderLeftWidth: 2, borderColor: colors.border, gap: spacing.xs },
-  reply: { paddingVertical: spacing.xs },
+  reply: { flexDirection: "row", paddingVertical: spacing.xs, gap: spacing.sm, overflow: "hidden" },
+  replySideBar: { width: 3, alignSelf: "stretch", borderRadius: 2 },
   replyInputWrap: { marginTop: spacing.sm, gap: spacing.xs },
-  replyInput: { borderWidth: 2, borderColor: colors.border, padding: spacing.xs, fontSize: font.sizes.sm, color: colors.onSurface, minHeight: 40 },
+  replyInput: { borderWidth: 2, borderColor: colors.border, padding: spacing.xs, fontSize: font.sizes.sm, color: colors.onSurface, minHeight: 44, backgroundColor: colors.surface },
   replySend: { backgroundColor: colors.onSurface, paddingVertical: spacing.xs, alignItems: "center" },
   replySendTxt: { color: colors.onSurfaceInverse, fontSize: font.sizes.xs, letterSpacing: 1 },
 });
@@ -417,11 +492,16 @@ const styles = StyleSheet.create({
   commentInput: { borderWidth: 2, borderColor: colors.border, padding: spacing.sm, minHeight: 60, fontSize: font.sizes.base, color: colors.onSurface, backgroundColor: colors.surfaceSecondary },
   postBtn: { paddingVertical: spacing.sm, alignItems: "center", borderWidth: 2, borderColor: colors.border },
   postBtnTxt: { fontSize: font.sizes.base, letterSpacing: 2, fontWeight: "500" },
-  commentsHeader: { flexDirection: "row", borderTopWidth: 2, borderBottomWidth: 2, borderColor: colors.border },
-  commentsHeaderHalf: { flex: 1, paddingVertical: spacing.sm, alignItems: "center" },
-  commentsHeaderTxt: { color: colors.onBrandPrimary, fontSize: font.sizes.sm, letterSpacing: 1, fontWeight: "500" },
-  commentsRow: { flexDirection: "row" },
-  commentsCol: { flex: 1, padding: spacing.sm, borderRightWidth: 1, borderColor: colors.border },
+  commentsTabs: { flexDirection: "row", borderTopWidth: 2, borderBottomWidth: 2, borderColor: colors.border },
+  commentsTab: { flex: 1, paddingVertical: spacing.md, paddingHorizontal: spacing.sm, alignItems: "center", gap: 2, position: "relative", overflow: "hidden" },
+  commentsTabDim: { opacity: 0.42 },
+  commentsTabCount: { color: colors.onBrandPrimary, fontSize: font.sizes.xxl, fontWeight: "500", letterSpacing: 1 },
+  commentsTabLabel: { color: colors.onBrandPrimary, fontSize: font.sizes.xs, letterSpacing: 1.5, paddingHorizontal: spacing.xs },
+  commentsTabIndicator: { position: "absolute", left: 0, right: 0, bottom: 0, height: 4, backgroundColor: colors.onBrandPrimary },
+  commentsList: { padding: spacing.md, backgroundColor: colors.surface },
+  commentsEmpty: { alignItems: "center", justifyContent: "center", paddingVertical: spacing.xxl, gap: spacing.xs },
+  commentsEmptyTxt: { color: colors.muted, fontSize: font.sizes.base, textAlign: "center", paddingHorizontal: spacing.lg, lineHeight: 20 },
+  commentsEmptyHint: { color: colors.brandPrimary, fontSize: font.sizes.sm, letterSpacing: 1, fontWeight: "500" },
   noCmt: { color: colors.muted, fontSize: font.sizes.sm, textAlign: "center", padding: spacing.md },
   goneBox: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.xxl, gap: spacing.md },
   goneTitle: { color: colors.onSurface, fontSize: font.sizes.xxxl, letterSpacing: 2, fontWeight: "500" },

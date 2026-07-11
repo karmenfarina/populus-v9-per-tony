@@ -1,0 +1,29 @@
+{
+  "summary": "Tab-based comments layout on /feud/[id].tsx verified end-to-end at 390x844 web viewport. 36/36 UI assertions pass (one earlier false-fail resolved: post-reply auto-expand is correct; my test had collapsed it again). Setup: signup + PATCH /api/auth/me/profile onboarding, token injected into localStorage under key 'faide_token' (AsyncStorage web backend). Feud with pre-populated comments (feud_9695e67bcd18, 2A+2B) confirms: (a) old testIDs comments-col-a and comments-col-b are GONE from DOM; (b) comments-tabs container + comments-tab-a + comments-tab-b Pressables render; (c) default active side is A when the user has NOT voted (comments-list-a visible, comments-list-b absent); (d) tapping tab-b makes comments-list-b appear and removes comments-list-a from the DOM; tapping tab-a restores it; (e) inactive tab has computed opacity 0.42 vs active 1.0 (verified via getComputedStyle); (f) each CommentItem card shows nickname (@user), relative timestamp ('ora' / 'Nm fa' / 'Nh fa' / 'Ng fa'), full comment text at font.sizes.base with NO truncation (matched byte-for-byte against backend content), red/yellow side accent bar via sideColor(c.side); (g) comment-user-<user_id> Pressable navigates to /user/<user_id>; (h) replies-toggle-<comment_id> Pressable present; (i) after voting side A the tab defaults to A (matches my_vote), 'rispondi' button appears, tapping it reveals reply-input-<id>, submitting posts the reply (verified via /api/comments/<id>/replies GET) and the reply auto-expands inline under the parent with its own accent bar; (j) empty state on feud_d0312abf93bc (0 comments) shows commentsEmpty icon + 'Ancora nessun commento per <party>.' text on both sides; (k) regression: LA FAIDA kicker + summary, FONTI/sources-box, feud-media-section (VIDEO block, Republic World iframe), and voting split UI (vote-a-button, vote-b-button) all render unchanged. No backend regressions.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "CommentItem", "issue": "After successfully posting a reply, the parent comment's local reply_count (label 'N risposte') is not incremented — only the expanded[] map is refreshed. Label switches to 'Nascondi risposte' immediately (fine) but if the user collapses again the count reverts to the pre-post value until the feud is re-loaded. Reference: /app/frontend/app/feud/[id].tsx submitReply lines 93-101.", "testID": "replies-toggle-<id>", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [
+    "Optional low-priority polish: in submitReply, after posting, either (a) increment the local sideA/sideB comment.reply_count, or (b) re-fetch api.comments(feud_id) to keep the toggle label ('N risposte' vs 'Nascondi risposte') consistent across collapse/expand cycles without a full page reload."
+  ],
+  "critical_code_review_comments": [
+    "feud/[id].tsx is 513 lines — approaching the 700-line split threshold. The CommentItem component and cs StyleSheet could be extracted to /src/components/CommentItem.tsx to keep the screen focused.",
+    "formatRelative() is defined inline; consider moving to /src/utils/time.ts for reuse if other screens need the same 'ora / Nm fa / Nh fa / Ng fa' formatting.",
+    "loadAll auto-sets activeSide from feud.my_vote on every re-load — if the user manually taps the opposite tab and then triggers loadAll (e.g. after posting a comment), their manual choice will be overwritten. Consider guarding with a ref or setting only on first mount.",
+    "The 'sideBar' width of 6px + card border of 2px is tight — visually clean at 390 width but on narrow devices <340 the accent bar may look thin against the card body. Not a blocker.",
+    "commentsTabIndicator uses colors.onBrandPrimary for both tabs' indicator but is conditionally re-styled to onBrandSecondary for tab B — check contrast when the yellow tab is active on light backgrounds."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (frontend-only change)", "frontend": "100% (36/36 assertions)"},
+  "seed_data_creation": "Two fresh test users created via /api/auth/signup + /api/auth/me/profile onboarding: reply_<ts>@ex.com and tabtest_<ts>@example.com. One reply posted to cmt_test_0_1783799115 under feud_9695e67bcd18.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Tab layout is stable. Auth injection pattern for web: after signup+onboarding via API, set localStorage.setItem('faide_token', JSON.stringify(token)) BEFORE navigating to any authenticated route (AsyncStorage web backend uses localStorage with the raw key). Feud_9695e67bcd18 now has 1 extra reply on cmt_test_0_1783799115 from user tabt9336 + rpt384; comments count remains 2A+2B. feud_d0312abf93bc, feud_9618aa026447, feud_2de4771b6d84 remain zero-comment feuds suitable for empty-state assertions."
+}
