@@ -129,7 +129,7 @@ export default function Onboarding() {
               <Pressable onPress={toggleAll} testID="select-all-toggle" style={styles.selectAllRow}>
                 <Ionicons
                   name={allSelected ? "checkbox" : "square-outline"}
-                  size={22}
+                  size={16}
                   color={colors.onSurface}
                 />
                 <Text style={styles.selectAllTxt}>
@@ -277,8 +277,8 @@ const styles = StyleSheet.create({
   section: { gap: spacing.md },
   sectionTitle: { fontSize: font.sizes.xl, letterSpacing: 2, fontWeight: "500", color: colors.onSurface },
   sectionHint: { fontSize: font.sizes.base, color: colors.muted },
-  selectAllRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, borderWidth: 2, borderColor: colors.border, padding: spacing.md, backgroundColor: colors.surfaceSecondary },
-  selectAllTxt: { fontSize: font.sizes.base, letterSpacing: 2, fontWeight: "500", color: colors.onSurface },
+  selectAllRow: { alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 6, borderWidth: 2, borderColor: colors.border, paddingHorizontal: spacing.sm, paddingVertical: 6, backgroundColor: colors.surfaceSecondary },
+  selectAllTxt: { fontSize: font.sizes.xs, letterSpacing: 1, fontWeight: "500", color: colors.onSurface },
   catsGrid: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
   catChip: { flexDirection: "row", alignItems: "center", gap: 8, borderWidth: 2, borderColor: colors.border, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, backgroundColor: colors.surfaceSecondary },
   catChipOn: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
