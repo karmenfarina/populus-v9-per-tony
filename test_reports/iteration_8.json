@@ -1,0 +1,27 @@
+{
+  "summary": "Frontend-only test of the restructured 3-step Onboarding wizard (/app/frontend/app/onboarding.tsx). Fresh anonymous signup -> /onboarding: step 1 renders alone (onboarding-step-2 and onboarding-step-3 not present in DOM). Progress dots: progress-1 active yellow rgb(255,230,0), progress-2 & progress-3 inactive gray rgb(234,234,234). 'SELEZIONA TUTTE' row (testID select-all-toggle) verified on its own full-width row (width 343px) BELOW the 'LE TUE CATEGORIE PREFERITE' title (selRect.y=246 > titleRect.y+h=206), no wrapping/overlap. Tapping it flips the label to 'TOGLI TUTTE' and selects all 7 category chips. AVANTI with 0 categories -> inline error 'Scegli almeno una categoria preferita' (testID onboarding-error) and stays on step 1. Selecting cat-sport and tapping onboarding-next navigates to step 2 (progress-1 & progress-2 yellow). Step 2: age=5 -> error 'Inserisci un\u2019eta valida (13-120)' (blocks nav); age=27 + sex-M + AVANTI -> step 3 with all 3 progress dots yellow. Back button (onboarding-back) works: from step 3 -> step 2 preserves age=27 and sex-M highlight; from step 2 -> step 1 preserves sport chip selected (bg brandPrimary red). Step 3: region-open modal -> region-Lombardia -> onboarding-submit -> PATCH /api/auth/me/profile succeeds and app routes to home-screen (URL '/'). All 8 review requirements PASS. Only note: React Native Web deprecation warning 'props.pointerEvents is deprecated. Use style.pointerEvents' surfaced in console (framework-level, not user visible).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "pointerEvents prop (RN-Web deprecation)", "issue": "Console warning 'props.pointerEvents is deprecated. Use style.pointerEvents'. Not from onboarding.tsx directly - likely from a dependency (react-native-safe-area-context / Ionicons wrapper) but worth tracking. Reference: surfaced while onboarding screen is mounted."}
+    ]
+  },
+  "test_report_links": ["/tmp/01_step1.png", "/tmp/02_step1_selectall.png", "/tmp/03_step2.png", "/tmp/04_step3.png", "/tmp/05_region_modal.png", "/tmp/06_after_submit.png"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "onboarding.tsx is 311 lines - still well under 700 line limit, fine.",
+    "goNext/goBack use setState synchronously - fine, no race condition observed.",
+    "region validation only runs on submit (step 3) - acceptable since region is the only step-3 field.",
+    "Selected categories/age/sex are preserved when navigating back (state lives in component, not per step) - verified working."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (not tested per request)", "frontend": "100% (8/8 acceptance criteria)"},
+  "seed_data_creation": "One fresh anonymous user created (nickname t1783786681) - profile now has favorite_categories=[sport], age=27, sex=M, region=Lombardia.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "3-step onboarding wizard is fully functional. TestIDs available: onboarding-screen, onboarding-step-1|2|3, progress-1|2|3, select-all-toggle, cat-<id> (sport, politica, tv, musica, cinema, social, gossip), age-input, sex-F|M|other|na, region-open, region-<Name-with-dashes>, region-close, onboarding-back, onboarding-next, onboarding-submit, onboarding-error. Progress active color = rgb(255,230,0) (brandSecondary), inactive = rgb(234,234,234). Selected category chip bg = rgb(255,59,48) (brandPrimary red).",
+  "rca_of_issue": "N/A - this iteration validated a fix (not a bug). Original bug: 'SELEZIONA TUTTE' shared a row with the section title via justifyContent:space-between, causing wrap on narrow viewports. Fix (verified): select-all is now a standalone full-width bordered Pressable row placed AFTER the sectionTitle Text in JSX with its own selectAllRow style (flexDirection:row + width via parent, borderWidth:2, backgroundColor surfaceSecondary). Screenshot 01_step1.png confirms visual layout."
+}
