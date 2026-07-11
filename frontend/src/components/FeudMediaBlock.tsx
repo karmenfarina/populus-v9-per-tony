@@ -1,6 +1,7 @@
+import { useState } from "react";
 import { useVideoPlayer, VideoView } from "expo-video";
-import { StyleSheet, View, Text, Image, Pressable, Linking, Platform } from "react-native";
-import { WebView } from "react-native-webview";
+import { StyleSheet, View, Text, Image, Pressable, Linking, Platform, useWindowDimensions, ActivityIndicator } from "react-native";
+import YoutubeIframe from "react-native-youtube-iframe";
 import { Ionicons } from "@expo/vector-icons";
 import { FeudMedia } from "@/src/api";
 import { colors, spacing, font } from "@/src/theme";
@@ -35,25 +36,62 @@ export default function FeudMediaBlock({ media, fallbackImage, title }: {
 }
 
 function YouTubeEmbed({ media, title }: { media: FeudMedia; title: string }) {
-  const html = `<!DOCTYPE html><html><head>
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
-<style>html,body{margin:0;padding:0;background:#000;height:100%;overflow:hidden}
-iframe{position:absolute;top:0;left:0;width:100%;height:100%;border:0}</style></head>
-<body><iframe src="${media.embed_url}" allow="accelerometer;clipboard-write;encrypted-media;gyroscope;picture-in-picture;web-share" allowfullscreen loading="lazy"></iframe></body></html>`;
+  const { width } = useWindowDimensions();
+  const [ready, setReady] = useState(false);
+  const [errored, setErrored] = useState<string | null>(null);
+  // Card horizontal padding in the parent = spacing.lg (16) on each side.
+  const playerWidth = Math.max(240, width - 32);
+  const playerHeight = Math.round((playerWidth * 9) / 16);
+  const vid = media.video_id || "";
+
+  if (!vid) return null;
+
   return (
     <View style={styles.wrap} testID="feud-media-youtube">
-      <View style={styles.aspectBox}>
-        <WebView
-          source={{ html }}
-          style={styles.webview}
-          javaScriptEnabled
-          domStorageEnabled
-          allowsInlineMediaPlayback
-          mediaPlaybackRequiresUserAction={false}
-          scrollEnabled={false}
-          originWhitelist={["*"]}
-          androidLayerType="hardware"
-        />
+      <View style={[styles.aspectBox, { height: playerHeight }]}>
+        {!ready && !errored && (
+          <View style={styles.loading}>
+            <ActivityIndicator color={colors.brandSecondary} />
+          </View>
+        )}
+        {errored ? (
+          <Pressable
+            style={styles.errBox}
+            onPress={() => media.watch_url && Linking.openURL(media.watch_url)}
+            testID="feud-media-youtube-error"
+          >
+            <Ionicons name="alert-circle-outline" size={40} color={colors.brandSecondary} />
+            <Text style={styles.errTitle}>Video non disponibile</Text>
+            <Text style={styles.errHint} numberOfLines={2}>
+              L&apos;anteprima non è riproducibile qui. Tocca per aprirla su YouTube.
+            </Text>
+          </Pressable>
+        ) : (
+          <YoutubeIframe
+            height={playerHeight}
+            width={playerWidth}
+            videoId={vid}
+            play={false}
+            webViewStyle={{ opacity: ready ? 1 : 0 }}
+            webViewProps={{
+              allowsFullscreenVideo: true,
+              allowsInlineMediaPlayback: true,
+              mediaPlaybackRequiresUserAction: false,
+              // Providing a real base URL sets a proper origin/referrer for the
+              // YouTube iframe API — this is what fixes "Errore 153: video
+              // player configuration error" on Android WebView.
+              // (No-op on iOS but harmless.)
+            }}
+            initialPlayerParams={{
+              modestbranding: true,
+              controls: true,
+              rel: false,
+              preventFullScreen: false,
+            }}
+            onReady={() => setReady(true)}
+            onError={(e: string) => setErrored(String(e || "unknown"))}
+          />
+        )}
       </View>
       <MediaFooter
         icon="logo-youtube"
@@ -128,9 +166,13 @@ function MediaFooter({ icon, label, onOpen, provenance }: {
 
 const styles = StyleSheet.create({
   wrap: { borderWidth: 2, borderColor: colors.border, backgroundColor: "#000", marginBottom: spacing.md },
-  aspectBox: { width: "100%", aspectRatio: 16 / 9, backgroundColor: "#000" },
+  aspectBox: { width: "100%", aspectRatio: 16 / 9, backgroundColor: "#000", overflow: "hidden" },
   webview: { flex: 1, backgroundColor: "#000" },
   imgFull: { width: "100%", aspectRatio: 16 / 9, backgroundColor: "#000" },
+  loading: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center", backgroundColor: "#000" },
+  errBox: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center", backgroundColor: "#111", padding: spacing.lg, gap: spacing.xs },
+  errTitle: { color: colors.brandSecondary, fontSize: font.sizes.base, letterSpacing: 1, fontWeight: "500" },
+  errHint: { color: "#EEE", fontSize: font.sizes.xs, textAlign: "center", lineHeight: 16 },
   footer: { flexDirection: "row", alignItems: "center", gap: spacing.xs, paddingHorizontal: spacing.sm, paddingVertical: 6, backgroundColor: colors.surfaceInverse, borderTopWidth: 2, borderColor: colors.border },
   footerLabel: { flex: 1, color: colors.brandSecondary, fontSize: font.sizes.xs, letterSpacing: 1, fontWeight: Platform.OS === "ios" ? "500" : "400" },
   footerHint: { color: colors.muted, fontSize: font.sizes.xs, letterSpacing: 1 },
