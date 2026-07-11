@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator } from "react-native";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Modal } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
@@ -15,6 +15,11 @@ export default function Profile() {
   const [filter, setFilter] = useState<Filter>("all");
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [loadingH, setLoadingH] = useState(false);
+  const [prefsOpen, setPrefsOpen] = useState(false);
+  const [cats, setCats] = useState<{ id: string; label: string }[]>([]);
+  const [editSel, setEditSel] = useState<Set<string>>(new Set());
+  const [savingPrefs, setSavingPrefs] = useState(false);
+  const [prefsError, setPrefsError] = useState<string | null>(null);
 
   const loadHistory = useCallback(async (f: Filter) => {
     setLoadingH(true);
@@ -28,6 +33,63 @@ export default function Profile() {
     refreshMe();
     loadHistory(filter);
   }, [filter, loadHistory, refreshMe]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const c = await api.categories();
+        setCats(c.categories);
+      } catch {}
+    })();
+  }, []);
+
+  const openPrefs = () => {
+    setPrefsError(null);
+    setEditSel(new Set(user?.favorite_categories || []));
+    setPrefsOpen(true);
+  };
+
+  const toggleEdit = (id: string) => {
+    setEditSel((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const allSelected = useMemo(
+    () => cats.length > 0 && editSel.size === cats.length,
+    [cats, editSel]
+  );
+
+  const toggleAllEdit = () => {
+    if (allSelected) setEditSel(new Set());
+    else setEditSel(new Set(cats.map((c) => c.id)));
+  };
+
+  const savePrefs = async () => {
+    if (!user) return;
+    if (editSel.size === 0) { setPrefsError("Scegli almeno una categoria"); return; }
+    if (!user.age || !user.sex || !user.region) {
+      setPrefsError("Profilo incompleto — completa prima l'onboarding");
+      return;
+    }
+    setSavingPrefs(true); setPrefsError(null);
+    try {
+      await api.updateProfile({
+        age: user.age,
+        sex: user.sex as "F" | "M" | "other" | "na",
+        region: user.region,
+        favorite_categories: Array.from(editSel),
+      });
+      await refreshMe();
+      setPrefsOpen(false);
+    } catch (e: any) {
+      setPrefsError(e?.message || "Errore durante il salvataggio");
+    } finally {
+      setSavingPrefs(false);
+    }
+  };
 
   if (!user) return null;
 
@@ -83,6 +145,30 @@ export default function Profile() {
           <View style={[styles.statBox, { borderLeftWidth: 2, backgroundColor: colors.surfaceInverse }]}>
             <Text style={[styles.statValue, { color: colors.brandSecondary }]}>{user.minority_votes}</Text>
             <Text style={[styles.statLabel, { color: colors.brandSecondary }]}>MINORANZA</Text>
+          </View>
+        </View>
+
+        <View style={styles.prefsSection} testID="prefs-section">
+          <View style={styles.prefsHeadRow}>
+            <Text style={styles.prefsTitle}>ARGOMENTI PREFERITI</Text>
+            <Pressable onPress={openPrefs} testID="prefs-edit-button" style={styles.prefsEditBtn}>
+              <Ionicons name="pencil" size={14} color={colors.onSurface} />
+              <Text style={styles.prefsEditTxt}>MODIFICA</Text>
+            </Pressable>
+          </View>
+          <View style={styles.prefsChipsRow}>
+            {(user.favorite_categories && user.favorite_categories.length > 0) ? (
+              user.favorite_categories.map((id) => {
+                const label = cats.find((c) => c.id === id)?.label || id;
+                return (
+                  <View key={id} style={styles.prefChip} testID={`pref-chip-${id}`}>
+                    <Text style={styles.prefChipTxt}>{label}</Text>
+                  </View>
+                );
+              })
+            ) : (
+              <Text style={styles.prefEmpty}>Nessuna preferenza impostata.</Text>
+            )}
           </View>
         </View>
 
@@ -148,6 +234,59 @@ export default function Profile() {
           <Text style={styles.logoutText}>ESCI</Text>
         </Pressable>
       </ScrollView>
+
+      <Modal visible={prefsOpen} animationType="slide" transparent onRequestClose={() => setPrefsOpen(false)}>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalSheet} testID="prefs-modal">
+            <View style={styles.modalHead}>
+              <Text style={styles.modalTitle}>MODIFICA ARGOMENTI</Text>
+              <Pressable onPress={() => setPrefsOpen(false)} testID="prefs-modal-close">
+                <Ionicons name="close" size={26} color={colors.onSurfaceInverse} />
+              </Pressable>
+            </View>
+            <ScrollView contentContainerStyle={styles.modalBody}>
+              <Pressable onPress={toggleAllEdit} testID="prefs-select-all" style={styles.prefsSelectAllRow}>
+                <Ionicons
+                  name={allSelected ? "checkbox" : "square-outline"}
+                  size={16}
+                  color={colors.onSurface}
+                />
+                <Text style={styles.prefsSelectAllTxt}>
+                  {allSelected ? "TOGLI TUTTE" : "SELEZIONA TUTTE"}
+                </Text>
+              </Pressable>
+              <View style={styles.prefsCatsGrid}>
+                {cats.map((c) => {
+                  const on = editSel.has(c.id);
+                  return (
+                    <Pressable
+                      key={c.id}
+                      onPress={() => toggleEdit(c.id)}
+                      testID={`prefs-cat-${c.id}`}
+                      style={[styles.prefsCatChip, on && styles.prefsCatChipOn]}
+                    >
+                      <Ionicons
+                        name={on ? "checkbox" : "square-outline"}
+                        size={20}
+                        color={on ? colors.onBrandPrimary : colors.onSurface}
+                      />
+                      <Text style={[styles.prefsCatTxt, on && styles.prefsCatTxtOn]}>{c.label}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              {prefsError && <Text style={styles.prefsErr} testID="prefs-error">{prefsError}</Text>}
+            </ScrollView>
+            <Pressable onPress={savePrefs} disabled={savingPrefs} testID="prefs-save" style={styles.prefsSaveBtn}>
+              {savingPrefs ? (
+                <ActivityIndicator color={colors.onBrandPrimary} />
+              ) : (
+                <Text style={styles.prefsSaveTxt}>SALVA</Text>
+              )}
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -186,4 +325,28 @@ const styles = StyleSheet.create({
   hBadgeMin: { backgroundColor: colors.brandSecondary, color: colors.onBrandSecondary },
   logout: { margin: spacing.lg, borderWidth: 2, borderColor: colors.border, padding: spacing.md, alignItems: "center", backgroundColor: colors.brandPrimary },
   logoutText: { color: colors.onBrandPrimary, fontSize: font.sizes.lg, letterSpacing: 2, fontWeight: "500" },
+  prefsSection: { padding: spacing.lg, borderBottomWidth: 2, borderColor: colors.border, gap: spacing.sm },
+  prefsHeadRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  prefsTitle: { fontSize: font.sizes.xxl, letterSpacing: 2, fontWeight: "500", color: colors.onSurface },
+  prefsEditBtn: { flexDirection: "row", alignItems: "center", gap: 6, borderWidth: 2, borderColor: colors.border, paddingHorizontal: spacing.sm, paddingVertical: 6, backgroundColor: colors.surfaceSecondary },
+  prefsEditTxt: { fontSize: font.sizes.xs, letterSpacing: 1, fontWeight: "500", color: colors.onSurface },
+  prefsChipsRow: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, marginTop: spacing.xs },
+  prefChip: { borderWidth: 2, borderColor: colors.brandPrimary, backgroundColor: colors.brandPrimary, paddingHorizontal: spacing.sm, paddingVertical: 6 },
+  prefChipTxt: { color: colors.onBrandPrimary, fontSize: font.sizes.sm, letterSpacing: 1, fontWeight: "500" },
+  prefEmpty: { fontSize: font.sizes.base, color: colors.muted },
+  modalBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
+  modalSheet: { backgroundColor: colors.surface, borderTopWidth: 2, borderColor: colors.border, maxHeight: "85%" },
+  modalHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: spacing.lg, borderBottomWidth: 2, borderColor: colors.border, backgroundColor: colors.surfaceInverse },
+  modalTitle: { color: colors.onSurfaceInverse, fontSize: font.sizes.xl, letterSpacing: 2, fontWeight: "500" },
+  modalBody: { padding: spacing.lg, gap: spacing.md },
+  prefsSelectAllRow: { alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 6, borderWidth: 2, borderColor: colors.border, paddingHorizontal: spacing.sm, paddingVertical: 6, backgroundColor: colors.surfaceSecondary },
+  prefsSelectAllTxt: { fontSize: font.sizes.xs, letterSpacing: 1, fontWeight: "500", color: colors.onSurface },
+  prefsCatsGrid: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
+  prefsCatChip: { flexDirection: "row", alignItems: "center", gap: 8, borderWidth: 2, borderColor: colors.border, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, backgroundColor: colors.surfaceSecondary },
+  prefsCatChipOn: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
+  prefsCatTxt: { fontSize: font.sizes.base, color: colors.onSurface, fontWeight: "500" },
+  prefsCatTxtOn: { color: colors.onBrandPrimary },
+  prefsErr: { color: colors.error, borderWidth: 2, borderColor: colors.error, padding: spacing.sm, fontSize: font.sizes.base },
+  prefsSaveBtn: { backgroundColor: colors.brandPrimary, borderTopWidth: 2, borderColor: colors.border, paddingVertical: spacing.lg, alignItems: "center" },
+  prefsSaveTxt: { color: colors.onBrandPrimary, fontSize: font.sizes.xl, letterSpacing: 2, fontWeight: "500" },
 });
