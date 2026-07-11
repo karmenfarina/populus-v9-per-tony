@@ -317,6 +317,12 @@ MAX_PHOTOS = 7
 def _sanitize_social_links(sl: Optional[dict]) -> dict:
     if not isinstance(sl, dict):
         return {}
+    platform_bases = {
+        'instagram': 'https://instagram.com/',
+        'tiktok': 'https://www.tiktok.com/@',
+        'twitter': 'https://x.com/',
+        'youtube': 'https://youtube.com/@',
+    }
     out = {}
     for k, v in sl.items():
         if k not in ALLOWED_SOCIAL_KEYS:
@@ -326,10 +332,20 @@ def _sanitize_social_links(sl: Optional[dict]) -> dict:
             continue
         if len(v) > 200:
             v = v[:200]
-        # tolerate handles without scheme
-        if not re.match(r'^https?://', v, re.IGNORECASE) and not v.startswith('@'):
-            v = 'https://' + v
-        out[k] = v
+        low = v.lower()
+        if low.startswith('http://') or low.startswith('https://'):
+            out[k] = v
+            continue
+        if k == 'website':
+            out[k] = 'https://' + v.lstrip('@').lstrip('/')
+            continue
+        # Bare handle for a known social platform
+        handle = v.lstrip('@').lstrip('/')
+        base = platform_bases.get(k)
+        if base:
+            out[k] = base + handle
+        else:
+            out[k] = 'https://' + handle
     return out
 
 
