@@ -233,6 +233,15 @@ export default function Profile() {
         <Pressable style={styles.logout} onPress={logout} testID="profile-logout">
           <Text style={styles.logoutText}>ESCI</Text>
         </Pressable>
+
+        <Pressable
+          style={styles.adminLink}
+          onPress={() => router.push("/admin")}
+          testID="profile-admin-link"
+        >
+          <Ionicons name="shield-checkmark-outline" size={14} color={colors.muted} />
+          <Text style={styles.adminLinkTxt}>PANNELLO ADMIN</Text>
+        </Pressable>
       </ScrollView>
 
       <Modal visible={prefsOpen} animationType="slide" transparent onRequestClose={() => setPrefsOpen(false)}>
@@ -325,6 +334,8 @@ const styles = StyleSheet.create({
   hBadgeMin: { backgroundColor: colors.brandSecondary, color: colors.onBrandSecondary },
   logout: { margin: spacing.lg, borderWidth: 2, borderColor: colors.border, padding: spacing.md, alignItems: "center", backgroundColor: colors.brandPrimary },
   logoutText: { color: colors.onBrandPrimary, fontSize: font.sizes.lg, letterSpacing: 2, fontWeight: "500" },
+  adminLink: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: spacing.md, marginBottom: spacing.lg },
+  adminLinkTxt: { fontSize: font.sizes.xs, letterSpacing: 2, color: colors.muted, fontWeight: "500" },
   prefsSection: { padding: spacing.lg, borderBottomWidth: 2, borderColor: colors.border, gap: spacing.sm },
   prefsHeadRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   prefsTitle: { fontSize: font.sizes.xxl, letterSpacing: 2, fontWeight: "500", color: colors.onSurface },

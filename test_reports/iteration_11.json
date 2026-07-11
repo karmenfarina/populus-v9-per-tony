@@ -1,0 +1,39 @@
+{
+  "summary": "Tested new admin feature (statistiche demografiche). Backend: 7/7 pytest tests pass (auth on /api/admin/stats and /api/admin/generate-daily, response shape validation, and end-to-end demographic aggregation after onboarding+vote for Lombardia/F/25-34). Frontend: /admin route works end-to-end — password gate renders with correct testIDs, wrong key shows 'Chiave admin non valida' in admin-error, CAMBIA CHIAVE resets the gate, correct key 'populus-admin-42b8f3' renders admin-screen with 3 stat cards (UTENTI/ONBOARDED/VOTI) and 4 SectionBlocks (regione, sesso, età, top feuds); admin-refresh re-fetches; admin-logout returns to gate. Profile 'PANNELLO ADMIN' link with testID='profile-admin-link' verified in code at profile.tsx bottom (line 237-244); could not exercise via UI in this run because the region picker on onboarding step 3 is a custom RN Picker not a native <select>, so scripted onboarding stalled at step 3 (not an admin bug).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_admin.py",
+    "/app/test_reports/pytest/admin_results.xml"
+  ],
+  "action_items": [
+    "Optional: consider making onboarding step-3 region picker easier to automate (e.g. add testID='onboarding-region-picker' and per-option testIDs). Not required for this feature."
+  ],
+  "critical_code_review_comments": [
+    "require_admin correctly rejects empty ADMIN_TOKEN or mismatch with 401 'Chiave admin non valida'.",
+    "GET /api/admin/stats correctly excludes _id via $project and returns all expected buckets including 'unknown' for by_sex/by_age; by_region sorted desc.",
+    "POST /api/admin/generate-daily is now behind require_admin — previously public endpoint is protected as expected.",
+    "admin.tsx uses expo-secure-store via storage util; correctly hydrates state and clears key on logout.",
+    "profile-admin-link is rendered as the very last element of the ScrollView, matching the 'discreet link' spec."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_admin.py (new)"
+  ],
+  "success_rate": {
+    "backend": "100% (7/7)",
+    "frontend": "~90% (admin route fully tested; profile→admin link verified in code but not exercised via automation due to custom region picker on onboarding step 3)"
+  },
+  "seed_data_creation": "Created a few TEST_ anonymous users during backend integration test; one onboarded to Lombardia/F/age 28 and voted once (persisted in DB).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Admin feature verified end-to-end. Admin key: populus-admin-42b8f3. /api/admin/stats and /api/admin/generate-daily both require X-Admin-Key header. /admin route works standalone (no user auth needed). profile-admin-link testID exists but is only reachable after a user completes onboarding, and the region picker on step 3 is a custom RN Picker — automate it by opening the picker overlay and clicking the item, not via select_option.",
+  "rca_of_issue": "N/A — no bugs found."
+}

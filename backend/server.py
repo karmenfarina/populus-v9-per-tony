@@ -30,6 +30,7 @@ JWT_SECRET = os.environ.get('JWT_SECRET', 'dev-secret-change')
 JWT_ALG = 'HS256'
 JWT_TTL_DAYS = 7
 EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY')
+ADMIN_TOKEN = os.environ.get('ADMIN_TOKEN', '')
 
 app = FastAPI()
 api_router = APIRouter(prefix="/api")
@@ -106,6 +107,12 @@ async def get_current_user_optional(authorization: Optional[str] = Header(None))
         return await get_current_user(authorization)
     except HTTPException:
         return None
+
+
+async def require_admin(x_admin_key: Optional[str] = Header(None, alias='X-Admin-Key')) -> bool:
+    if not ADMIN_TOKEN or not x_admin_key or x_admin_key != ADMIN_TOKEN:
+        raise HTTPException(status_code=401, detail='Chiave admin non valida')
+    return True
 
 
 class SignupBody(BaseModel):
@@ -793,7 +800,7 @@ def _image_from_entry(entry) -> Optional[str]:
 
 
 @api_router.post('/admin/generate-daily')
-async def generate_daily(count: int = 3):
+async def generate_daily(count: int = 3, _: bool = Depends(require_admin)):
     try:
         from emergentintegrations.llm.chat import LlmChat, UserMessage
     except Exception as e:
@@ -813,6 +820,116 @@ async def generate_daily(count: int = 3):
         except Exception as e:
             logger.warning(f"AI generation failed for {cat['id']}: {e}")
     return {'created': created}
+
+
+AGE_BUCKETS = [
+    ('13-17', 13, 18),
+    ('18-24', 18, 25),
+    ('25-34', 25, 35),
+    ('35-44', 35, 45),
+    ('45-54', 45, 55),
+    ('55-64', 55, 65),
+    ('65+', 65, 121),
+]
+
+
+@api_router.get('/admin/stats')
+async def admin_stats(_: bool = Depends(require_admin)):
+    total_users = await db.users.count_documents({})
+    onboarded_users = await db.users.count_documents({'onboarding_completed': True})
+
+    # Join votes with users
+    pipeline = [
+        {'$lookup': {'from': 'users', 'localField': 'user_id', 'foreignField': 'user_id', 'as': 'u'}},
+        {'$unwind': {'path': '$u', 'preserveNullAndEmptyArrays': True}},
+        {'$project': {
+            '_id': 0,
+            'side': 1, 'feud_id': 1,
+            'region': '$u.region',
+            'sex': '$u.sex',
+            'age': '$u.age',
+        }},
+    ]
+    joined = await db.votes.aggregate(pipeline).to_list(100000)
+    total_votes = len(joined)
+
+    by_region: dict = {}
+    by_sex: dict = {'F': 0, 'M': 0, 'other': 0, 'na': 0, 'unknown': 0}
+    by_age: dict = {name: 0 for (name, _lo, _hi) in AGE_BUCKETS}
+    by_age['unknown'] = 0
+
+    for v in joined:
+        r = v.get('region') or 'unknown'
+        by_region[r] = by_region.get(r, 0) + 1
+        s = v.get('sex') or 'unknown'
+        if s not in by_sex:
+            s = 'unknown'
+        by_sex[s] = by_sex.get(s, 0) + 1
+        age = v.get('age')
+        if not isinstance(age, int):
+            by_age['unknown'] += 1
+        else:
+            placed = False
+            for name, lo, hi in AGE_BUCKETS:
+                if lo <= age < hi:
+                    by_age[name] += 1
+                    placed = True
+                    break
+            if not placed:
+                by_age['unknown'] += 1
+
+    region_list = sorted(
+        [{'region': k, 'count': v} for k, v in by_region.items()],
+        key=lambda x: x['count'],
+        reverse=True,
+    )
+
+    # Top feuds by total votes
+    top_pipe = [
+        {'$group': {
+            '_id': '$feud_id',
+            'total': {'$sum': 1},
+            'a': {'$sum': {'$cond': [{'$eq': ['$side', 'A']}, 1, 0]}},
+            'b': {'$sum': {'$cond': [{'$eq': ['$side', 'B']}, 1, 0]}},
+        }},
+        {'$sort': {'total': -1}},
+        {'$limit': 5},
+        {'$lookup': {'from': 'feuds', 'localField': '_id', 'foreignField': 'feud_id', 'as': 'f'}},
+        {'$unwind': {'path': '$f', 'preserveNullAndEmptyArrays': True}},
+        {'$project': {
+            '_id': 0,
+            'feud_id': '$_id',
+            'total': 1, 'a': 1, 'b': 1,
+            'title': '$f.title',
+            'category_label': '$f.category_label',
+            'party_a': '$f.party_a',
+            'party_b': '$f.party_b',
+        }},
+    ]
+    top_feuds_raw = await db.votes.aggregate(top_pipe).to_list(5)
+    top_feuds = []
+    for tf in top_feuds_raw:
+        total = tf.get('total', 0)
+        top_feuds.append({
+            'feud_id': tf.get('feud_id'),
+            'title': tf.get('title') or '(cancellata)',
+            'category_label': tf.get('category_label') or '',
+            'party_a': tf.get('party_a') or 'A',
+            'party_b': tf.get('party_b') or 'B',
+            'total': total,
+            'pct_a': round(100 * tf.get('a', 0) / total) if total else 50,
+            'pct_b': round(100 * tf.get('b', 0) / total) if total else 50,
+        })
+
+    return {
+        'total_users': total_users,
+        'onboarded_users': onboarded_users,
+        'total_votes': total_votes,
+        'by_region': region_list,
+        'by_sex': by_sex,
+        'by_age': by_age,
+        'top_feuds': top_feuds,
+    }
 
 
 async def _generate_feud_for_category(cat: dict, LlmChat, UserMessage) -> Optional[dict]:
