@@ -261,7 +261,7 @@ export default function FeudDetail() {
                 disabled={voting || feud.my_vote === "A" || (!!feud.my_vote && (feud.my_vote_changes_left ?? 0) <= 0)}
                 style={[styles.pollHalf, { backgroundColor: colors.brandPrimary }, feud.my_vote === "B" && { opacity: 0.35 }]}
               >
-                <Text style={styles.pollPct}>{feud.revealed ? `${feud.pct_a}%` : "?"}</Text>
+                <Text style={styles.pollPct}>{feud.revealed ? `${feud.pct_a}%` : ""}</Text>
                 <Text style={styles.pollName}>{feud.party_a}</Text>
                 <Text style={styles.pollVotes}>{feud.revealed ? `${feud.votes_a} voti` : "voti nascosti"}</Text>
                 {feud.my_vote === "A" && <View style={styles.checkPill}><Ionicons name="checkmark" size={14} color={colors.brandPrimary} /></View>}
@@ -272,7 +272,7 @@ export default function FeudDetail() {
                 disabled={voting || feud.my_vote === "B" || (!!feud.my_vote && (feud.my_vote_changes_left ?? 0) <= 0)}
                 style={[styles.pollHalf, { backgroundColor: colors.brandSecondary }, feud.my_vote === "A" && { opacity: 0.35 }]}
               >
-                <Text style={[styles.pollPct, { color: colors.onBrandSecondary }]}>{feud.revealed ? `${feud.pct_b}%` : "?"}</Text>
+                <Text style={[styles.pollPct, { color: colors.onBrandSecondary }]}>{feud.revealed ? `${feud.pct_b}%` : ""}</Text>
                 <Text style={[styles.pollName, { color: colors.onBrandSecondary }]}>{feud.party_b}</Text>
                 <Text style={[styles.pollVotes, { color: colors.onBrandSecondary }]}>{feud.revealed ? `${feud.votes_b} voti` : "voti nascosti"}</Text>
                 {feud.my_vote === "B" && <View style={[styles.checkPill, { backgroundColor: colors.onBrandSecondary }]}><Ionicons name="checkmark" size={14} color={colors.brandSecondary} /></View>}

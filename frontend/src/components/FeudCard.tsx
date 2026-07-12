@@ -28,11 +28,11 @@ export default function FeudCard({ feud, onPress, showArchivedBadge = false }: {
       </ImageBackground>
       <View style={styles.splitRow}>
         <View style={[styles.splitHalf, { backgroundColor: colors.brandPrimary }]}>
-          <Text style={styles.splitPct}>{revealed ? `${feud.pct_a}%` : "?"}</Text>
+          <Text style={styles.splitPct}>{revealed ? `${feud.pct_a}%` : ""}</Text>
           <Text style={styles.splitLabel} numberOfLines={2}>{feud.party_a}</Text>
         </View>
         <View style={[styles.splitHalf, { backgroundColor: colors.brandSecondary }]}>
-          <Text style={[styles.splitPct, { color: colors.onBrandSecondary }]}>{revealed ? `${feud.pct_b}%` : "?"}</Text>
+          <Text style={[styles.splitPct, { color: colors.onBrandSecondary }]}>{revealed ? `${feud.pct_b}%` : ""}</Text>
           <Text style={[styles.splitLabel, { color: colors.onBrandSecondary }]} numberOfLines={2}>{feud.party_b}</Text>
         </View>
       </View>
