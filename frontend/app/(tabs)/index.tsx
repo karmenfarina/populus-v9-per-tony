@@ -88,12 +88,12 @@ export default function HomeFeed() {
         <View style={styles.headerTop}>
           <View style={{ flex: 1 }}>
             <View style={styles.brandRow}>
+              <Text style={styles.brand}>POPULUS</Text>
               <Image
                 source={require("../../assets/images/icon.png")}
                 style={styles.brandLogo}
                 resizeMode="contain"
               />
-              <Text style={styles.brand}>POPULUS</Text>
             </View>
             <Text style={styles.date}>{new Date().toLocaleDateString("it-IT", { day: "numeric", month: "long" }).toUpperCase()}</Text>
           </View>
