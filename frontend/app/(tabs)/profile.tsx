@@ -229,6 +229,45 @@ export default function Profile() {
   const badgeUnlocked = badge?.unlocked;
   const badgeType = badge?.type;
 
+  // Anonymous users don't have a profile page. Show a full-screen block with
+  // the same "profilo bloccato / registrati ora" message + CTA.
+  if (isAnonymous) {
+    return (
+      <SafeAreaView style={styles.safe} edges={["top"]} testID="profile-screen">
+        <View style={styles.anonLockScreen} testID="anon-lock-screen">
+          <View style={styles.anonLockCircle}>
+            <Ionicons name="lock-closed-outline" size={72} color={colors.brandSecondary} />
+          </View>
+          <Text style={styles.anonLockTitle}>PROFILO BLOCCATO</Text>
+          <Text style={styles.anonLockSubtitle}>@{user.nickname}</Text>
+          <Text style={styles.anonLockBody}>
+            Come utente anonimo non hai un profilo pubblico e non puoi aggiungere foto,
+            descrizione, link social o vedere il tuo storico voti.
+          </Text>
+          <Text style={styles.anonLockBody}>
+            Registrati con un account per sbloccare tutte le funzionalità.
+          </Text>
+          <Pressable
+            onPress={async () => { await logout(); router.replace("/auth"); }}
+            testID="anon-register-btn"
+            style={styles.anonLockCta}
+          >
+            <Text style={styles.anonLockCtaTxt}>REGISTRATI ORA  ›</Text>
+          </Pressable>
+          <Pressable
+            onPress={async () => { await logout(); router.replace("/auth"); }}
+            testID="anon-logout-btn"
+            style={styles.anonLockLogout}
+            hitSlop={8}
+          >
+            <Ionicons name="log-out-outline" size={14} color={colors.muted} />
+            <Text style={styles.anonLockLogoutTxt}>Esci dalla sessione anonima</Text>
+          </Pressable>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.safe} edges={["top"]} testID="profile-screen">
       <ScrollView contentContainerStyle={styles.content}>
@@ -602,6 +641,15 @@ const styles = StyleSheet.create({
   anonBannerBody: { color: colors.onSurfaceInverse, fontSize: font.sizes.sm, lineHeight: 18 },
   anonRegisterBtn: { alignSelf: "flex-start", backgroundColor: colors.brandPrimary, borderWidth: 2, borderColor: colors.brandSecondary, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
   anonRegisterTxt: { color: colors.onBrandPrimary, fontSize: font.sizes.base, letterSpacing: 2, fontWeight: "500" },
+  anonLockScreen: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.xxl, gap: spacing.md, backgroundColor: colors.surface },
+  anonLockCircle: { width: 140, height: 140, borderRadius: 70, borderWidth: 4, borderColor: colors.brandSecondary, alignItems: "center", justifyContent: "center", backgroundColor: colors.surfaceInverse, marginBottom: spacing.sm },
+  anonLockTitle: { fontSize: font.sizes.xxxl, letterSpacing: 3, fontWeight: "500", color: colors.onSurface, textAlign: "center" },
+  anonLockSubtitle: { fontSize: font.sizes.base, color: colors.brandPrimary, letterSpacing: 1, marginTop: -spacing.xs },
+  anonLockBody: { fontSize: font.sizes.sm, color: colors.muted, textAlign: "center", lineHeight: 20, paddingHorizontal: spacing.md },
+  anonLockCta: { marginTop: spacing.lg, backgroundColor: colors.brandPrimary, borderWidth: 3, borderColor: colors.onSurface, paddingHorizontal: spacing.xxl, paddingVertical: spacing.md },
+  anonLockCtaTxt: { color: colors.onBrandPrimary, fontSize: font.sizes.lg, letterSpacing: 3, fontWeight: "500" },
+  anonLockLogout: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: spacing.md, paddingVertical: spacing.xs },
+  anonLockLogoutTxt: { color: colors.muted, fontSize: font.sizes.xs, letterSpacing: 1 },
   editSectionTitle: { fontSize: font.sizes.sm, letterSpacing: 2, fontWeight: "500", color: colors.brandPrimary },
   photosGrid: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, marginTop: spacing.xs },
   photoBox: { width: 90, height: 90, borderWidth: 2, borderColor: colors.border, position: "relative", overflow: "hidden", backgroundColor: colors.surfaceSecondary },
