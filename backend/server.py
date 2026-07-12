@@ -741,11 +741,15 @@ async def get_feud(feud_id: str, user: Optional[dict] = Depends(get_current_user
             detail='Faida più vecchia di 2 settimane',
         )
     my_vote = None
+    my_vote_changes = 0
     if user:
         vote = await db.votes.find_one({'feud_id': feud_id, 'user_id': user['user_id']}, {'_id': 0})
         my_vote = vote.get('side') if vote else None
+        my_vote_changes = int(vote.get('change_count') or 0) if vote else 0
     _attach_percentages(doc, revealed=bool(my_vote))
     doc['my_vote'] = my_vote
+    doc['my_vote_changes'] = my_vote_changes
+    doc['my_vote_changes_left'] = max(0, MAX_VOTE_CHANGES - my_vote_changes)
     return {'feud': doc}
 
 
@@ -833,6 +837,9 @@ _RSS_CACHE: dict = {}  # key: cat_id -> (expires_ts, results)
 _RSS_TTL_SECONDS = 30 * 60  # 30 minutes
 
 
+MAX_VOTE_CHANGES = 2
+
+
 @api_router.post('/feuds/{feud_id}/vote')
 async def vote_feud(feud_id: str, body: VoteBody, user: dict = Depends(get_current_user)):
     feud = await db.feuds.find_one({'feud_id': feud_id}, {'_id': 0})
@@ -840,10 +847,39 @@ async def vote_feud(feud_id: str, body: VoteBody, user: dict = Depends(get_curre
         raise HTTPException(status_code=404, detail='Faida non trovata')
     existing = await db.votes.find_one({'feud_id': feud_id, 'user_id': user['user_id']}, {'_id': 0})
     if existing:
-        raise HTTPException(status_code=400, detail='Hai già votato')
+        if existing.get('side') == body.side:
+            raise HTTPException(status_code=400, detail='Hai già votato per questa parte')
+        change_count = int(existing.get('change_count') or 0)
+        if change_count >= MAX_VOTE_CHANGES:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Hai raggiunto il limite di {MAX_VOTE_CHANGES} cambi voto",
+            )
+        old_side = existing['side']
+        dec_field = 'votes_a' if old_side == 'A' else 'votes_b'
+        inc_field = 'votes_a' if body.side == 'A' else 'votes_b'
+        await db.votes.update_one(
+            {'vote_id': existing['vote_id']},
+            {'$set': {
+                'side': body.side,
+                'change_count': change_count + 1,
+                'updated_at': now_utc(),
+            }},
+        )
+        await db.feuds.update_one(
+            {'feud_id': feud_id},
+            {'$inc': {dec_field: -1, inc_field: 1}},
+        )
+        await _recompute_user_alignment(user['user_id'])
+        updated = await db.feuds.find_one({'feud_id': feud_id}, {'_id': 0})
+        _attach_percentages(updated, revealed=True)
+        updated['my_vote'] = body.side
+        updated['my_vote_changes'] = change_count + 1
+        updated['my_vote_changes_left'] = MAX_VOTE_CHANGES - (change_count + 1)
+        return {'feud': updated, 'changed': True}
     await db.votes.insert_one({
         'vote_id': new_id('vote'), 'feud_id': feud_id, 'user_id': user['user_id'],
-        'side': body.side, 'created_at': now_utc(),
+        'side': body.side, 'created_at': now_utc(), 'change_count': 0,
         # Denormalized snapshot — allows history to render feud preview even after
         # the feud is purged from `feuds` (retention: 14 days).
         'feud_snapshot': {
@@ -860,7 +896,9 @@ async def vote_feud(feud_id: str, body: VoteBody, user: dict = Depends(get_curre
     updated = await db.feuds.find_one({'feud_id': feud_id}, {'_id': 0})
     _attach_percentages(updated, revealed=True)
     updated['my_vote'] = body.side
-    return {'feud': updated}
+    updated['my_vote_changes'] = 0
+    updated['my_vote_changes_left'] = MAX_VOTE_CHANGES
+    return {'feud': updated, 'changed': False}
 
 
 # ----------------------- Sponsors -----------------------
@@ -987,8 +1025,19 @@ async def public_user_history(user_id: str, filter: str = 'all'):
 @api_router.get('/feuds/{feud_id}/comments')
 async def get_comments(feud_id: str):
     docs = await db.comments.find({'feud_id': feud_id}, {'_id': 0}).sort('created_at', -1).to_list(500)
-    for c in docs:
-        c['reply_count'] = await db.replies.count_documents({'comment_id': c['comment_id']})
+    # Nickname colour follows the user's CURRENT vote (up to 2 vote changes are
+    # allowed per feud) — so a user who commented as A but then switched to B
+    # is displayed with the B accent everywhere.
+    if docs:
+        uids = list({c['user_id'] for c in docs})
+        current_votes = await db.votes.find(
+            {'feud_id': feud_id, 'user_id': {'$in': uids}},
+            {'_id': 0, 'user_id': 1, 'side': 1},
+        ).to_list(len(uids))
+        current = {v['user_id']: v['side'] for v in current_votes}
+        for c in docs:
+            c['reply_count'] = await db.replies.count_documents({'comment_id': c['comment_id']})
+            c['nickname_side'] = current.get(c['user_id'], c['side'])
     a = [c for c in docs if c['side'] == 'A']
     b = [c for c in docs if c['side'] == 'B']
     return {'side_a': a, 'side_b': b}
@@ -1019,6 +1068,18 @@ async def add_comment(feud_id: str, body: CommentBody, user: dict = Depends(get_
 @api_router.get('/comments/{comment_id}/replies')
 async def list_replies(comment_id: str):
     docs = await db.replies.find({'comment_id': comment_id}, {'_id': 0}).sort('created_at', 1).to_list(500)
+    if docs:
+        # Colour reply nicknames by the author's CURRENT vote on the parent feud.
+        feud_id = docs[0].get('feud_id')
+        uids = list({r['user_id'] for r in docs})
+        if feud_id:
+            current_votes = await db.votes.find(
+                {'feud_id': feud_id, 'user_id': {'$in': uids}},
+                {'_id': 0, 'user_id': 1, 'side': 1},
+            ).to_list(len(uids))
+            current = {v['user_id']: v['side'] for v in current_votes}
+            for r in docs:
+                r['nickname_side'] = current.get(r['user_id'], r['side'])
     return {'replies': docs}
 
 

@@ -1,0 +1,53 @@
+{
+  "summary": "Vote-change feature (max 2 changes) + dynamic nickname colouring via nickname_side tested end-to-end. Backend: 2/2 pytest cases PASS (test_vote_changes.py). Frontend: all 7 UI assertions PASS at 390x844 including first vote, same-side reject, A->B switch (hint '1 volta' singular), 2nd switch (hint 'esaurito'), 3rd change no-op, comment stays in PRO A tab with nickname_side=B after vote change, and unvoted-user regression hint still shown.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "props.pointerEvents", "issue": "Console warning 'props.pointerEvents is deprecated. Use style.pointerEvents' still logged repeatedly (pre-existing, non-blocking, react-native-web internal)."}
+    ]
+  },
+  "backend_assertions": {
+    "first_vote_A_returns_changed_false": "PASS (200, my_vote=A, my_vote_changes=0, left=2, votes_a += 1)",
+    "same_side_A_400": "PASS ('Hai già votato per questa parte'; counters unchanged)",
+    "switch_to_B_changed_true": "PASS (my_vote=B, changes=1, left=1, votes_a -1, votes_b +1)",
+    "switch_back_to_A_second_change": "PASS (my_vote=A, changes=2, left=0)",
+    "third_change_403": "PASS ('Hai raggiunto il limite di 2 cambi voto')",
+    "get_feud_carries_changes_state": "PASS (my_vote_changes=2, my_vote_changes_left=0 on GET /feuds/{id} with Bearer)",
+    "comments_nickname_side_reflects_current_vote": "PASS (comment side stays A frozen; nickname_side flips to B after vote change)"
+  },
+  "frontend_assertions": {
+    "signup_onboarding_localStorage_navigate_feud": "PASS",
+    "vote_A_hint_2_volte": "PASS ('Puoi cambiare voto ancora 2 volte · tocca l\\'altra fazione')",
+    "vote_A_button_aria_disabled_true_after_vote_A": "PASS (vote-b remains enabled)",
+    "comment_post_appears_in_PRO_A_tab": "PASS",
+    "vote_B_after_A_hint_1_volta_singular": "PASS",
+    "comment_still_visible_in_PRO_A_after_switch": "PASS (frozen side); backend nickname_side=B confirmed via /api/feuds/{id}/comments",
+    "vote_A_again_hint_esaurito": "PASS ('Hai esaurito i cambi voto disponibili')",
+    "third_change_tap_noop": "PASS (my_vote and my_vote_changes unchanged after tapping vote-B when exhausted)",
+    "regression_unvoted_user_sees_standard_hint": "PASS (no vote-change-hint; 'Vota per svelare i risultati' present)"
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_vote_changes.py",
+    "/app/test_reports/pytest/vote_changes.xml"
+  ],
+  "action_items": [
+    "OPTIONAL: address 'props.pointerEvents is deprecated' warnings (pre-existing carry-over, not caused by this feature)."
+  ],
+  "critical_code_review_comments": [
+    "backend/server.py POST /feuds/{id}/vote correctly guards MAX_VOTE_CHANGES with same-side 400, third-change 403, and increments change_count only on side switch.",
+    "GET /feuds/{id} exposes my_vote_changes and my_vote_changes_left based on the vote row's change_count.",
+    "get_comments / list_replies join the live votes collection and embed nickname_side per commenter — falls back to c['side'] when the user later revokes/no vote row exists (defensive).",
+    "frontend feud/[id].tsx disables the currently-chosen side always and disables the OTHER side only when my_vote_changes_left<=0. Hint pluralizes correctly (volta vs volte).",
+    "CommentItem uses sideColor(c.nickname_side || c.side) so nickname colour updates immediately after the vote() call reloads comments."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "seed_data_creation": "Signed up two fresh email users (TEST_vc_* and TEST_vcui_*) plus one anonymous user for regression. Cast up to 2 vote changes on live feuds and posted 1 comment marked with TEST_ prefix.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Vote-change feature is fully working across backend (MAX_VOTE_CHANGES=2 enforcement, changed flag, feud.my_vote_changes/_left) and frontend (dynamic hint pluralization, disabled-state logic, comment reload with nickname_side). No regressions observed on standard hint or anonymous flows.",
+  "rca_of_issue": ""
+}

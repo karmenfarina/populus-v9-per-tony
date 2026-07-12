@@ -191,6 +191,8 @@ export type Feud = {
   pct_b: number | null;
   revealed: boolean;
   my_vote?: 'A' | 'B' | null;
+  my_vote_changes?: number;
+  my_vote_changes_left?: number;
   sources?: { title: string; link: string; source: string }[];
 };
 
@@ -200,6 +202,7 @@ export type Comment = {
   user_id: string;
   nickname: string;
   side: 'A' | 'B';
+  nickname_side?: 'A' | 'B';
   text: string;
   reply_count?: number;
   created_at: string;

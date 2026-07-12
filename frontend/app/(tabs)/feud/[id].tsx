@@ -56,12 +56,24 @@ export default function FeudDetail() {
   }, [loadAll]);
 
   const vote = async (side: "A" | "B") => {
-    if (!feud || feud.my_vote) return;
+    if (!feud) return;
+    // Same side & already voted → no-op (button is greyed out anyway).
+    if (feud.my_vote === side) return;
+    // If switching sides, respect the change limit.
+    if (feud.my_vote && (feud.my_vote_changes_left ?? 0) <= 0) {
+      setError("Hai raggiunto il limite di cambi voto");
+      return;
+    }
     setVoting(true); setError(null);
     try {
       try { await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); } catch {}
       const res = await api.vote(feud.feud_id, side);
       setFeud(res.feud);
+      // Reload comments so nickname_side reflects the new faction everywhere.
+      try {
+        const c = await api.comments(feud.feud_id);
+        setSideA(c.side_a); setSideB(c.side_b);
+      } catch {}
     } catch (e: any) { setError(e?.message || "Errore"); }
     finally { setVoting(false); }
   };
@@ -225,7 +237,7 @@ export default function FeudDetail() {
               <Pressable
                 testID="vote-a-button"
                 onPress={() => vote("A")}
-                disabled={voting || !!feud.my_vote}
+                disabled={voting || feud.my_vote === "A" || (!!feud.my_vote && (feud.my_vote_changes_left ?? 0) <= 0)}
                 style={[styles.pollHalf, { backgroundColor: colors.brandPrimary }, feud.my_vote === "B" && { opacity: 0.35 }]}
               >
                 <Text style={styles.pollPct}>{feud.revealed ? `${feud.pct_a}%` : "?"}</Text>
@@ -236,7 +248,7 @@ export default function FeudDetail() {
               <Pressable
                 testID="vote-b-button"
                 onPress={() => vote("B")}
-                disabled={voting || !!feud.my_vote}
+                disabled={voting || feud.my_vote === "B" || (!!feud.my_vote && (feud.my_vote_changes_left ?? 0) <= 0)}
                 style={[styles.pollHalf, { backgroundColor: colors.brandSecondary }, feud.my_vote === "A" && { opacity: 0.35 }]}
               >
                 <Text style={[styles.pollPct, { color: colors.onBrandSecondary }]}>{feud.revealed ? `${feud.pct_b}%` : "?"}</Text>
@@ -246,6 +258,13 @@ export default function FeudDetail() {
               </Pressable>
             </View>
             {!feud.my_vote && <Text style={styles.pollHint}>Vota per svelare i risultati e sbloccare i commenti.</Text>}
+            {feud.my_vote && (
+              <Text style={styles.pollHint} testID="vote-change-hint">
+                {(feud.my_vote_changes_left ?? 0) > 0
+                  ? `Puoi cambiare voto ancora ${feud.my_vote_changes_left} ${feud.my_vote_changes_left === 1 ? "volta" : "volte"} · tocca l'altra fazione`
+                  : "Hai esaurito i cambi voto disponibili"}
+              </Text>
+            )}
           </View>
 
           {error && <Text style={styles.err}>{error}</Text>}
@@ -360,7 +379,10 @@ function CommentItem({
 }) {
   const router = useRouter();
   const isReplying = replyingTo === c.comment_id;
-  const accent = sideColor(c.side);
+  // Nickname colour follows the commenter's CURRENT vote (they might have
+  // switched sides after posting). `nickname_side` is set by the backend based
+  // on the live vote row; falls back to the comment's own side for legacy rows.
+  const accent = sideColor((c.nickname_side || c.side) as "A" | "B");
   return (
     <View style={cs.item} testID={`comment-${c.comment_id}`}>
       <View style={[cs.sideBar, { backgroundColor: accent }]} />
@@ -395,7 +417,7 @@ function CommentItem({
         {expanded && expanded.length > 0 && (
           <View style={cs.replies}>
             {expanded.map((r) => {
-              const rAccent = sideColor(r.side);
+              const rAccent = sideColor((r.nickname_side || r.side) as "A" | "B");
               return (
                 <View key={r.reply_id} style={cs.reply}>
                   <View style={[cs.replySideBar, { backgroundColor: rAccent }]} />
