@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   View, Text, StyleSheet, ScrollView, Pressable, FlatList, RefreshControl,
-  ActivityIndicator, TextInput,
+  ActivityIndicator, TextInput, Image,
 } from "react-native";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -87,7 +87,14 @@ export default function HomeFeed() {
       <View style={styles.header}>
         <View style={styles.headerTop}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.brand}>POPULUS</Text>
+            <View style={styles.brandRow}>
+              <Image
+                source={require("../../assets/images/icon.png")}
+                style={styles.brandLogo}
+                resizeMode="contain"
+              />
+              <Text style={styles.brand}>POPULUS</Text>
+            </View>
             <Text style={styles.date}>{new Date().toLocaleDateString("it-IT", { day: "numeric", month: "long" }).toUpperCase()}</Text>
           </View>
           <Pressable onPress={() => router.push(`/archive?category=${selected}`)} testID="archive-toggle" style={styles.archiveBtn}>
@@ -171,6 +178,8 @@ const styles = StyleSheet.create({
   searchWrap: { flexDirection: "row", alignItems: "center", marginTop: spacing.sm },
   searchInput: { flex: 1, borderWidth: 2, borderColor: colors.brandSecondary, backgroundColor: colors.surfaceInverse, color: colors.onSurfaceInverse, padding: spacing.sm, fontSize: font.sizes.base },
   brand: { color: colors.onSurfaceInverse, fontSize: font.sizes.xxxl, letterSpacing: 2, fontWeight: "500" },
+  brandRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
+  brandLogo: { width: 32, height: 32 },
   date: { color: colors.brandSecondary, fontSize: font.sizes.sm, letterSpacing: 2, marginTop: 2 },
   chipRowWrap: { height: 56, backgroundColor: colors.surfaceInverse, borderBottomWidth: 2, borderColor: colors.border },
   chipRowContent: { paddingHorizontal: spacing.lg, gap: spacing.sm, alignItems: "center" },
