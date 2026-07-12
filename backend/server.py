@@ -870,6 +870,17 @@ async def vote_feud(feud_id: str, body: VoteBody, user: dict = Depends(get_curre
             {'feud_id': feud_id},
             {'$inc': {dec_field: -1, inc_field: 1}},
         )
+        # Coherence rule: a user can only own comments/replies in the faction
+        # they're currently voting for. On vote change, purge everything they
+        # posted on this feud (comments + their child replies + own replies).
+        old_ids = [c['comment_id'] async for c in db.comments.find(
+            {'feud_id': feud_id, 'user_id': user['user_id']},
+            {'_id': 0, 'comment_id': 1},
+        )]
+        if old_ids:
+            await db.replies.delete_many({'comment_id': {'$in': old_ids}})
+        await db.comments.delete_many({'feud_id': feud_id, 'user_id': user['user_id']})
+        await db.replies.delete_many({'feud_id': feud_id, 'user_id': user['user_id']})
         await _recompute_user_alignment(user['user_id'])
         updated = await db.feuds.find_one({'feud_id': feud_id}, {'_id': 0})
         _attach_percentages(updated, revealed=True)
