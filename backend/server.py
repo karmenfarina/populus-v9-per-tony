@@ -550,7 +550,80 @@ async def list_feuds(category: Optional[str] = None, user: Optional[dict] = Depe
         my_vote = voted_map.get(d['feud_id']) if user else None
         _attach_percentages(d, revealed=bool(my_vote))
         d['my_vote'] = my_vote
-    return {'feuds': docs}
+    # Personalization: on the "all" feed, blend recency with the user's category
+    # affinity (votes+comments+views+favorites). Users without any signal keep
+    # the pure chronological order.
+    personalized = False
+    if user and docs and (not category or category == 'all'):
+        affinity = await _compute_user_affinity(user)
+        if affinity:
+            n = len(docs)
+            max_aff = max(affinity.values()) or 1.0
+            for i, d in enumerate(docs):
+                aff_norm = (affinity.get(d.get('category'), 0.0)) / max_aff
+                rec_norm = (n - i) / n  # 1.0 = newest
+                d['_rank'] = 0.65 * aff_norm + 0.35 * rec_norm
+            docs.sort(key=lambda x: x.get('_rank', 0.0), reverse=True)
+            for d in docs:
+                d.pop('_rank', None)
+            personalized = True
+    return {'feuds': docs, 'personalized': personalized}
+
+
+async def _compute_user_affinity(user: dict) -> dict:
+    """Returns {category_id: score} based on votes, comments, views and
+    onboarding favorites. Higher = user is more engaged with that category."""
+    uid = user['user_id']
+    score: dict = {}
+    # Votes → weight 4 (strongest engagement)
+    async for v in db.votes.find(
+        {'user_id': uid}, {'_id': 0, 'feud_id': 1, 'feud_snapshot': 1}
+    ):
+        cat = None
+        snap = v.get('feud_snapshot') or {}
+        if snap.get('category'):
+            cat = snap['category']
+        else:
+            f = await db.feuds.find_one({'feud_id': v['feud_id']}, {'_id': 0, 'category': 1})
+            if f:
+                cat = f.get('category')
+        if cat:
+            score[cat] = score.get(cat, 0.0) + 4.0
+    # Comments → weight 3
+    async for c in db.comments.find({'user_id': uid}, {'_id': 0, 'feud_id': 1}):
+        f = await db.feuds.find_one({'feud_id': c['feud_id']}, {'_id': 0, 'category': 1})
+        if f and f.get('category'):
+            score[f['category']] = score.get(f['category'], 0.0) + 3.0
+    # Views → weight 1 (aggregated `count` per feud)
+    async for v in db.feud_views.find(
+        {'user_id': uid}, {'_id': 0, 'category': 1, 'count': 1}
+    ):
+        if v.get('category'):
+            score[v['category']] = score.get(v['category'], 0.0) + 1.0 * float(v.get('count') or 1)
+    # Onboarding favorites → flat +8 bonus (baseline)
+    for fav in (user.get('favorite_categories') or []):
+        score[fav] = score.get(fav, 0.0) + 8.0
+    return score
+
+
+@api_router.post('/feuds/{feud_id}/view')
+async def record_view(feud_id: str, user: dict = Depends(get_current_user)):
+    """Fire-and-forget: track that the user opened this feud's detail view.
+    Used for personalization ranking on the /feuds home feed."""
+    f = await db.feuds.find_one({'feud_id': feud_id}, {'_id': 0, 'category': 1})
+    if not f:
+        # Silently no-op on missing feud; don't punish the client.
+        return {'ok': False}
+    await db.feud_views.update_one(
+        {'user_id': user['user_id'], 'feud_id': feud_id},
+        {
+            '$setOnInsert': {'user_id': user['user_id'], 'feud_id': feud_id, 'category': f.get('category')},
+            '$set': {'last_viewed_at': now_utc(), 'category': f.get('category')},
+            '$inc': {'count': 1},
+        },
+        upsert=True,
+    )
+    return {'ok': True}
 
 
 ARCHIVE_MAX_DAYS = 7
@@ -888,6 +961,7 @@ async def vote_feud(feud_id: str, body: VoteBody, user: dict = Depends(get_curre
         # the feud is purged from `feuds` (retention: 14 days).
         'feud_snapshot': {
             'title': feud.get('title'),
+            'category': feud.get('category'),
             'category_label': feud.get('category_label'),
             'party_a': feud.get('party_a'),
             'party_b': feud.get('party_b'),

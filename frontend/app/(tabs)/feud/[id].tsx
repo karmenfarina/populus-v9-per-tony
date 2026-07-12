@@ -54,7 +54,9 @@ export default function FeudDetail() {
       }
       finally { setLoading(false); }
     })();
-  }, [loadAll]);
+    // Fire-and-forget engagement signal for the personalized feed.
+    if (id) { api.recordView(id); }
+  }, [loadAll, id]);
 
   const vote = async (side: "A" | "B") => {
     if (!feud) return;

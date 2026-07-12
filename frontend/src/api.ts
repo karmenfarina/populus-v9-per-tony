@@ -58,6 +58,8 @@ export const api = {
   categories: () => request('/categories'),
   feuds: (category?: string) => request(`/feuds${category && category !== 'all' ? `?category=${category}` : ''}`),
   feud: (id: string) => request(`/feuds/${id}`),
+  recordView: (id: string) =>
+    request(`/feuds/${id}/view`, { method: 'POST' }).catch(() => null),
   vote: (id: string, side: 'A' | 'B') =>
     request(`/feuds/${id}/vote`, { method: 'POST', body: JSON.stringify({ side }) }),
   comments: (id: string) => request(`/feuds/${id}/comments`),
