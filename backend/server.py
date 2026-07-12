@@ -870,17 +870,10 @@ async def vote_feud(feud_id: str, body: VoteBody, user: dict = Depends(get_curre
             {'feud_id': feud_id},
             {'$inc': {dec_field: -1, inc_field: 1}},
         )
-        # Coherence rule: a user can only own comments/replies in the faction
-        # they're currently voting for. On vote change, purge everything they
-        # posted on this feud (comments + their child replies + own replies).
-        old_ids = [c['comment_id'] async for c in db.comments.find(
-            {'feud_id': feud_id, 'user_id': user['user_id']},
-            {'_id': 0, 'comment_id': 1},
-        )]
-        if old_ids:
-            await db.replies.delete_many({'comment_id': {'$in': old_ids}})
-        await db.comments.delete_many({'feud_id': feud_id, 'user_id': user['user_id']})
-        await db.replies.delete_many({'feud_id': feud_id, 'user_id': user['user_id']})
+        # Coherence via visibility, not deletion:
+        # A user's comments/replies persist in the DB but are only surfaced when
+        # the user's CURRENT vote matches the comment/reply side. Switching back
+        # to a previous faction re-exposes what was hidden, symmetric on both sides.
         await _recompute_user_alignment(user['user_id'])
         updated = await db.feuds.find_one({'feud_id': feud_id}, {'_id': 0})
         _attach_percentages(updated, revealed=True)
@@ -1036,9 +1029,10 @@ async def public_user_history(user_id: str, filter: str = 'all'):
 @api_router.get('/feuds/{feud_id}/comments')
 async def get_comments(feud_id: str):
     docs = await db.comments.find({'feud_id': feud_id}, {'_id': 0}).sort('created_at', -1).to_list(500)
-    # Nickname colour follows the user's CURRENT vote (up to 2 vote changes are
-    # allowed per feud) — so a user who commented as A but then switched to B
-    # is displayed with the B accent everywhere.
+    # Visibility rule: a comment is shown only if its author is CURRENTLY voting
+    # for the same side the comment was posted on. Comments where the author has
+    # since switched sides are hidden — they reappear if the author switches
+    # back to the original faction.
     if docs:
         uids = list({c['user_id'] for c in docs})
         current_votes = await db.votes.find(
@@ -1046,9 +1040,29 @@ async def get_comments(feud_id: str):
             {'_id': 0, 'user_id': 1, 'side': 1},
         ).to_list(len(uids))
         current = {v['user_id']: v['side'] for v in current_votes}
-        for c in docs:
-            c['reply_count'] = await db.replies.count_documents({'comment_id': c['comment_id']})
-            c['nickname_side'] = current.get(c['user_id'], c['side'])
+        docs = [c for c in docs if current.get(c['user_id'], c['side']) == c['side']]
+        if docs:
+            # Batch-count only *visible* replies (author's current vote matches).
+            cmt_ids = [c['comment_id'] for c in docs]
+            all_replies = await db.replies.find(
+                {'comment_id': {'$in': cmt_ids}},
+                {'_id': 0, 'comment_id': 1, 'user_id': 1, 'side': 1},
+            ).to_list(10000)
+            extra_uids = list({r['user_id'] for r in all_replies} - set(current.keys()))
+            if extra_uids:
+                extra = await db.votes.find(
+                    {'feud_id': feud_id, 'user_id': {'$in': extra_uids}},
+                    {'_id': 0, 'user_id': 1, 'side': 1},
+                ).to_list(len(extra_uids))
+                for v in extra:
+                    current[v['user_id']] = v['side']
+            reply_counts: dict = {}
+            for r in all_replies:
+                if current.get(r['user_id'], r['side']) == r['side']:
+                    reply_counts[r['comment_id']] = reply_counts.get(r['comment_id'], 0) + 1
+            for c in docs:
+                c['reply_count'] = reply_counts.get(c['comment_id'], 0)
+                c['nickname_side'] = c['side']
     a = [c for c in docs if c['side'] == 'A']
     b = [c for c in docs if c['side'] == 'B']
     return {'side_a': a, 'side_b': b}
@@ -1080,7 +1094,8 @@ async def add_comment(feud_id: str, body: CommentBody, user: dict = Depends(get_
 async def list_replies(comment_id: str):
     docs = await db.replies.find({'comment_id': comment_id}, {'_id': 0}).sort('created_at', 1).to_list(500)
     if docs:
-        # Colour reply nicknames by the author's CURRENT vote on the parent feud.
+        # Same visibility rule as comments: a reply is shown only if its author
+        # is currently voting on the side the reply was posted on.
         feud_id = docs[0].get('feud_id')
         uids = list({r['user_id'] for r in docs})
         if feud_id:
@@ -1089,8 +1104,9 @@ async def list_replies(comment_id: str):
                 {'_id': 0, 'user_id': 1, 'side': 1},
             ).to_list(len(uids))
             current = {v['user_id']: v['side'] for v in current_votes}
+            docs = [r for r in docs if current.get(r['user_id'], r['side']) == r['side']]
             for r in docs:
-                r['nickname_side'] = current.get(r['user_id'], r['side'])
+                r['nickname_side'] = r['side']
     return {'replies': docs}
 
 
