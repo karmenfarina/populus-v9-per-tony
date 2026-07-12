@@ -38,6 +38,14 @@ export default function TabsLayout() {
           tabBarIcon: ({ color, size }) => <Ionicons name="person" color={color} size={size} />,
         }}
       />
+      {/* Nested screens that must render inside the tab bar layout but should
+          not appear as their own tab entries. Setting `href: null` hides the
+          tab icon while still keeping the tab bar visible when navigating to
+          these routes. */}
+      <Tabs.Screen name="feud/[id]" options={{ href: null }} />
+      <Tabs.Screen name="user/[id]" options={{ href: null }} />
+      <Tabs.Screen name="archive" options={{ href: null }} />
+      <Tabs.Screen name="admin" options={{ href: null }} />
     </Tabs>
   );
 }

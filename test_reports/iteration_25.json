@@ -1,0 +1,58 @@
+{
+  "summary": "Tested Bug 1 (tab bar persistence) and Bug 2 (realtime history refresh) on Populus at 390x844. Both fixes verified. Tab bar (FAIDE + PROFILO) visible on /, /feud/<id>, /user/<id>, /archive, /admin with only TWO tab icons (no leaking of hidden screens). PROFILO tap from /feud/<id> navigates to /profile as expected. Profile refresh-on-focus works: total_votes counter and stats increment 0->1->2 without logout/login after casting votes elsewhere. History item appears on re-expand of STORICO VOTI. Anon /profile still shows anon-lock-screen (regression OK).",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "props.pointerEvents", "issue": "Console warning 'props.pointerEvents is deprecated. Use style.pointerEvents' logged repeatedly. Likely coming from a react-native-web component in the render tree. Non-blocking but should be addressed."}
+    ]
+  },
+  "bug1_tab_bar_persistence": {
+    "home": "PASS - FAIDE + PROFILO visible, exactly 1 occurrence each",
+    "feud_id": "PASS - tab bar visible on /feud/feud_f1a8e5b8dea4",
+    "user_id": "PASS - tab bar visible on /user/user_34c2f036bb2e",
+    "archive": "PASS - tab bar visible on /archive?category=all",
+    "admin": "PASS - tab bar visible on /admin",
+    "only_two_tabs": "PASS - home shows FAIDE=1, PROFILO=1 (hidden screens do not create extra tab entries)",
+    "profilo_nav_from_feud": "PASS - tap PROFILO on /feud/<id> navigates to /profile"
+  },
+  "bug2_history_refresh": {
+    "signup_onboarding": "PASS - signup 200, PATCH /me/profile 200",
+    "profile_initial_empty": "PASS - STORICO VOTI shows count 0, empty state 'Nessun voto in questa categoria.' rendered",
+    "feud_page_tabbar": "PASS - /feud/<id> shows tab bar",
+    "vote_cast": "PASS - POST /api/feuds/<id>/vote returned 200",
+    "total_votes_increment_on_focus": "PASS - counter went 0 -> 1 after tapping PROFILO tab (refreshMe via useFocusEffect works). Second vote: 1 -> 2 on subsequent focus. Stats row also updated (VOTI=1, MAGGIORANZA=1).",
+    "history_item_appears_after_reexpand": "PASS - history-<feud_id> element visible after expanding STORICO VOTI (loadHistory ran on focus with historyExpanded flag). No logout/login required.",
+    "history_stays_expanded_across_tabs": "NOT_APPLICABLE - React Native Tabs unmounts the profile screen on tab switch, so historyExpanded local state resets to false (screen collapses). Request spec explicitly accepts this case: 'If it was collapsed, expand it -> the new vote is present.'"
+  },
+  "regression": {
+    "anon_lock_screen": "PASS - anonymous /profile still shows [data-testid=anon-lock-screen]",
+    "admin_page": "PASS - /admin renders 'PANNELLO ADMIN' with key input and tab bar visible (no crash)"
+  },
+  "test_report_links": [
+    "/tmp/bug1_home.png",
+    "/tmp/bug1_feud.png",
+    "/tmp/bug1_admin.png",
+    "/tmp/bug2_profile_initial.png",
+    "/tmp/bug2_profile_after.png",
+    "/tmp/bug2_final.png"
+  ],
+  "action_items": [
+    "OPTIONAL: If desired, persist historyExpanded state across tab switches (e.g., via zustand/context or lift state to root) so users returning to /profile don't have to re-expand STORICO VOTI. Current behavior meets the spec but is a mild UX regression.",
+    "MINOR: Address 'props.pointerEvents is deprecated' console warnings emitted by react-native-web components."
+  ],
+  "critical_code_review_comments": [
+    "app/(tabs)/_layout.tsx correctly registers feud/[id], user/[id], archive, admin as hidden Tabs.Screen entries with href:null.",
+    "app/(tabs)/profile.tsx useFocusEffect implementation is correct: calls refreshMe() unconditionally and loadHistory(filter) when historyExpanded=true. Dependency array on the useCallback includes refreshMe, historyExpanded, loadHistory, filter which is correct.",
+    "No duplicate refresh calls: initial useEffect only calls refreshMe on mount, useFocusEffect handles subsequent focuses."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "seed_data_creation": "Signed up two fresh users via /api/auth/signup (tb2xur8f... and tb2b9yjov...) each with onboarding + votes cast. Also created anonymous user 'regressAnon' via /api/auth/anonymous.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Bug 1 (tab bar persistence via (tabs)/ subroutes) and Bug 2 (useFocusEffect-driven refresh of profile stats/history) are both verified. Only minor UX consideration: historyExpanded state does not persist across tab navigation; spec accepts this.",
+  "rca_of_issue": ""
+}

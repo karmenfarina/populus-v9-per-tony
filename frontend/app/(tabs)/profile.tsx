@@ -4,7 +4,7 @@ import * as ImagePicker from "expo-image-picker";
 import * as ImageManipulator from "expo-image-manipulator";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { useRouter, useFocusEffect } from "expo-router";
 import { useAuth } from "@/src/auth/AuthContext";
 import { api, HistoryItem, UserPhoto } from "@/src/api";
 import { colors, spacing, font, sideColor } from "@/src/theme";
@@ -53,6 +53,16 @@ export default function Profile() {
     refreshMe();
     // History is lazy-loaded when the user expands the section (see effect below).
   }, [refreshMe]);
+
+  // Refresh user data (total_votes/majority/minority + badge) and expanded
+  // voting history each time the profile tab regains focus — this keeps stats
+  // in sync after actions taken elsewhere (voting on a feud, etc.).
+  useFocusEffect(
+    useCallback(() => {
+      refreshMe();
+      if (historyExpanded) loadHistory(filter);
+    }, [refreshMe, historyExpanded, loadHistory, filter])
+  );
 
   useEffect(() => {
     if (historyExpanded) loadHistory(filter);
