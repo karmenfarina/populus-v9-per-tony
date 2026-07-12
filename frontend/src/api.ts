@@ -124,6 +124,8 @@ export type UserPhoto = { photo_id: string; data: string; position: number; is_p
 export type PublicUser = {
   user_id: string;
   nickname: string;
+  auth_provider?: string;
+  is_anonymous?: boolean;
   bio?: string | null;
   social_links?: User['social_links'];
   primary_photo_id?: string | null;

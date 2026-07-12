@@ -453,6 +453,16 @@ async def public_user(user_id: str):
     u = await db.users.find_one({'user_id': user_id}, {'_id': 0})
     if not u:
         raise HTTPException(status_code=404, detail='Utente non trovato')
+    is_anonymous = u.get('auth_provider') == 'anonymous'
+    # Anonymous accounts only expose their opaque identifier — no photos,
+    # profile, socials, badge, or voting stats.
+    if is_anonymous:
+        return {
+            'user_id': u['user_id'],
+            'nickname': u.get('nickname') or 'Anonimo',
+            'auth_provider': 'anonymous',
+            'is_anonymous': True,
+        }
     photos = await db.user_photos.find(
         {'user_id': user_id}, {'_id': 0, 'user_id': 0}
     ).sort('position', 1).to_list(MAX_PHOTOS + 1)
@@ -462,6 +472,8 @@ async def public_user(user_id: str):
     return {
         'user_id': u['user_id'],
         'nickname': u.get('nickname'),
+        'auth_provider': u.get('auth_provider'),
+        'is_anonymous': False,
         'bio': u.get('bio'),
         'social_links': u.get('social_links', {}),
         'primary_photo_id': u.get('primary_photo_id'),
@@ -962,9 +974,12 @@ async def my_history(filter: str = 'all', user: dict = Depends(get_current_user)
 
 @api_router.get('/users/{user_id}/history')
 async def public_user_history(user_id: str, filter: str = 'all'):
-    u = await db.users.find_one({'user_id': user_id}, {'_id': 0, 'user_id': 1})
+    u = await db.users.find_one({'user_id': user_id}, {'_id': 0, 'user_id': 1, 'auth_provider': 1})
     if not u:
         raise HTTPException(status_code=404, detail='Utente non trovato')
+    if u.get('auth_provider') == 'anonymous':
+        # Anonymous voting history is hidden from other users.
+        return {'history': [], 'is_anonymous': True}
     return {'history': await _history_for_user(user_id, filter)}
 
 

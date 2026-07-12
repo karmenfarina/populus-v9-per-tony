@@ -1,0 +1,28 @@
+{
+  "summary": "Anonymous profile privacy + registered-user badge card verified end-to-end. Backend: 6/6 pytest cases pass on public prod URL. GET /api/users/{anon} returns EXACTLY {user_id, nickname, auth_provider:'anonymous', is_anonymous:true} with no photos/bio/social_links/badge/votes/email/primary_photo_id leaked. GET /api/users/{anon}/history returns {history:[], is_anonymous:true} both before and after the anon user casts a vote via POST /api/feuds/{id}/vote (also validated with ?filter=all|majority|minority — none bypass the guard). Regression: GET /api/users/user_34c2f036bb2e still returns full payload with new fields auth_provider='email' and is_anonymous=false, plus badge{unlocked:true, type:'bastian_contrario', majority:5, minority:7}; history non-empty and does NOT include is_anonymous key. 404 preserved for missing user. Frontend (390x844 web): (a) /user/<anon_id> renders public-user-screen + public-anonymous card with glasses-outline in dark circle, 'UTENTE ANONIMO' title, @nickname, and full hint text 'Gli utenti anonimi non condividono foto, storico voti, spille o profilo pubblico.' — public-history-section count=0, public-badge-* count=0, zero runtime crash / undefined errors. (b) Registered user with total_votes<10 (user_b96abe2529c8): public-anonymous absent, public-history-section visible, public-badge-* absent. (c) Registered bastian_contrario (user_34c2f036bb2e): public-badge-bastian_contrario visible with the exact copy 'SPILLA / BASTIAN CONTRARIO / 5 maggioranza · 7 minoranza' on red brand card, public-badge-buon_senso NOT rendered, bio ('Bio test') and history section still render. (d) Tapping first history item (public-history-feud_d3409f4f26ba) navigates to /feud/feud_d3409f4f26ba — regression intact even though the feud returned 410 (expired). No React Native red screen, no deprecated packages touched in these files, no testID gaps.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_anonymous_profile_badge.py",
+    "/app/test_reports/pytest/anon_profile_badge.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "backend/server.py public_user() correctly whitelists the anon payload; consider also stripping 'is_anonymous' from _public_user() when auth_provider=='anonymous' returned by /auth/anonymous, /auth/login-me, etc., for consistency across every endpoint that echoes a user object (currently only /users/{id} enforces the redaction).",
+    "user/[id].tsx line 46: photos.findIndex is now guarded (photos = r.photos || []), preventing the previously reported crash — no further concern.",
+    "user/[id].tsx (371 lines) is well under the 700-line split threshold; the badge card + anon card blocks are inlined but readable. Optional: extract BadgeCard and AnonProfileCard into src/components/ if reused on /me screen."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_anonymous_profile_badge.py"
+  ],
+  "success_rate": {"backend": "100% (6/6)", "frontend": "100% (all assertions across 3 profile variants + history nav)"},
+  "seed_data_creation": "One transient anonymous user created via /api/auth/anonymous during backend tests (nickname TestAnon<epoch>, casts 1 vote on the first available open feud). One additional anon created during Playwright run (UITestAnon<epoch>). No cleanup performed as they are opaque test accounts and do not affect other users.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Seeded assets: user_34c2f036bb2e (registered, bastian_contrario, 12 votes 5maj/7min, bio 'Bio test'); user_b96abe2529c8 (registered, 0 votes, no badge, nickname TEST_signup). To create a fresh anon user for /user/<id> testing, hit POST {BASE}/api/auth/anonymous with {nickname}. The FE screen /user/[id] correctly branches on profile.is_anonymous; anonymous branch renders exclusively public-anonymous card (no gallery, no history, no badge). Registered branch shows public-badge-<type> only when badge.unlocked=true (needs total_votes>=10). Backend /api/users/{id}/history for anon always returns {history:[], is_anonymous:true} regardless of filter. Tests file at /app/backend/tests/test_anonymous_profile_badge.py is reusable for regression."
+}

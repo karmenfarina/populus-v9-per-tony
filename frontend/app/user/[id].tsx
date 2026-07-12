@@ -42,7 +42,8 @@ export default function UserPublicScreen() {
       try {
         const r = await api.publicUser(id);
         setProfile(r);
-        const pIdx = r.photos.findIndex((p: any) => p.photo_id === r.primary_photo_id);
+        const photos = r.photos || [];
+        const pIdx = photos.findIndex((p: any) => p.photo_id === r.primary_photo_id);
         setIdx(pIdx >= 0 ? pIdx : 0);
       } catch (e: any) { setError(e?.message || "Errore"); }
       finally { setLoading(false); }
@@ -60,8 +61,11 @@ export default function UserPublicScreen() {
 
   useEffect(() => {
     if (!id) return;
+    // Skip loading history for anonymous accounts — the server returns [] anyway
+    // but avoiding the request also skips the flicker/loader in the anon UI.
+    if (profile?.is_anonymous) return;
     loadHistory(id, filter);
-  }, [id, filter, loadHistory]);
+  }, [id, filter, loadHistory, profile?.is_anonymous]);
 
   if (loading) {
     return (
@@ -86,6 +90,35 @@ export default function UserPublicScreen() {
 
   const prev = () => setIdx((i) => (i > 0 ? i - 1 : photos.length - 1));
   const next = () => setIdx((i) => (i < photos.length - 1 ? i + 1 : 0));
+
+  // Anonymous user profile — minimal card, no photos/history/socials/badge.
+  if (profile.is_anonymous) {
+    return (
+      <SafeAreaView style={styles.safe} edges={["top"]} testID="public-user-screen">
+        <View style={styles.topbar}>
+          <Pressable onPress={() => router.back()} testID="user-back" style={styles.backBtn}>
+            <Ionicons name="chevron-back" size={22} color={colors.onSurfaceInverse} />
+            <Text style={styles.backTxt}>INDIETRO</Text>
+          </Pressable>
+          <Text style={styles.topNick}>@{profile.nickname}</Text>
+        </View>
+        <View style={styles.anonBox} testID="public-anonymous">
+          <View style={styles.anonAvatar}>
+            <Ionicons name="glasses-outline" size={80} color={colors.brandSecondary} />
+          </View>
+          <Text style={styles.anonTitle}>UTENTE ANONIMO</Text>
+          <Text style={styles.anonSubtitle}>@{profile.nickname}</Text>
+          <Text style={styles.anonHint}>
+            Gli utenti anonimi non condividono foto, storico voti, spille o profilo pubblico.
+          </Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  const badge = profile.badge;
+  const badgeUnlocked = badge?.unlocked === true;
+  const badgeType = badge?.type; // 'buon_senso' | 'bastian_contrario' | undefined
 
   return (
     <SafeAreaView style={styles.safe} edges={["top"]} testID="public-user-screen">
@@ -131,14 +164,51 @@ export default function UserPublicScreen() {
 
         <View style={styles.body}>
           <Text style={styles.nick}>@{profile.nickname}</Text>
-          {profile.badge?.unlocked && (
-            <Text style={[styles.badge, profile.badge.type === "bastian_contrario" ? styles.badgeRed : styles.badgeYellow]}>
-              {profile.badge.type === "bastian_contrario" ? "BASTIAN CONTRARIO" : "BUON SENSO"}
-            </Text>
-          )}
           <Text style={styles.stat}>
             {profile.total_votes} voti · {profile.majority_votes} maggioranza · {profile.minority_votes} minoranza
           </Text>
+
+          {badgeUnlocked && badgeType && (
+            <View
+              style={[
+                styles.badgeCard,
+                badgeType === "bastian_contrario" ? styles.badgeCardRed : styles.badgeCardYellow,
+              ]}
+              testID={`public-badge-${badgeType}`}
+            >
+              <View
+                style={[
+                  styles.badgeIconWrap,
+                  badgeType === "bastian_contrario" ? styles.badgeIconRed : styles.badgeIconYellow,
+                ]}
+              >
+                <Ionicons
+                  name={badgeType === "bastian_contrario" ? "flash" : "shield-checkmark"}
+                  size={26}
+                  color={badgeType === "bastian_contrario" ? colors.onBrandPrimary : colors.onBrandSecondary}
+                />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.badgeKicker}>SPILLA</Text>
+                <Text
+                  style={[
+                    styles.badgeTitle,
+                    badgeType === "bastian_contrario" ? { color: colors.onBrandPrimary } : { color: colors.onBrandSecondary },
+                  ]}
+                >
+                  {badgeType === "bastian_contrario" ? "BASTIAN CONTRARIO" : "BUON SENSO"}
+                </Text>
+                <Text
+                  style={[
+                    styles.badgeSubtitle,
+                    badgeType === "bastian_contrario" ? { color: colors.onBrandPrimary } : { color: colors.onBrandSecondary },
+                  ]}
+                >
+                  {badge?.majority ?? 0} maggioranza · {badge?.minority ?? 0} minoranza
+                </Text>
+              </View>
+            </View>
+          )}
 
           {profile.bio ? (
             <View style={styles.section}>
@@ -262,6 +332,20 @@ const styles = StyleSheet.create({
   badge: { alignSelf: "flex-start", paddingHorizontal: spacing.sm, paddingVertical: 4, borderWidth: 2, borderColor: colors.border, fontSize: font.sizes.xs, letterSpacing: 2, fontWeight: "500" },
   badgeRed: { backgroundColor: colors.brandPrimary, color: colors.onBrandPrimary },
   badgeYellow: { backgroundColor: colors.brandSecondary, color: colors.onBrandSecondary },
+  badgeCard: { flexDirection: "row", alignItems: "center", gap: spacing.sm, padding: spacing.md, borderWidth: 2, borderColor: colors.border, marginTop: spacing.sm },
+  badgeCardRed: { backgroundColor: colors.brandPrimary },
+  badgeCardYellow: { backgroundColor: colors.brandSecondary },
+  badgeIconWrap: { width: 52, height: 52, borderWidth: 2, borderColor: colors.border, alignItems: "center", justifyContent: "center" },
+  badgeIconRed: { backgroundColor: "#B31700" },
+  badgeIconYellow: { backgroundColor: "#D6A800" },
+  badgeKicker: { fontSize: font.sizes.xs, letterSpacing: 2, opacity: 0.7, color: colors.onBrandPrimary },
+  badgeTitle: { fontSize: font.sizes.lg, fontWeight: "500", letterSpacing: 1.5, marginTop: 2 },
+  badgeSubtitle: { fontSize: font.sizes.xs, letterSpacing: 1, opacity: 0.8, marginTop: 2 },
+  anonBox: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.xxl, gap: spacing.sm },
+  anonAvatar: { width: 140, height: 140, borderRadius: 70, borderWidth: 4, borderColor: colors.border, alignItems: "center", justifyContent: "center", backgroundColor: colors.surfaceInverse, marginBottom: spacing.md },
+  anonTitle: { fontSize: font.sizes.xxl, letterSpacing: 2.5, fontWeight: "500", color: colors.onSurface },
+  anonSubtitle: { fontSize: font.sizes.base, color: colors.brandPrimary, letterSpacing: 1 },
+  anonHint: { fontSize: font.sizes.sm, color: colors.muted, textAlign: "center", lineHeight: 20, marginTop: spacing.sm, paddingHorizontal: spacing.md },
   stat: { fontSize: font.sizes.sm, color: colors.muted, letterSpacing: 0.5 },
   section: { gap: spacing.xs, marginTop: spacing.md },
   sectionTitle: { fontSize: font.sizes.sm, letterSpacing: 2, color: colors.brandPrimary, fontWeight: "500" },
