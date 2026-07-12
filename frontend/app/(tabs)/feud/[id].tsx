@@ -29,6 +29,7 @@ export default function FeudDetail() {
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
   const [replyText, setReplyText] = useState("");
   const [activeSide, setActiveSide] = useState<"A" | "B" | null>(null);
+  const [sourcesExpanded, setSourcesExpanded] = useState(false);
 
   const loadAll = useCallback(async () => {
     const f = await api.feud(id!);
@@ -205,19 +206,39 @@ export default function FeudDetail() {
 
           {feud.sources && feud.sources.length > 0 && (
             <View style={styles.sourcesBox} testID="sources-box">
-              <Text style={styles.sectionKicker}>FONTI</Text>
-              {feud.sources.map((s, i) => (
-                <Pressable
-                  key={i}
-                  style={styles.sourceItem}
-                  onPress={() => Linking.openURL(s.link)}
-                  testID={`source-${i}`}
-                >
-                  <Text style={styles.sourceName}>{s.source.toUpperCase()}</Text>
-                  <Text style={styles.sourceTitle} numberOfLines={2}>{s.title}</Text>
-                  <Text style={styles.sourceLink}>{s.link.replace(/^https?:\/\//, '').slice(0, 45)}...  ›</Text>
-                </Pressable>
-              ))}
+              <Pressable
+                onPress={() => setSourcesExpanded((v) => !v)}
+                testID="sources-toggle"
+                style={styles.sourcesHead}
+                hitSlop={6}
+              >
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                  <Ionicons name="newspaper-outline" size={16} color={colors.brandPrimary} />
+                  <Text style={styles.sectionKicker}>FONTI</Text>
+                  <Text style={styles.sourcesCount}>{feud.sources.length}</Text>
+                </View>
+                <Ionicons
+                  name={sourcesExpanded ? "chevron-up" : "chevron-down"}
+                  size={20}
+                  color={colors.onSurface}
+                />
+              </Pressable>
+              {sourcesExpanded && (
+                <View style={styles.sourcesList} testID="sources-list">
+                  {feud.sources.map((s, i) => (
+                    <Pressable
+                      key={i}
+                      style={styles.sourceItem}
+                      onPress={() => Linking.openURL(s.link)}
+                      testID={`source-${i}`}
+                    >
+                      <Text style={styles.sourceName}>{s.source.toUpperCase()}</Text>
+                      <Text style={styles.sourceTitle} numberOfLines={2}>{s.title}</Text>
+                      <Text style={styles.sourceLink}>{s.link.replace(/^https?:\/\//, '').slice(0, 45)}...  ›</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              )}
             </View>
           )}
 
@@ -502,6 +523,9 @@ const styles = StyleSheet.create({
   mediaSection: { paddingHorizontal: spacing.lg, marginBottom: spacing.md },
   summary: { fontSize: font.sizes.lg, lineHeight: 24, color: colors.onSurface },
   sourcesBox: { padding: spacing.lg, borderBottomWidth: 2, borderColor: colors.border, backgroundColor: colors.surface, gap: spacing.sm },
+  sourcesHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: spacing.xs },
+  sourcesCount: { color: colors.muted, fontSize: font.sizes.sm, letterSpacing: 1, minWidth: 20 },
+  sourcesList: { gap: spacing.sm, marginTop: spacing.xs },
   sourceItem: { borderWidth: 2, borderColor: colors.border, backgroundColor: colors.surfaceSecondary, padding: spacing.sm },
   sourceName: { fontSize: font.sizes.xs, letterSpacing: 2, color: colors.brandPrimary },
   sourceTitle: { fontSize: font.sizes.base, color: colors.onSurface, marginTop: 2, lineHeight: 18 },
