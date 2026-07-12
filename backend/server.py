@@ -680,8 +680,10 @@ async def archive_feuds(
         voted_map = await _user_voted_ids(user['user_id'], [d['feud_id'] for d in docs])
     for d in docs:
         my_vote = voted_map.get(d['feud_id']) if user else None
-        # Always reveal on archive — voting closed, results public.
-        _attach_percentages(d, revealed=True)
+        # Same rule as the live feed: reveal percentages only if the user has
+        # voted. Archive is read-mostly but voting is still allowed, so hiding
+        # results preserves the "vote-to-see" contract.
+        _attach_percentages(d, revealed=bool(my_vote))
         d['my_vote'] = my_vote
         d['archived'] = True
     return {'feuds': docs, 'date': date}
