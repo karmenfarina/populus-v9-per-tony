@@ -97,7 +97,7 @@ export default function HomeFeed() {
             </View>
             <Text style={styles.date}>{new Date().toLocaleDateString("it-IT", { day: "numeric", month: "long" }).toUpperCase()}</Text>
           </View>
-          <Pressable onPress={() => router.push(`/archive?category=${selected}`)} testID="archive-toggle" style={styles.archiveBtn}>
+          <Pressable onPress={() => router.push('/archive')} testID="archive-toggle" style={styles.archiveBtn}>
             <Ionicons name="calendar-outline" size={22} color={colors.brandSecondary} />
           </Pressable>
           <Pressable onPress={() => setSearchOpen((v) => !v)} testID="search-toggle" style={styles.searchBtn}>
