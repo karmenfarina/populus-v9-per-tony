@@ -379,10 +379,10 @@ function CommentItem({
 }) {
   const router = useRouter();
   const isReplying = replyingTo === c.comment_id;
-  // Nickname colour follows the commenter's CURRENT vote (they might have
-  // switched sides after posting). `nickname_side` is set by the backend based
-  // on the live vote row; falls back to the comment's own side for legacy rows.
-  const accent = sideColor((c.nickname_side || c.side) as "A" | "B");
+  // Comment colour follows the side the comment was posted for (which matches
+  // the tab it's in). We intentionally ignore `nickname_side` (current vote)
+  // to avoid visual mismatch — e.g. a red comment appearing under the yellow tab.
+  const accent = sideColor(c.side as "A" | "B");
   return (
     <View style={cs.item} testID={`comment-${c.comment_id}`}>
       <View style={[cs.sideBar, { backgroundColor: accent }]} />
@@ -417,7 +417,7 @@ function CommentItem({
         {expanded && expanded.length > 0 && (
           <View style={cs.replies}>
             {expanded.map((r) => {
-              const rAccent = sideColor((r.nickname_side || r.side) as "A" | "B");
+              const rAccent = sideColor(r.side as "A" | "B");
               return (
                 <View key={r.reply_id} style={cs.reply}>
                   <View style={[cs.replySideBar, { backgroundColor: rAccent }]} />

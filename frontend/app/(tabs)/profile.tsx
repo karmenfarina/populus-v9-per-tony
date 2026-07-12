@@ -497,7 +497,14 @@ export default function Profile() {
           )}
         </View>
 
-        <Pressable style={styles.logout} onPress={logout} testID="profile-logout">
+        <Pressable
+          style={styles.logout}
+          onPress={async () => {
+            await logout();
+            router.replace("/auth");
+          }}
+          testID="profile-logout"
+        >
           <Text style={styles.logoutText}>ESCI</Text>
         </Pressable>
 
