@@ -45,6 +45,14 @@ export default function ArchiveScreen() {
   const [feuds, setFeuds] = useState<Feud[]>([]);
   const [loadingFeuds, setLoadingFeuds] = useState(false);
 
+  // Keep local state in sync with the incoming `category` param. Without this,
+  // subsequent visits to /archive?category=X don't update the selection because
+  // useState(initialCat) only runs at mount and the tab screen is kept alive.
+  useEffect(() => {
+    const incoming = (params.category as string) || "all";
+    setCategory((prev) => (prev === incoming ? prev : incoming));
+  }, [params.category]);
+
   // Load categories once (ordered by favorites like home)
   useEffect(() => {
     (async () => {
