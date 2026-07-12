@@ -1,0 +1,30 @@
+{
+  "summary": "Collapsible sections tested end-to-end on web (390x844) for personal profile and public user profile. All 28 assertions PASSED across 3 flows. Test 1 (personal, 17/17): prefs-section and history-section present, prefs-body and history-body both absent when collapsed, toggle Pressables visible; tapping prefs-section-toggle expands prefs-body with pref-chip-politica and pref-chip-musica plus prefs-edit-button; tapping history-section-toggle expands history-body with filter-all/majority/minority chips and 3 history-<feud_id> items rendered; re-tapping prefs-section-toggle collapses body (prefs-body count=0). Regression: profile-avatar, profile-badge, profile-edit-button and logout Pressable all still visible. Test 2 (public, 8/8): user_34c2f036bb2e — public-history-section renders, public-history-body count=0 initially, tap expands (public-filter-*, 3 public-history-feud_* items), re-tap collapses. Anonymous user profile — public-history-section count=0 and public-anonymous card renders instead. Test 3 (anon personal, 3/3): anon-lock-screen renders, prefs-section and history-section both absent. Lazy-load confirmed via UI: history items only appear after history toggle is expanded. Only warnings in console: 'props.pointerEvents is deprecated. Use style.pointerEvents' (React Native web upstream, non-blocking). No red screen, no runtime errors.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/test_reports/iteration_24.json",
+    "/app/test_reports/scripts/setup_test_user.sh"
+  ],
+  "action_items": [
+    "Minor spec/code mismatch: review_request references testID 'logout-btn' but current code uses 'profile-logout' (line 490 of profile.tsx). Element works correctly, but consider aligning naming (either rename testID to 'logout-btn' or update spec) to match the request."
+  ],
+  "critical_code_review_comments": [
+    "profile.tsx is 761 lines — above the 700-line soft threshold. Consider extracting PrefsSection, HistorySection and the two Modals into separate components under src/components/profile/. Non-blocking.",
+    "user/[id].tsx (390 lines) cleanly hosts the new collapsible logic; history load effect correctly gates on !profile.is_anonymous && historyExpanded (lines 63-70). Lazy-load semantics respected.",
+    "profile.tsx history load effect (lines 57-59) fires on filter change even when historyExpanded is false only via the historyExpanded guard — verified in code: `if (historyExpanded) loadHistory(filter)` is correct. Efficiency optimization confirmed.",
+    "sectionCountBadge uses colors.muted; contrast on cream surface is acceptable but the number '12' in the badge could be visually stronger (letterSpacing 1) — cosmetic only."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (no backend changes tested)", "frontend": "100% (28/28)"},
+  "seed_data_creation": "Created 1 ephemeral registered user (user_c840bc2e3e8d, email test_collap_1783851820@test.com, nickname collap1820) — completed onboarding (age=28, sex=M, region=Lombardia, favorite_categories=[politica, musica]) and cast 3 votes on the first 3 open feuds. Created 1 anonymous user (anon_e6739b14f341) for Test 2f and Test 3. Setup script: /app/test_reports/scripts/setup_test_user.sh (idempotent — creates fresh users on each run).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Auth bridge for web preview testing: set both localStorage['faide_token'] AND localStorage['@AsyncStorage:faide_token'] to JSON.stringify(token), then wait ~5-6s after /profile navigation for AuthContext hydration. Reusable seed script at /app/test_reports/scripts/setup_test_user.sh returns TOKEN / USER_ID / ANON_ID / ANON_TOKEN. Existing seeded user with badge for public-profile testing: user_34c2f036bb2e (12 votes, bastian_contrario badge unlocked). Collapsible section testIDs (personal): prefs-section, prefs-section-toggle, prefs-body, pref-chip-<id>, prefs-edit-button, history-section, history-section-toggle, history-body, filter-{all|majority|minority}, history-<feud_id>. Public: public-history-section, public-history-toggle, public-history-body, public-filter-{all|majority|minority}, public-history-<feud_id>. Logout testID on personal profile is 'profile-logout' (not 'logout-btn').",
+  "rca_of_issue": "N/A — feature works exactly as specified. All acceptance criteria met including lazy-load efficiency (history only fetched when expanded), collapsed default state, toggle idempotence, and anonymous regression paths on both personal and public profile."
+}

@@ -35,6 +35,7 @@ export default function UserPublicScreen() {
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [loadingH, setLoadingH] = useState(false);
   const [filter, setFilter] = useState<HFilter>("all");
+  const [historyExpanded, setHistoryExpanded] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -61,11 +62,12 @@ export default function UserPublicScreen() {
 
   useEffect(() => {
     if (!id) return;
-    // Skip loading history for anonymous accounts — the server returns [] anyway
-    // but avoiding the request also skips the flicker/loader in the anon UI.
+    // Skip loading history for anonymous accounts or when the section is
+    // collapsed — avoid unnecessary requests + loader flicker.
     if (profile?.is_anonymous) return;
+    if (!historyExpanded) return;
     loadHistory(id, filter);
-  }, [id, filter, loadHistory, profile?.is_anonymous]);
+  }, [id, filter, loadHistory, profile?.is_anonymous, historyExpanded]);
 
   if (loading) {
     return (
@@ -239,71 +241,86 @@ export default function UserPublicScreen() {
           )}
 
           <View style={styles.section} testID="public-history-section">
-            <Text style={styles.sectionTitle}>STORICO VOTI</Text>
-            <View style={styles.filterRow}>
-              {(["all", "majority", "minority"] as HFilter[]).map((f) => (
-                <Pressable
-                  key={f}
-                  onPress={() => setFilter(f)}
-                  testID={`public-filter-${f}`}
-                  style={[
-                    styles.filterChip,
-                    filter === f && (
-                      f === "majority" ? { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary } :
-                      f === "minority" ? { backgroundColor: colors.brandSecondary, borderColor: colors.brandSecondary } :
-                      { backgroundColor: colors.surfaceInverse, borderColor: colors.surfaceInverse }
-                    ),
-                  ]}
-                >
-                  <Text style={[
-                    styles.filterTxt,
-                    filter === f && (
-                      f === "minority" ? { color: colors.onBrandSecondary } : { color: "#FFFFFF" }
-                    ),
-                  ]}>
-                    {f === "all" ? "TUTTI" : f === "majority" ? "MAGGIORANZA" : "MINORANZA"}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
-
-            {loadingH ? (
-              <View style={{ paddingVertical: spacing.lg, alignItems: "center" }}>
-                <ActivityIndicator color={colors.brandPrimary} />
+            <Pressable
+              onPress={() => setHistoryExpanded((v) => !v)}
+              testID="public-history-toggle"
+              style={styles.sectionHeadRow}
+            >
+              <Text style={styles.sectionTitle}>STORICO VOTI</Text>
+              <View style={styles.sectionHeadRight}>
+                <Text style={styles.sectionCountBadge}>{profile.total_votes ?? 0}</Text>
+                <Ionicons name={historyExpanded ? "chevron-up" : "chevron-down"} size={20} color={colors.onSurface} />
               </View>
-            ) : history.length === 0 ? (
-              <Text style={styles.emptyH} testID="public-history-empty">
-                Nessun voto in questa categoria.
-              </Text>
-            ) : (
-              <View style={styles.historyList}>
-                {history.map((h) => {
-                  const votedName = h.side_voted === "A" ? h.party_a : h.party_b;
-                  return (
+            </Pressable>
+            {historyExpanded ? (
+              <View testID="public-history-body">
+                <View style={styles.filterRow}>
+                  {(["all", "majority", "minority"] as HFilter[]).map((f) => (
                     <Pressable
-                      key={h.feud_id + h.voted_at}
-                      style={styles.historyItem}
-                      onPress={() => router.push(`/feud/${h.feud_id}`)}
-                      testID={`public-history-${h.feud_id}`}
+                      key={f}
+                      onPress={() => setFilter(f)}
+                      testID={`public-filter-${f}`}
+                      style={[
+                        styles.filterChip,
+                        filter === f && (
+                          f === "majority" ? { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary } :
+                          f === "minority" ? { backgroundColor: colors.brandSecondary, borderColor: colors.brandSecondary } :
+                          { backgroundColor: colors.surfaceInverse, borderColor: colors.surfaceInverse }
+                        ),
+                      ]}
                     >
-                      <View style={[styles.sideBar, { backgroundColor: sideColor(h.side_voted) }]} />
-                      <View style={{ flex: 1, padding: spacing.sm }}>
-                        <Text style={styles.hCat}>{h.category_label.toUpperCase()}</Text>
-                        <Text style={styles.hTitle} numberOfLines={2}>{h.title}</Text>
-                        <View style={styles.hMetaRow}>
-                          <Text style={[styles.hVoted, { color: sideColor(h.side_voted) }]} numberOfLines={1}>
-                            Ha votato: {votedName}
-                          </Text>
-                          <Text style={[styles.hBadge, h.aligned ? styles.hBadgeMaj : styles.hBadgeMin]}>
-                            {h.aligned ? "MAGGIORANZA" : "MINORANZA"}
-                          </Text>
-                        </View>
-                      </View>
+                      <Text style={[
+                        styles.filterTxt,
+                        filter === f && (
+                          f === "minority" ? { color: colors.onBrandSecondary } : { color: "#FFFFFF" }
+                        ),
+                      ]}>
+                        {f === "all" ? "TUTTI" : f === "majority" ? "MAGGIORANZA" : "MINORANZA"}
+                      </Text>
                     </Pressable>
-                  );
-                })}
+                  ))}
+                </View>
+                {loadingH && (
+                  <View style={{ paddingVertical: spacing.lg, alignItems: "center" }}>
+                    <ActivityIndicator color={colors.brandPrimary} />
+                  </View>
+                )}
+                {!loadingH && history.length === 0 && (
+                  <Text style={styles.emptyH} testID="public-history-empty">
+                    Nessun voto in questa categoria.
+                  </Text>
+                )}
+                {!loadingH && history.length > 0 && (
+                  <View style={styles.historyList}>
+                    {history.map((h) => {
+                      const votedName = h.side_voted === "A" ? h.party_a : h.party_b;
+                      return (
+                        <Pressable
+                          key={h.feud_id + h.voted_at}
+                          style={styles.historyItem}
+                          onPress={() => router.push(`/feud/${h.feud_id}`)}
+                          testID={`public-history-${h.feud_id}`}
+                        >
+                          <View style={[styles.sideBar, { backgroundColor: sideColor(h.side_voted) }]} />
+                          <View style={{ flex: 1, padding: spacing.sm }}>
+                            <Text style={styles.hCat}>{h.category_label.toUpperCase()}</Text>
+                            <Text style={styles.hTitle} numberOfLines={2}>{h.title}</Text>
+                            <View style={styles.hMetaRow}>
+                              <Text style={[styles.hVoted, { color: sideColor(h.side_voted) }]} numberOfLines={1}>
+                                Ha votato: {votedName}
+                              </Text>
+                              <Text style={[styles.hBadge, h.aligned ? styles.hBadgeMaj : styles.hBadgeMin]}>
+                                {h.aligned ? "MAGGIORANZA" : "MINORANZA"}
+                              </Text>
+                            </View>
+                          </View>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                )}
               </View>
-            )}
+            ) : null}
           </View>
         </View>
       </ScrollView>
@@ -349,6 +366,9 @@ const styles = StyleSheet.create({
   stat: { fontSize: font.sizes.sm, color: colors.muted, letterSpacing: 0.5 },
   section: { gap: spacing.xs, marginTop: spacing.md },
   sectionTitle: { fontSize: font.sizes.sm, letterSpacing: 2, color: colors.brandPrimary, fontWeight: "500" },
+  sectionHeadRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: spacing.sm, borderBottomWidth: 2, borderColor: colors.border },
+  sectionHeadRight: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  sectionCountBadge: { color: colors.muted, fontSize: font.sizes.sm, letterSpacing: 1, minWidth: 20, textAlign: "right" },
   bio: { fontSize: font.sizes.base, color: colors.onSurface, lineHeight: 20 },
   socialRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, borderWidth: 2, borderColor: colors.border, padding: spacing.sm, backgroundColor: colors.surfaceSecondary },
   socialLabel: { fontSize: font.sizes.sm, letterSpacing: 1, color: colors.onSurface, fontWeight: "500" },

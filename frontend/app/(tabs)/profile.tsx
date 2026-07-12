@@ -37,6 +37,8 @@ export default function Profile() {
   const [savingDetails, setSavingDetails] = useState(false);
   const [detailsError, setDetailsError] = useState<string | null>(null);
   const [primaryPhotoData, setPrimaryPhotoData] = useState<string | null>(null);
+  const [prefsExpanded, setPrefsExpanded] = useState(false);
+  const [historyExpanded, setHistoryExpanded] = useState(false);
   const isAnonymous = user?.auth_provider === "anonymous";
 
   const loadHistory = useCallback(async (f: Filter) => {
@@ -49,8 +51,12 @@ export default function Profile() {
 
   useEffect(() => {
     refreshMe();
-    loadHistory(filter);
-  }, [filter, loadHistory, refreshMe]);
+    // History is lazy-loaded when the user expands the section (see effect below).
+  }, [refreshMe]);
+
+  useEffect(() => {
+    if (historyExpanded) loadHistory(filter);
+  }, [historyExpanded, filter, loadHistory]);
 
   useEffect(() => {
     (async () => {
@@ -373,87 +379,113 @@ export default function Profile() {
 
         {!isAnonymous && (
           <View style={styles.prefsSection} testID="prefs-section">
-            <View style={styles.prefsHeadRow}>
+            <Pressable
+              onPress={() => setPrefsExpanded((v) => !v)}
+              testID="prefs-section-toggle"
+              style={styles.prefsHeadRow}
+            >
               <Text style={styles.prefsTitle}>ARGOMENTI PREFERITI</Text>
-              <Pressable onPress={openPrefs} testID="prefs-edit-button" style={styles.prefsEditBtn}>
-                <Ionicons name="pencil" size={14} color={colors.onSurface} />
-                <Text style={styles.prefsEditTxt}>MODIFICA</Text>
-              </Pressable>
+              <View style={styles.sectionHeadRight}>
+                <Text style={styles.sectionCountBadge}>{user.favorite_categories?.length ?? 0}</Text>
+                <Ionicons name={prefsExpanded ? "chevron-up" : "chevron-down"} size={20} color={colors.onSurface} />
+              </View>
+            </Pressable>
+            {prefsExpanded && (
+              <View style={styles.prefsBody} testID="prefs-body">
+                <View style={styles.prefsChipsRow}>
+                  {(user.favorite_categories && user.favorite_categories.length > 0) ? (
+                    user.favorite_categories.map((id) => {
+                      const label = cats.find((c) => c.id === id)?.label || id;
+                      return (
+                        <View key={id} style={styles.prefChip} testID={`pref-chip-${id}`}>
+                          <Text style={styles.prefChipTxt}>{label}</Text>
+                        </View>
+                      );
+                    })
+                  ) : (
+                    <Text style={styles.prefEmpty}>Nessuna preferenza impostata.</Text>
+                  )}
+                </View>
+                <Pressable onPress={openPrefs} testID="prefs-edit-button" style={styles.prefsEditBtnFull}>
+                  <Ionicons name="pencil" size={14} color={colors.onSurface} />
+                  <Text style={styles.prefsEditTxt}>MODIFICA</Text>
+                </Pressable>
+              </View>
+            )}
+          </View>
+        )}
+
+        <View style={styles.historySection} testID="history-section">
+          <Pressable
+            onPress={() => setHistoryExpanded((v) => !v)}
+            testID="history-section-toggle"
+            style={styles.historyHeadRow}
+          >
+            <Text style={styles.historyTitle}>STORICO VOTI</Text>
+            <View style={styles.sectionHeadRight}>
+              <Text style={styles.sectionCountBadge}>{user.total_votes ?? 0}</Text>
+              <Ionicons name={historyExpanded ? "chevron-up" : "chevron-down"} size={20} color={colors.onSurface} />
             </View>
-            <View style={styles.prefsChipsRow}>
-              {(user.favorite_categories && user.favorite_categories.length > 0) ? (
-                user.favorite_categories.map((id) => {
-                  const label = cats.find((c) => c.id === id)?.label || id;
-                  return (
-                    <View key={id} style={styles.prefChip} testID={`pref-chip-${id}`}>
-                      <Text style={styles.prefChipTxt}>{label}</Text>
-                    </View>
-                  );
-                })
+          </Pressable>
+          {historyExpanded && (
+            <View testID="history-body">
+              <View style={styles.filterRow}>
+                {(["all", "majority", "minority"] as Filter[]).map((f) => (
+                  <Pressable
+                    key={f}
+                    onPress={() => setFilter(f)}
+                    testID={`filter-${f}`}
+                    style={[styles.filterChip, filter === f && (
+                      f === "majority" ? { backgroundColor: colors.brandPrimary } :
+                      f === "minority" ? { backgroundColor: colors.brandSecondary } :
+                      { backgroundColor: colors.surfaceInverse }
+                    )]}
+                  >
+                    <Text style={[styles.filterTxt,
+                      filter === f && (
+                        f === "minority" ? { color: colors.onBrandSecondary } : { color: "#FFFFFF" }
+                      )
+                    ]}>
+                      {f === "all" ? "TUTTI" : f === "majority" ? "MAGGIORANZA" : "MINORANZA"}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+
+              {loadingH ? (
+                <View style={styles.center}><ActivityIndicator color={colors.brandPrimary} /></View>
+              ) : history.length === 0 ? (
+                <Text style={styles.emptyH}>Nessun voto in questa categoria.</Text>
               ) : (
-                <Text style={styles.prefEmpty}>Nessuna preferenza impostata.</Text>
+                <View style={styles.historyList}>
+                  {history.map((h) => {
+                    const votedName = h.side_voted === "A" ? h.party_a : h.party_b;
+                    return (
+                      <Pressable
+                        key={h.feud_id + h.voted_at}
+                        style={styles.historyItem}
+                        onPress={() => router.push(`/feud/${h.feud_id}`)}
+                        testID={`history-${h.feud_id}`}
+                      >
+                        <View style={[styles.sideBar, { backgroundColor: sideColor(h.side_voted) }]} />
+                        <View style={{ flex: 1, padding: spacing.sm }}>
+                          <Text style={styles.hCat}>{h.category_label.toUpperCase()}</Text>
+                          <Text style={styles.hTitle} numberOfLines={2}>{h.title}</Text>
+                          <View style={styles.hMetaRow}>
+                            <Text style={[styles.hVoted, { color: sideColor(h.side_voted) }]}>Hai votato: {votedName}</Text>
+                            <Text style={[styles.hBadge, h.aligned ? styles.hBadgeMaj : styles.hBadgeMin]}>
+                              {h.aligned ? "MAGGIORANZA" : "MINORANZA"}
+                            </Text>
+                          </View>
+                        </View>
+                      </Pressable>
+                    );
+                  })}
+                </View>
               )}
             </View>
-          </View>
-        )}
-
-        <View style={styles.historyHeader}>
-          <Text style={styles.historyTitle}>STORICO VOTI</Text>
+          )}
         </View>
-        <View style={styles.filterRow}>
-          {(["all", "majority", "minority"] as Filter[]).map((f) => (
-            <Pressable
-              key={f}
-              onPress={() => setFilter(f)}
-              testID={`filter-${f}`}
-              style={[styles.filterChip, filter === f && (
-                f === "majority" ? { backgroundColor: colors.brandPrimary } :
-                f === "minority" ? { backgroundColor: colors.brandSecondary } :
-                { backgroundColor: colors.surfaceInverse }
-              )]}
-            >
-              <Text style={[styles.filterTxt,
-                filter === f && (
-                  f === "minority" ? { color: colors.onBrandSecondary } : { color: "#FFFFFF" }
-                )
-              ]}>
-                {f === "all" ? "TUTTI" : f === "majority" ? "MAGGIORANZA" : "MINORANZA"}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
-
-        {loadingH ? (
-          <View style={styles.center}><ActivityIndicator color={colors.brandPrimary} /></View>
-        ) : history.length === 0 ? (
-          <Text style={styles.emptyH}>Nessun voto in questa categoria.</Text>
-        ) : (
-          <View style={styles.historyList}>
-            {history.map((h) => {
-              const votedName = h.side_voted === "A" ? h.party_a : h.party_b;
-              return (
-                <Pressable
-                  key={h.feud_id + h.voted_at}
-                  style={styles.historyItem}
-                  onPress={() => router.push(`/feud/${h.feud_id}`)}
-                  testID={`history-${h.feud_id}`}
-                >
-                  <View style={[styles.sideBar, { backgroundColor: sideColor(h.side_voted) }]} />
-                  <View style={{ flex: 1, padding: spacing.sm }}>
-                    <Text style={styles.hCat}>{h.category_label.toUpperCase()}</Text>
-                    <Text style={styles.hTitle} numberOfLines={2}>{h.title}</Text>
-                    <View style={styles.hMetaRow}>
-                      <Text style={[styles.hVoted, { color: sideColor(h.side_voted) }]}>Hai votato: {votedName}</Text>
-                      <Text style={[styles.hBadge, h.aligned ? styles.hBadgeMaj : styles.hBadgeMin]}>
-                        {h.aligned ? "MAGGIORANZA" : "MINORANZA"}
-                      </Text>
-                    </View>
-                  </View>
-                </Pressable>
-              );
-            })}
-          </View>
-        )}
 
         <Pressable style={styles.logout} onPress={logout} testID="profile-logout">
           <Text style={styles.logoutText}>ESCI</Text>
@@ -676,6 +708,10 @@ const styles = StyleSheet.create({
   statLabel: { fontSize: font.sizes.xs, color: colors.muted, letterSpacing: 1, marginTop: 2 },
   historyHeader: { paddingHorizontal: spacing.lg, paddingTop: spacing.lg, paddingBottom: spacing.sm },
   historyTitle: { fontSize: font.sizes.xxl, letterSpacing: 2, fontWeight: "500", color: colors.onSurface },
+  historySection: { paddingHorizontal: spacing.lg, paddingVertical: spacing.md, borderBottomWidth: 2, borderColor: colors.border },
+  historyHeadRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: spacing.xs },
+  sectionHeadRight: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  sectionCountBadge: { color: colors.muted, fontSize: font.sizes.sm, letterSpacing: 1, minWidth: 20, textAlign: "right" },
   filterRow: { flexDirection: "row", gap: spacing.sm, paddingHorizontal: spacing.lg, paddingBottom: spacing.md },
   filterChip: { flex: 1, borderWidth: 2, borderColor: colors.border, paddingVertical: spacing.sm, alignItems: "center", backgroundColor: colors.surfaceSecondary },
   filterTxt: { fontSize: font.sizes.xs, letterSpacing: 1, color: colors.onSurface, fontWeight: "500" },
@@ -696,9 +732,11 @@ const styles = StyleSheet.create({
   adminLink: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: spacing.md, marginBottom: spacing.lg },
   adminLinkTxt: { fontSize: font.sizes.xs, letterSpacing: 2, color: colors.muted, fontWeight: "500" },
   prefsSection: { padding: spacing.lg, borderBottomWidth: 2, borderColor: colors.border, gap: spacing.sm },
-  prefsHeadRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  prefsHeadRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: spacing.xs },
+  prefsBody: { gap: spacing.sm, marginTop: spacing.xs },
   prefsTitle: { fontSize: font.sizes.xxl, letterSpacing: 2, fontWeight: "500", color: colors.onSurface },
   prefsEditBtn: { flexDirection: "row", alignItems: "center", gap: 6, borderWidth: 2, borderColor: colors.border, paddingHorizontal: spacing.sm, paddingVertical: 6, backgroundColor: colors.surfaceSecondary },
+  prefsEditBtnFull: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, borderWidth: 2, borderColor: colors.border, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, backgroundColor: colors.surfaceSecondary, alignSelf: "flex-start" },
   prefsEditTxt: { fontSize: font.sizes.xs, letterSpacing: 1, fontWeight: "500", color: colors.onSurface },
   prefsChipsRow: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, marginTop: spacing.xs },
   prefChip: { borderWidth: 2, borderColor: colors.brandPrimary, backgroundColor: colors.brandPrimary, paddingHorizontal: spacing.sm, paddingVertical: 6 },
