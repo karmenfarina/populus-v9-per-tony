@@ -28,14 +28,11 @@ export default function FeudDetail() {
   const [expanded, setExpanded] = useState<Record<string, Reply[]>>({});
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
   const [replyText, setReplyText] = useState("");
-  const [activeSide, setActiveSide] = useState<"A" | "B">("A");
+  const [activeSide, setActiveSide] = useState<"A" | "B" | null>(null);
 
   const loadAll = useCallback(async () => {
     const f = await api.feud(id!);
     setFeud(f.feud);
-    // Default the comments tab to the user's chosen side; keep whatever the
-    // user has manually picked (only auto-set when we have no explicit choice).
-    if (f.feud?.my_vote) setActiveSide(f.feud.my_vote);
     const [c, s] = await Promise.all([
       api.comments(id!),
       api.sponsors(f.feud.category).catch(() => ({ sponsors: [] })),
@@ -97,6 +94,12 @@ export default function FeudDetail() {
       setReplyText(""); setReplyingTo(null);
       const r = await api.replies(commentId);
       setExpanded((prev) => ({ ...prev, [commentId]: r.replies }));
+      // Keep the parent's "N risposte" label in sync with the new reply count.
+      const bump = (list: Comment[]) => list.map((c) => c.comment_id === commentId
+        ? { ...c, reply_count: r.replies.length }
+        : c);
+      setSideA(bump);
+      setSideB(bump);
     } catch (e: any) { setError(e?.message || "Errore"); }
   };
 
@@ -273,7 +276,7 @@ export default function FeudDetail() {
 
           <View style={styles.commentsTabs} testID="comments-tabs">
             <Pressable
-              onPress={() => setActiveSide("A")}
+              onPress={() => setActiveSide((s) => (s === "A" ? null : "A"))}
               testID="comments-tab-a"
               style={[
                 styles.commentsTab,
@@ -288,7 +291,7 @@ export default function FeudDetail() {
               {activeSide === "A" && <View style={styles.commentsTabIndicator} />}
             </Pressable>
             <Pressable
-              onPress={() => setActiveSide("B")}
+              onPress={() => setActiveSide((s) => (s === "B" ? null : "B"))}
               testID="comments-tab-b"
               style={[
                 styles.commentsTab,
@@ -304,34 +307,43 @@ export default function FeudDetail() {
             </Pressable>
           </View>
 
-          <View style={styles.commentsList} testID={`comments-list-${activeSide.toLowerCase()}`}>
-            {(activeSide === "A" ? sideA : sideB).length === 0 ? (
-              <View style={styles.commentsEmpty}>
-                <Ionicons name="chatbubbles-outline" size={36} color={colors.muted} />
-                <Text style={styles.commentsEmptyTxt}>
-                  Ancora nessun commento per {activeSide === "A" ? feud.party_a : feud.party_b}.
-                </Text>
-                {feud.my_vote === activeSide && (
-                  <Text style={styles.commentsEmptyHint}>Sii il primo a scrivere!</Text>
-                )}
-              </View>
-            ) : (
-              (activeSide === "A" ? sideA : sideB).map((c) => (
-                <CommentItem
-                  key={c.comment_id}
-                  c={c}
-                  expanded={expanded[c.comment_id]}
-                  onToggle={() => toggleReplies(c.comment_id)}
-                  replyingTo={replyingTo}
-                  setReplyingTo={setReplyingTo}
-                  replyText={replyText}
-                  setReplyText={setReplyText}
-                  onSubmitReply={() => submitReply(c.comment_id)}
-                  canReply={!!feud.my_vote}
-                />
-              ))
-            )}
-          </View>
+          {activeSide === null ? (
+            <View style={styles.commentsIdle} testID="comments-idle">
+              <Ionicons name="chatbubbles-outline" size={44} color={colors.muted} />
+              <Text style={styles.commentsIdleTxt}>
+                Tocca una fazione per leggere i commenti
+              </Text>
+            </View>
+          ) : (
+            <View style={styles.commentsList} testID={`comments-list-${activeSide.toLowerCase()}`}>
+              {(activeSide === "A" ? sideA : sideB).length === 0 ? (
+                <View style={styles.commentsEmpty}>
+                  <Ionicons name="chatbubbles-outline" size={36} color={colors.muted} />
+                  <Text style={styles.commentsEmptyTxt}>
+                    Ancora nessun commento per {activeSide === "A" ? feud.party_a : feud.party_b}.
+                  </Text>
+                  {feud.my_vote === activeSide && (
+                    <Text style={styles.commentsEmptyHint}>Sii il primo a scrivere!</Text>
+                  )}
+                </View>
+              ) : (
+                (activeSide === "A" ? sideA : sideB).map((c) => (
+                  <CommentItem
+                    key={c.comment_id}
+                    c={c}
+                    expanded={expanded[c.comment_id]}
+                    onToggle={() => toggleReplies(c.comment_id)}
+                    replyingTo={replyingTo}
+                    setReplyingTo={setReplyingTo}
+                    replyText={replyText}
+                    setReplyText={setReplyText}
+                    onSubmitReply={() => submitReply(c.comment_id)}
+                    canReply={!!feud.my_vote}
+                  />
+                ))
+              )}
+            </View>
+          )}
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -499,6 +511,8 @@ const styles = StyleSheet.create({
   commentsTabLabel: { color: colors.onBrandPrimary, fontSize: font.sizes.xs, letterSpacing: 1.5, paddingHorizontal: spacing.xs },
   commentsTabIndicator: { position: "absolute", left: 0, right: 0, bottom: 0, height: 4, backgroundColor: colors.onBrandPrimary },
   commentsList: { padding: spacing.md, backgroundColor: colors.surface },
+  commentsIdle: { alignItems: "center", justifyContent: "center", paddingVertical: spacing.xxxl, gap: spacing.sm, backgroundColor: colors.surface },
+  commentsIdleTxt: { color: colors.muted, fontSize: font.sizes.sm, letterSpacing: 1, textAlign: "center", paddingHorizontal: spacing.xl },
   commentsEmpty: { alignItems: "center", justifyContent: "center", paddingVertical: spacing.xxl, gap: spacing.xs },
   commentsEmptyTxt: { color: colors.muted, fontSize: font.sizes.base, textAlign: "center", paddingHorizontal: spacing.lg, lineHeight: 20 },
   commentsEmptyHint: { color: colors.brandPrimary, fontSize: font.sizes.sm, letterSpacing: 1, fontWeight: "500" },
