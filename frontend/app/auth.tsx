@@ -45,13 +45,15 @@ export default function AuthScreen() {
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
           <View style={styles.header} testID="auth-header">
-            <Image
-              source={require("../assets/images/icon.png")}
-              style={styles.logo}
-              resizeMode="contain"
-              testID="auth-logo"
-            />
-            <Text style={styles.brand}>POPULUS</Text>
+            <View style={styles.brandRow}>
+              <Image
+                source={require("../assets/images/icon.png")}
+                style={styles.logo}
+                resizeMode="contain"
+                testID="auth-logo"
+              />
+              <Text style={styles.brand}>POPULUS</Text>
+            </View>
             <Text style={styles.tagline}>Scegli il tuo schieramento.</Text>
           </View>
 
@@ -162,7 +164,8 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.surface },
   scroll: { padding: spacing.lg, paddingBottom: spacing.xxl },
   header: { paddingVertical: spacing.xl, borderBottomWidth: 2, borderColor: colors.border, marginBottom: spacing.lg, alignItems: "center" },
-  logo: { width: 120, height: 120, marginBottom: spacing.md },
+  brandRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  logo: { width: 48, height: 48 },
   brand: { fontSize: font.sizes.giant, color: colors.onSurface, letterSpacing: 1, fontWeight: "500" },
   tagline: { fontSize: font.sizes.lg, color: colors.onSurface, marginTop: spacing.xs },
   tabsRow: { flexDirection: "row", gap: spacing.sm, marginBottom: spacing.lg },
