@@ -28,11 +28,11 @@ export default function FeudCard({ feud, onPress, showArchivedBadge = false }: {
       </ImageBackground>
       <View style={styles.splitRow}>
         <View style={[styles.splitHalf, { backgroundColor: colors.brandPrimary }]}>
-          <Text style={styles.splitPct}>{revealed ? `${feud.pct_a}%` : ""}</Text>
+          {revealed && <Text style={styles.splitPct}>{feud.pct_a}%</Text>}
           <Text style={styles.splitLabel} numberOfLines={2}>{feud.party_a}</Text>
         </View>
         <View style={[styles.splitHalf, { backgroundColor: colors.brandSecondary }]}>
-          <Text style={[styles.splitPct, { color: colors.onBrandSecondary }]}>{revealed ? `${feud.pct_b}%` : ""}</Text>
+          {revealed && <Text style={[styles.splitPct, { color: colors.onBrandSecondary }]}>{feud.pct_b}%</Text>}
           <Text style={[styles.splitLabel, { color: colors.onBrandSecondary }]} numberOfLines={2}>{feud.party_b}</Text>
         </View>
       </View>
@@ -51,7 +51,7 @@ const styles = StyleSheet.create({
   cardCat: { color: colors.brandSecondary, fontSize: font.sizes.sm, letterSpacing: 2 },
   cardTitle: { color: "#FFFFFF", fontSize: font.sizes.xxl, letterSpacing: 0.5, fontWeight: "500", lineHeight: 28 },
   splitRow: { flexDirection: "row", borderTopWidth: 2, borderColor: colors.border },
-  splitHalf: { flex: 1, paddingVertical: spacing.md, alignItems: "center" },
+  splitHalf: { flex: 1, paddingVertical: spacing.md, alignItems: "center", justifyContent: "center" },
   splitPct: { color: colors.onBrandPrimary, fontSize: font.sizes.xxl, fontWeight: "500", letterSpacing: 1 },
   splitLabel: { color: colors.onBrandPrimary, fontSize: font.sizes.sm, letterSpacing: 1, textAlign: "center", marginTop: 2, paddingHorizontal: spacing.xs },
   cardFooter: { flexDirection: "row", justifyContent: "space-between", padding: spacing.sm, borderTopWidth: 2, borderColor: colors.border, backgroundColor: colors.surfaceInverse },
