@@ -52,7 +52,7 @@ export default function AuthScreen() {
               testID="auth-logo"
             />
             <Text style={styles.brand}>POPULUS</Text>
-            <Text style={styles.tagline}>Scegli il tuo schieramento.</Text>
+            <Text style={styles.tagline}>Entra nel dibattito.</Text>
           </View>
 
           <View style={styles.tabsRow}>
