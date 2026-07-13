@@ -1516,9 +1516,13 @@ async def _generate_feud_for_category(cat: dict, LlmChat, UserMessage) -> Option
             "in FAIDE — controversie a due parti su cui la gente si accalora. "
             "Il tuo unico criterio è l'engagement: la notizia scelta deve provocare reazioni "
             "emotive forti (rabbia, indignazione, ironia, gossip, tifo), dividere il pubblico in due, "
-            "e far venir voglia di commentare. Evita come la peste notizie tecniche, burocratiche, "
+            "e far venir voglia di commentare. Le DUE PARTI possono essere: "
+            "(A) due contendenti diversi (persone/gruppi/istituzioni) citati nella notizia, "
+            "OPPURE (B) due POSIZIONI ANTITETICHE su un singolo soggetto (chi lo difende vs "
+            "chi lo condanna, chi lo sostiene vs chi lo critica). Scegli la modalità che rende "
+            "la faida più naturale. Evita come la peste notizie tecniche, burocratiche, "
             "adempimenti, dati economici astratti, dichiarazioni istituzionali generiche, "
-            "necrologi, cronaca meteo, o eventi che non hanno due parti chiaramente contrapposte. "
+            "necrologi, cronaca meteo, o eventi senza reali linee di frattura pubblica. "
             "Restituisci SOLO JSON valido, in italiano, senza commenti e senza testo extra."
         ),
     ).with_model('anthropic', 'claude-sonnet-4-6')
@@ -1528,9 +1532,10 @@ async def _generate_feud_for_category(cat: dict, LlmChat, UserMessage) -> Option
         prompt = (
             f"Categoria: {cat['label']}.\n\n"
             f"POOL DI NOTIZIE REALI DI OGGI:\n{sources_block}\n\n"
-            "COMPITO: scegli LA notizia che ha il coefficiente di engagement più alto. "
+            "COMPITO: scegli LA notizia con il coefficiente di engagement più alto. "
             "Criteri, in ordine di importanza:\n"
-            "1. Deve avere DUE parti chiaramente contrapposte (persone, gruppi, opinioni, tifoserie).\n"
+            "1. Deve avere DUE parti chiaramente contrapposte OPPURE due posizioni opposte "
+            "su un soggetto (es. condanna vs assoluzione, sostegno vs critica).\n"
             "2. Deve scatenare reazioni emotive forti: rabbia, indignazione, tifo, gossip, ironia.\n"
             "3. Deve toccare l'opinione popolare o essere già virale sui social.\n"
             "4. Preferisci scandali, litigi pubblici, gaffe, dichiarazioni divisive, "
@@ -1541,14 +1546,20 @@ async def _generate_feud_for_category(cat: dict, LlmChat, UserMessage) -> Option
             "dal pool fornito. Se nessuna notizia del pool è abbastanza succosa, restituisci "
             'esattamente {"skip": true, "reason": "motivo"} e nient\'altro.\n\n'
             "Il titolo deve essere DA TABLOID: incisivo, esplicito nel conflitto (usa 'contro', 'vs', "
-            "'attacca', 'smaschera', 'accusa', 'insulta', 'gela', 'demolisce'), max 90 caratteri. "
-            "Ma tutti i fatti, i nomi e i dettagli DEVONO derivare dalla notizia scelta, non da tua fantasia.\n"
-            "Le due parti devono essere nomi propri o gruppi riconoscibili citati nella notizia.\n"
+            "'attacca', 'smaschera', 'accusa', 'insulta', 'gela', 'demolisce', 'inguaia', 'divide'), "
+            "max 90 caratteri. Ma tutti i fatti, i nomi e i dettagli DEVONO derivare dalla notizia "
+            "scelta, non dalla tua fantasia.\n"
+            "MODALITÀ PARTI ammesse:\n"
+            "  A) Due contendenti reali: nomi propri/gruppi citati nella notizia (es. Milan vs Inter).\n"
+            "  B) Due POSIZIONI ANTITETICHE su UN singolo soggetto quando non esiste una vera "
+            "controparte (es. su Fabrizio Corona: 'Merita la condanna' vs 'La magistratura esagera'; "
+            "su una decisione politica: 'Giusta' vs 'Sbagliata'; su un fenomeno: 'Utile' vs 'Dannoso'). "
+            "In modalità B i nomi devono essere brevi (max 40 caratteri) e schierarsi in modo netto.\n"
             "La domanda finale deve essere provocatoria e schierante.\n\n"
             "Rispondi SOLO con questo JSON:\n"
             '{"title": "titolo tabloid max 90 caratteri", '
-            '"party_a": "primo contendente riconoscibile citato nella notizia", '
-            '"party_b": "secondo contendente riconoscibile citato nella notizia", '
+            '"party_a": "prima parte (contendente OPPURE posizione)", '
+            '"party_b": "seconda parte antitetica alla prima", '
             '"summary": "3-4 frasi che spiegano la faida partendo dalla notizia scelta, con dettagli concreti presi dalla notizia, senza inventare", '
             '"question": "domanda schierante e provocatoria, non neutra", '
             '"source_index": indice (0-based) della notizia scelta nel pool (obbligatorio), '
@@ -1878,29 +1889,29 @@ async def _cleanup_expired_feuds() -> None:
 
 
 async def _daily_generation_loop():
-    """Every hour, ensure each category has at least one fresh feud from the last 24 hours.
-    Skip generation for categories that already have a fresh feud. This uses the RSS+dedup
-    logic so no duplicate stories will be inserted."""
+    """Every 30 minutes, top up each category with fresh feuds. Each category
+    gets up to MAX_FRESH_PER_CATEGORY_24H feuds within a rolling 24h window.
+    The RSS+dedup logic prevents duplicate stories."""
     import asyncio as _asyncio
+    MAX_FRESH_PER_CATEGORY_24H = 4
     while True:
         try:
             try:
                 from emergentintegrations.llm.chat import LlmChat, UserMessage
             except Exception as e:
                 logger.warning(f"scheduler LLM import failed: {e}")
-                await _asyncio.sleep(3600)
+                await _asyncio.sleep(1800)
                 continue
 
             one_day_ago = now_utc() - timedelta(hours=24)
             for cat in CATEGORIES:
                 try:
-                    fresh = await db.feuds.find_one(
-                        {'category': cat['id'], 'source': 'ai', 'created_at': {'$gte': one_day_ago}},
-                        {'_id': 0, 'feud_id': 1},
+                    fresh_count = await db.feuds.count_documents(
+                        {'category': cat['id'], 'source': 'ai', 'created_at': {'$gte': one_day_ago}}
                     )
-                    if fresh:
+                    if fresh_count >= MAX_FRESH_PER_CATEGORY_24H:
                         continue
-                    logger.info(f"scheduler: generating fresh feud for {cat['id']}")
+                    logger.info(f"scheduler: attempting fresh feud for {cat['id']} ({fresh_count}/{MAX_FRESH_PER_CATEGORY_24H})")
                     feud = await _generate_feud_for_category(cat, LlmChat, UserMessage)
                     if feud:
                         await db.feuds.insert_one(feud)
@@ -1919,7 +1930,7 @@ async def _daily_generation_loop():
                 logger.warning(f"cleanup error: {e}")
         except Exception as e:
             logger.warning(f"scheduler loop error: {e}")
-        await _asyncio.sleep(3600)  # check hourly
+        await _asyncio.sleep(1800)  # 30 min cadence
 
 
 @api_router.get('/')
