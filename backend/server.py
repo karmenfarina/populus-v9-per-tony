@@ -1551,6 +1551,7 @@ async def admin_stats(_: bool = Depends(require_admin)):
 async def _generate_feud_for_category(cat: dict, LlmChat, UserMessage) -> Optional[dict]:
     # Fetch a wider pool of real news headlines so the AI has room to pick the juiciest
     headlines = await _fetch_headlines_for_category(cat['id'], max_items=12)
+    hot_topics = _load_hot_topics()
 
     chat = LlmChat(
         api_key=EMERGENT_LLM_KEY,
@@ -1573,9 +1574,20 @@ async def _generate_feud_for_category(cat: dict, LlmChat, UserMessage) -> Option
 
     if headlines:
         sources_block = "\n".join([f"[{i}] {h['title']} — fonte: {h['source']}" for i, h in enumerate(headlines)])
+        hot_topics_block = ""
+        if hot_topics:
+            bullets = "\n".join(f"  • {t}" for t in hot_topics)
+            hot_topics_block = (
+                "\n\nARGOMENTI PRIORITARI DA MONITORARE (aggiorna dinamicamente il programmatore):\n"
+                f"{bullets}\n"
+                "Se una delle notizie nel pool tocca uno di questi argomenti, DAI PRIORITÀ "
+                "assoluta alla sua selezione (a parità di altri criteri). Questi sono i temi "
+                "più caldi/discussi del momento su cui il pubblico si divide di più.\n"
+            )
         prompt = (
             f"Categoria: {cat['label']}.\n\n"
-            f"POOL DI NOTIZIE REALI DI OGGI:\n{sources_block}\n\n"
+            f"POOL DI NOTIZIE REALI DI OGGI:\n{sources_block}\n"
+            f"{hot_topics_block}\n"
             "COMPITO: scegli LA notizia con il coefficiente di engagement più alto. "
             "Criteri, in ordine di importanza:\n"
             "1. Deve avere DUE parti chiaramente contrapposte OPPURE due posizioni opposte "
@@ -1720,6 +1732,37 @@ async def _generate_feud_for_category(cat: dict, LlmChat, UserMessage) -> Option
         'hashtag_display': _hashtag_display(data.get('party_a') or '', data.get('party_b') or '', subject=subject),
         'votes_a': 0, 'votes_b': 0, 'created_at': now_utc(), 'source': 'ai',
     }
+
+
+HOT_TOPICS_PATH = ROOT_DIR / 'hot_topics.md'
+
+
+def _load_hot_topics() -> List[str]:
+    """Read the hot-topics list from `hot_topics.md`. Editable at runtime — the
+    file is re-read on every generation cycle so the programmer can push new
+    trends without a server restart. Non-list lines and comments are ignored.
+    """
+    try:
+        raw = HOT_TOPICS_PATH.read_text(encoding='utf-8')
+    except Exception as e:
+        logger.warning(f"hot_topics.md not readable: {e}")
+        return []
+    topics: List[str] = []
+    in_priority_section = False
+    for line in raw.splitlines():
+        s = line.strip()
+        if s.startswith('##'):
+            in_priority_section = s.lower().startswith('## argomenti prioritari')
+            continue
+        if not in_priority_section:
+            continue
+        # Only pick bullet list items in the priority section.
+        m = re.match(r'^[-*]\s+(.+?)$', s)
+        if m:
+            item = m.group(1).strip()
+            if item and not item.startswith('#'):
+                topics.append(item)
+    return topics
 
 
 def _extract_subject_from_title(title: str) -> str:
