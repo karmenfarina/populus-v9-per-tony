@@ -1567,7 +1567,17 @@ async def _generate_feud_for_category(cat: dict, LlmChat, UserMessage) -> Option
             "chi lo condanna, chi lo sostiene vs chi lo critica). Scegli la modalità che rende "
             "la faida più naturale. Evita come la peste notizie tecniche, burocratiche, "
             "adempimenti, dati economici astratti, dichiarazioni istituzionali generiche, "
-            "necrologi, cronaca meteo, o eventi senza reali linee di frattura pubblica. "
+            "necrologi, cronaca meteo, o eventi senza reali linee di frattura pubblica.\n\n"
+            "REGOLE DI STILE PER IL SUMMARY (non negoziabili):\n"
+            "1. Ogni persona citata deve avere NOME E COGNOMI completi (non solo il nome, non "
+            "il soprannome soltanto). Es: 'Fabrizio Corona', non 'Corona' o 'Fabri'.\n"
+            "2. Inserisci sempre i dettagli specifici della notizia: dove, quando, cifre, ruoli, "
+            "titoli professionali, contesto (es. 'in diretta a La Vita in Diretta', 'durante il GF 18').\n"
+            "3. Includi il dettaglio più succoso, l'aneddoto specifico, la frase incriminata o "
+            "il numero-shock che rende la storia degna di essere raccontata.\n"
+            "4. Vietati riassunti vaghi tipo 'polemica sui social', 'litigio pubblico', 'scoppia il caso': "
+            "sostituiscili con la scena concreta ('Selvaggia Lucarelli ha pubblicato uno screenshot dove...').\n"
+            "5. Se la notizia contiene una citazione forte, RIPORTALA breve tra virgolette.\n\n"
             "Restituisci SOLO JSON valido, in italiano, senza commenti e senza testo extra."
         ),
     ).with_model('anthropic', 'claude-sonnet-4-6')
@@ -1617,7 +1627,7 @@ async def _generate_feud_for_category(cat: dict, LlmChat, UserMessage) -> Option
             '"subject": "SOLO in modalità B (singolo soggetto con posizioni opposte): il NOME del soggetto della faida — persona, gruppo, cosa (es. \"Fabrizio Corona\", \"Samsung\", \"il nuovo film Marvel\"). In modalità A (due contendenti) lascia stringa vuota.", '
             '"party_a": "prima parte (contendente OPPURE posizione)", '
             '"party_b": "seconda parte antitetica alla prima", '
-            '"summary": "3-4 frasi che spiegano la faida partendo dalla notizia scelta, con dettagli concreti presi dalla notizia, senza inventare", '
+            '"summary": "3-4 frasi DENSE di dettagli concreti presi dalla notizia: nomi e COGNOMI completi dei protagonisti, ruoli, fatti verificabili, date/luoghi se disponibili, cifre, dichiarazioni testuali brevi tra virgolette se presenti, e IL DETTAGLIO PIÙ SUCCOSO che rende la storia interessante (il retroscena, la frase incriminata, l\'aneddoto, il numero shock). Vietato riassunti generici tipo \'litigano\', \'polemica sui social\': scrivi cosa è successo esattamente, chi ha detto/fatto cosa, e perché la gente si sta dividendo.", '
             '"question": "domanda schierante e provocatoria, non neutra", '
             '"source_index": indice (0-based) della notizia scelta nel pool (obbligatorio), '
             '"engagement_score": numero da 1 a 10 che stimi per la faida che hai creato, '
