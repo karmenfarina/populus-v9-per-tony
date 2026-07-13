@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   View, Text, StyleSheet, ScrollView, Pressable, FlatList, RefreshControl,
-  ActivityIndicator, TextInput, Image,
+  ActivityIndicator, TextInput, Image, useWindowDimensions,
 } from "react-native";
-import { useRouter } from "expo-router";
+import { useRouter, useLocalSearchParams } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { api, Feud } from "@/src/api";
@@ -15,15 +15,36 @@ const ALL_CAT = { id: "all", label: "Tutte" };
 
 export default function HomeFeed() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ category?: string }>();
   const { user } = useAuth();
   const [cats, setCats] = useState<{ id: string; label: string }[]>([ALL_CAT]);
-  const [selected, setSelected] = useState<string>("all");
+  const [selected, setSelected] = useState<string>((params.category as string) || "all");
   const [feuds, setFeuds] = useState<Feud[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQ, setSearchQ] = useState("");
   const [searching, setSearching] = useState(false);
+
+  // Keep the selected category in sync with the incoming `?category=` param.
+  // Enables round-trip preservation with the Archive screen and deep-links.
+  useEffect(() => {
+    const incoming = (params.category as string) || null;
+    if (incoming && incoming !== selected) setSelected(incoming);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params.category]);
+
+  // Auto-center the selected chip in the horizontal strip.
+  const chipScrollRef = useRef<ScrollView>(null);
+  const chipLayouts = useRef<Record<string, { x: number; w: number }>>({});
+  const { width: winW } = useWindowDimensions();
+  const centerChip = useCallback((id: string, animated = true) => {
+    const l = chipLayouts.current[id];
+    if (!l || !chipScrollRef.current) return;
+    const target = Math.max(0, l.x - winW / 2 + l.w / 2);
+    chipScrollRef.current.scrollTo({ x: target, animated });
+  }, [winW]);
+  useEffect(() => { centerChip(selected); }, [selected, centerChip]);
 
   const load = useCallback(async (category: string) => {
     const res = await api.feuds(category);
@@ -124,6 +145,7 @@ export default function HomeFeed() {
 
       <View style={styles.chipRowWrap}>
         <ScrollView
+          ref={chipScrollRef}
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.chipRowContent}
@@ -134,6 +156,11 @@ export default function HomeFeed() {
               key={c.id}
               testID={`chip-${c.id}`}
               onPress={() => onSelect(c.id)}
+              onLayout={(e) => {
+                const { x, width } = e.nativeEvent.layout;
+                chipLayouts.current[c.id] = { x, w: width };
+                if (c.id === selected) centerChip(c.id, false);
+              }}
               style={[styles.chip, selected === c.id && styles.chipActive]}
             >
               <Text style={[styles.chipText, selected === c.id && styles.chipTextActive]}>

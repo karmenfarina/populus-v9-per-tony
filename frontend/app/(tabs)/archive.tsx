@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   View, Text, StyleSheet, ScrollView, Pressable, FlatList,
-  ActivityIndicator,
+  ActivityIndicator, useWindowDimensions,
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -52,6 +52,18 @@ export default function ArchiveScreen() {
     const incoming = (params.category as string) || "all";
     setCategory((prev) => (prev === incoming ? prev : incoming));
   }, [params.category]);
+
+  // Auto-center the selected category chip in the horizontal strip.
+  const chipScrollRef = useRef<ScrollView>(null);
+  const chipLayouts = useRef<Record<string, { x: number; w: number }>>({});
+  const { width: winW } = useWindowDimensions();
+  const centerChip = useCallback((id: string, animated = true) => {
+    const l = chipLayouts.current[id];
+    if (!l || !chipScrollRef.current) return;
+    const target = Math.max(0, l.x - winW / 2 + l.w / 2);
+    chipScrollRef.current.scrollTo({ x: target, animated });
+  }, [winW]);
+  useEffect(() => { centerChip(category); }, [category, centerChip]);
 
   // Load categories once (ordered by favorites like home)
   useEffect(() => {
@@ -109,7 +121,11 @@ export default function ArchiveScreen() {
     <SafeAreaView style={styles.safe} edges={["top"]} testID="archive-screen">
       <View style={styles.header}>
         <View style={styles.headerTop}>
-          <Pressable onPress={() => router.back()} testID="archive-back" style={styles.backBtn}>
+          <Pressable
+            onPress={() => router.replace(`/?category=${category}`)}
+            testID="archive-back"
+            style={styles.backBtn}
+          >
             <Ionicons name="chevron-back" size={22} color={colors.brandSecondary} />
           </Pressable>
           <View style={{ flex: 1 }}>
@@ -121,6 +137,7 @@ export default function ArchiveScreen() {
 
       <View style={styles.chipRowWrap}>
         <ScrollView
+          ref={chipScrollRef}
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.chipRowContent}
@@ -131,6 +148,11 @@ export default function ArchiveScreen() {
               key={c.id}
               testID={`archive-chip-${c.id}`}
               onPress={() => setCategory(c.id)}
+              onLayout={(e) => {
+                const { x, width } = e.nativeEvent.layout;
+                chipLayouts.current[c.id] = { x, w: width };
+                if (c.id === category) centerChip(c.id, false);
+              }}
               style={[styles.chip, category === c.id && styles.chipActive]}
             >
               <Text style={[styles.chipText, category === c.id && styles.chipTextActive]}>
