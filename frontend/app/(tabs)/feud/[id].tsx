@@ -11,6 +11,7 @@ import * as Haptics from "expo-haptics";
 import { api, ApiError, Comment, Feud, Reply, Sponsor } from "@/src/api";
 import { colors, spacing, font, sideColor, onSideColor } from "@/src/theme";
 import FeudMediaBlock from "@/src/components/FeudMediaBlock";
+import { useUIPrefs } from "@/src/ui/UIPrefs";
 
 export default function FeudDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -29,7 +30,7 @@ export default function FeudDetail() {
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
   const [replyText, setReplyText] = useState("");
   const [activeSide, setActiveSide] = useState<"A" | "B" | null>(null);
-  const [sourcesExpanded, setSourcesExpanded] = useState(false);
+  const { sourcesExpanded, setSourcesExpanded } = useUIPrefs();
 
   const loadAll = useCallback(async () => {
     const f = await api.feud(id!);
@@ -209,14 +210,16 @@ export default function FeudDetail() {
           {feud.sources && feud.sources.length > 0 && (
             <View style={styles.sourcesBox} testID="sources-box">
               <Pressable
-                onPress={() => setSourcesExpanded((v) => !v)}
+                onPress={() => setSourcesExpanded(!sourcesExpanded)}
                 testID="sources-toggle"
                 style={styles.sourcesHead}
                 hitSlop={6}
               >
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
                   <Ionicons name="newspaper-outline" size={16} color={colors.brandPrimary} />
-                  <Text style={styles.sectionKicker}>FONTI</Text>
+                  <Text style={styles.sectionKicker}>
+                    {feud.sources.length === 1 ? "FONTE" : "FONTI"}
+                  </Text>
                   <Text style={styles.sourcesCount}>{feud.sources.length}</Text>
                 </View>
                 <Ionicons

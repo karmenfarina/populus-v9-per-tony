@@ -825,7 +825,36 @@ async def get_feud(feud_id: str, user: Optional[dict] = Depends(get_current_user
     doc['my_vote'] = my_vote
     doc['my_vote_changes'] = my_vote_changes
     doc['my_vote_changes_left'] = max(0, MAX_VOTE_CHANGES - my_vote_changes)
+    doc['sources'] = _filter_relevant_sources(doc)
     return {'feud': doc}
+
+
+def _filter_relevant_sources(feud: dict) -> list:
+    """Keep only sources actually related to the feud story.
+    Rule: primary source (index 0) is always retained. Extra sources must share
+    at least 2 significant tokens with title/parties OR mention a party name.
+    Applied at read-time so legacy feuds get cleaned up transparently.
+    """
+    srcs = feud.get('sources') or []
+    if len(srcs) <= 1:
+        return srcs
+    title_lc = (feud.get('title') or '').lower()
+    party_a = (feud.get('party_a') or '').lower()
+    party_b = (feud.get('party_b') or '').lower()
+    key_terms = set(t for t in re.findall(r"\w{5,}", title_lc))
+    for p in (party_a, party_b):
+        key_terms |= set(t for t in re.findall(r"\w{4,}", p))
+    kept = [srcs[0]]
+    for s in srcs[1:]:
+        ht = (s.get('title') or '').lower()
+        if not ht:
+            continue
+        overlap = sum(1 for t in key_terms if t and t in ht)
+        party_hit = (party_a and len(party_a) >= 4 and party_a in ht) or \
+                    (party_b and len(party_b) >= 4 and party_b in ht)
+        if overlap >= 2 or party_hit:
+            kept.append(s)
+    return kept
 
 
 async def _recompute_user_alignment(user_id: str):
@@ -1564,9 +1593,28 @@ async def _generate_feud_for_category(cat: dict, LlmChat, UserMessage) -> Option
         return None
 
     sources: List[dict] = [chosen]
-    for i, h in enumerate(headlines[:6]):
-        if i != idx and h not in sources and len(sources) < 3:
+    # Only include additional sources that are actually about the same story.
+    # Filter by shared long words between the extra headline and the chosen
+    # title / party names — avoids sprinkling unrelated news items from the
+    # same category feed.
+    def _tokens(s: str) -> set:
+        return set(t for t in re.findall(r"\w{5,}", (s or '').lower()))
+    key_terms = _tokens(chosen.get('title') or '')
+    for p in (data.get('party_a') or '', data.get('party_b') or ''):
+        key_terms |= set(t for t in re.findall(r"\w{4,}", (p or '').lower()))
+    parties_lc = [(data.get('party_a') or '').lower(), (data.get('party_b') or '').lower()]
+    for i, h in enumerate(headlines[:12]):
+        if i == idx or h in sources:
+            continue
+        ht = (h.get('title') or '').lower()
+        # Match if the extra headline shares 2+ significant tokens OR mentions
+        # a party by name (min 4 chars).
+        overlap = sum(1 for t in key_terms if t and t in ht)
+        party_hit = any(p and len(p) >= 4 and p in ht for p in parties_lc)
+        if overlap >= 2 or party_hit:
             sources.append(h)
+            if len(sources) >= 3:
+                break
 
     # Prefer the real image from the chosen headline; fallback to category image
     chosen_image = chosen.get('image')
