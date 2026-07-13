@@ -204,7 +204,7 @@ const styles = StyleSheet.create({
   archiveBtn: { width: 44, height: 44, borderWidth: 2, borderColor: colors.brandSecondary, alignItems: "center", justifyContent: "center", backgroundColor: colors.surfaceInverse },
   searchWrap: { flexDirection: "row", alignItems: "center", marginTop: spacing.sm },
   searchInput: { flex: 1, borderWidth: 2, borderColor: colors.brandSecondary, backgroundColor: colors.surfaceInverse, color: colors.onSurfaceInverse, padding: spacing.sm, fontSize: font.sizes.base },
-  brand: { color: colors.onSurfaceInverse, fontSize: font.sizes.xxxl, letterSpacing: 2, fontWeight: "500" },
+  brand: { color: colors.onSurfaceInverse, fontSize: font.sizes.xxxl, letterSpacing: 2, fontWeight: "500", marginLeft: -2 },
   brandRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   brandLogo: { width: 32, height: 32 },
   date: { color: colors.brandSecondary, fontSize: font.sizes.sm, letterSpacing: 2, marginTop: 2 },
