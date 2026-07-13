@@ -831,11 +831,23 @@ async def get_feud(feud_id: str, user: Optional[dict] = Depends(get_current_user
 
 
 def _ensure_hashtag(feud: dict) -> None:
-    """Backfill hashtag fields on legacy feuds. In-place mutation."""
-    if not feud.get('hashtag'):
-        feud['hashtag'] = _hashtag_key(feud.get('party_a', ''), feud.get('party_b', ''))
-    if not feud.get('hashtag_display'):
-        feud['hashtag_display'] = _hashtag_display(feud.get('party_a', ''), feud.get('party_b', ''))
+    """Backfill/recompute hashtag fields on legacy feuds. In-place mutation.
+    Detects single-subject mode when either party is a stance/position (or is
+    too long to be a name), and in that case derives the subject from either
+    the stored `subject` field or the feud title.
+    """
+    subject = (feud.get('subject') or '').strip() or None
+    if not subject:
+        # Legacy heuristic: if either party looks like a stance, extract the
+        # subject from the title.
+        pa, pb = feud.get('party_a', ''), feud.get('party_b', '')
+        if _is_stance_party(pa) or _is_stance_party(pb):
+            subject = _extract_subject_from_title(feud.get('title', '')) or None
+            if subject:
+                feud['subject'] = subject  # cache for the response only
+    # Always recompute to reflect the current rules on legacy rows.
+    feud['hashtag'] = _hashtag_key(feud.get('party_a', ''), feud.get('party_b', ''), subject=subject)
+    feud['hashtag_display'] = _hashtag_display(feud.get('party_a', ''), feud.get('party_b', ''), subject=subject)
 
 
 @api_router.get('/hashtags/{tag}')
@@ -1590,6 +1602,7 @@ async def _generate_feud_for_category(cat: dict, LlmChat, UserMessage) -> Option
             "La domanda finale deve essere provocatoria e schierante.\n\n"
             "Rispondi SOLO con questo JSON:\n"
             '{"title": "titolo tabloid max 90 caratteri", '
+            '"subject": "SOLO in modalità B (singolo soggetto con posizioni opposte): il NOME del soggetto della faida — persona, gruppo, cosa (es. \"Fabrizio Corona\", \"Samsung\", \"il nuovo film Marvel\"). In modalità A (due contendenti) lascia stringa vuota.", '
             '"party_a": "prima parte (contendente OPPURE posizione)", '
             '"party_b": "seconda parte antitetica alla prima", '
             '"summary": "3-4 frasi che spiegano la faida partendo dalla notizia scelta, con dettagli concreti presi dalla notizia, senza inventare", '
@@ -1688,6 +1701,7 @@ async def _generate_feud_for_category(cat: dict, LlmChat, UserMessage) -> Option
     except Exception:
         engagement = None
 
+    subject = (data.get('subject') or '').strip() or None
     return {
         'feud_id': new_id('feud'),
         'category': cat['id'], 'category_label': cat['label'],
@@ -1701,34 +1715,65 @@ async def _generate_feud_for_category(cat: dict, LlmChat, UserMessage) -> Option
         'sources': sources,
         'engagement_score': engagement,
         'engagement_reason': data.get('engagement_reason') or '',
-        'hashtag': _hashtag_key(data.get('party_a') or '', data.get('party_b') or ''),
-        'hashtag_display': _hashtag_display(data.get('party_a') or '', data.get('party_b') or ''),
+        'subject': subject,
+        'hashtag': _hashtag_key(data.get('party_a') or '', data.get('party_b') or '', subject=subject),
+        'hashtag_display': _hashtag_display(data.get('party_a') or '', data.get('party_b') or '', subject=subject),
         'votes_a': 0, 'votes_b': 0, 'created_at': now_utc(), 'source': 'ai',
     }
 
 
+def _extract_subject_from_title(title: str) -> str:
+    """Fallback: derive a single-subject slug from the feud title by taking the
+    leading proper-noun phrase (1-3 capitalized words)."""
+    m = re.match(
+        r"\s*([A-ZÀ-Ù][a-zà-ùÀ-Ù']+(?:\s+[A-ZÀ-Ù][a-zà-ùÀ-Ù']+){0,2})",
+        (title or '').strip(),
+    )
+    return m.group(1) if m else ''
+
+
+def _is_stance_party(name: str) -> bool:
+    """Detect if a party string represents a *position/stance* rather than a
+    named contender (used for legacy feuds without an explicit `subject`)."""
+    if not name:
+        return False
+    s = name.strip()
+    if len(s) > 30:
+        return True
+    lc = s.lower()
+    STANCE_PREFIXES = (
+        'chi ', 'difensori', 'contrari', 'sostenitori', 'critici', 'favorevoli',
+        'anti-', 'anti ', 'pro-', 'pro ', 'fan di', 'contro '
+    )
+    return any(lc.startswith(p) for p in STANCE_PREFIXES)
+
+
 def _hashtag_norm(name: str) -> str:
-    """Normalize a party name to a compact alphanumeric slug."""
+    """Normalize a name to a compact alphanumeric slug."""
     return re.sub(r'[^a-zA-Z0-9]+', '', (name or '').strip().lower())
 
 
-def _hashtag_key(a: str, b: str) -> str:
-    """Deterministic canonical hashtag key for a pair — sorted so orientation
-    doesn't matter. Used for lookups: two feuds with the same pair (regardless
-    of side order) share the same key."""
+def _hashtag_key(a: str, b: str, subject: Optional[str] = None) -> str:
+    """Deterministic canonical hashtag key.
+    - If `subject` is given → hashtag is derived from the subject alone
+      (single-subject mode with two opposing stances).
+    - Otherwise → sorted concat of both party names (two-contender mode).
+    """
+    if subject:
+        return _hashtag_norm(subject)[:32] or 'faida'
     def _cap(s: str) -> str:
         return _hashtag_norm(s)[:24]
     parts = sorted([p for p in (_cap(a), _cap(b)) if p])
     return ''.join(parts) or 'faida'
 
 
-def _hashtag_display(a: str, b: str) -> str:
-    """Human-readable hashtag: PascalCase concatenation of both party names,
-    e.g. '#MilanInter', '#FabrizioCoronaMagistratura'. Same pair → same string."""
+def _hashtag_display(a: str, b: str, subject: Optional[str] = None) -> str:
+    """Human-readable hashtag: '#Subject' (mode B) or '#PartyAPartyB' (mode A)."""
     def _pascal(s: str) -> str:
-        # Take up to 3 significant words per party, PascalCase, cap at 20 chars.
-        words = re.findall(r"[A-Za-z0-9]+", (s or ''))
-        return ''.join(w.capitalize() for w in words[:3])[:20]
+        words = re.findall(r"[A-Za-zÀ-Ù0-9]+", (s or ''))
+        return ''.join(w.capitalize() for w in words[:3])[:24]
+    if subject:
+        return ('#' + _pascal(subject)) or '#Faida'
     parts = sorted([p for p in (_pascal(a), _pascal(b)) if p])
     return ('#' + ''.join(parts)) if parts else '#Faida'
 
