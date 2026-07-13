@@ -192,6 +192,18 @@ export default function FeudDetail() {
           <View style={styles.article}>
             <Text style={styles.sectionKicker}>LA FAIDA</Text>
             <Text style={styles.summary}>{feud.summary}</Text>
+            {feud.hashtag && (
+              <Pressable
+                onPress={() => router.push(`/hashtag/${feud.hashtag}`)}
+                testID="feud-hashtag"
+                hitSlop={6}
+                style={styles.hashtagPill}
+              >
+                <Text style={styles.hashtagText} numberOfLines={1}>
+                  {feud.hashtag_display || `#${feud.hashtag}`}
+                </Text>
+              </Pressable>
+            )}
           </View>
 
           {feud.media && (
@@ -524,6 +536,8 @@ const styles = StyleSheet.create({
   heroContent: { padding: spacing.lg },
   title: { color: "#FFFFFF", fontSize: font.sizes.xxxl, lineHeight: 36, letterSpacing: 0.5, fontWeight: "500" },
   article: { padding: spacing.lg, borderBottomWidth: 2, borderColor: colors.border, backgroundColor: colors.surfaceSecondary },
+  hashtagPill: { alignSelf: "flex-start", marginTop: spacing.sm, borderWidth: 1, borderColor: colors.brandSecondary, paddingHorizontal: spacing.sm, paddingVertical: 3, backgroundColor: "rgba(255,230,0,0.08)" },
+  hashtagText: { fontSize: font.sizes.xs, color: colors.brandSecondary, letterSpacing: 0.5, fontWeight: "500" },
   sectionKicker: { fontSize: font.sizes.sm, letterSpacing: 2, color: colors.brandPrimary, marginBottom: spacing.xs },
   mediaSection: { paddingHorizontal: spacing.lg, marginBottom: spacing.md },
   summary: { fontSize: font.sizes.lg, lineHeight: 24, color: colors.onSurface },

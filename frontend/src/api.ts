@@ -60,6 +60,7 @@ export const api = {
   feud: (id: string) => request(`/feuds/${id}`),
   recordView: (id: string) =>
     request(`/feuds/${id}/view`, { method: 'POST' }).catch(() => null),
+  hashtag: (tag: string) => request(`/hashtags/${encodeURIComponent(tag)}`),
   vote: (id: string, side: 'A' | 'B') =>
     request(`/feuds/${id}/vote`, { method: 'POST', body: JSON.stringify({ side }) }),
   comments: (id: string) => request(`/feuds/${id}/comments`),
@@ -196,6 +197,8 @@ export type Feud = {
   my_vote_changes?: number;
   my_vote_changes_left?: number;
   sources?: { title: string; link: string; source: string }[];
+  hashtag?: string;
+  hashtag_display?: string;
 };
 
 export type Comment = {

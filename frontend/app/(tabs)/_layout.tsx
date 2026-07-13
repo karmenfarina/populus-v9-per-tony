@@ -44,6 +44,7 @@ export default function TabsLayout() {
           these routes. */}
       <Tabs.Screen name="feud/[id]" options={{ href: null }} />
       <Tabs.Screen name="user/[id]" options={{ href: null }} />
+      <Tabs.Screen name="hashtag/[key]" options={{ href: null }} />
       <Tabs.Screen name="archive" options={{ href: null }} />
       <Tabs.Screen name="admin" options={{ href: null }} />
     </Tabs>

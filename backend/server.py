@@ -826,7 +826,39 @@ async def get_feud(feud_id: str, user: Optional[dict] = Depends(get_current_user
     doc['my_vote_changes'] = my_vote_changes
     doc['my_vote_changes_left'] = max(0, MAX_VOTE_CHANGES - my_vote_changes)
     doc['sources'] = _filter_relevant_sources(doc)
+    _ensure_hashtag(doc)
     return {'feud': doc}
+
+
+def _ensure_hashtag(feud: dict) -> None:
+    """Backfill hashtag fields on legacy feuds. In-place mutation."""
+    if not feud.get('hashtag'):
+        feud['hashtag'] = _hashtag_key(feud.get('party_a', ''), feud.get('party_b', ''))
+    if not feud.get('hashtag_display'):
+        feud['hashtag_display'] = _hashtag_display(feud.get('party_a', ''), feud.get('party_b', ''))
+
+
+@api_router.get('/hashtags/{tag}')
+async def feuds_by_hashtag(tag: str, user: Optional[dict] = Depends(get_current_user_optional)):
+    """List all feuds matching a hashtag key (canonical form) within the retention
+    window. Includes both live (24h) and archived (up to 14d) feuds."""
+    key = _hashtag_norm(tag).replace('#', '')
+    # Match either the stored `hashtag` key or compute-on-the-fly for legacy rows.
+    docs = await db.feuds.find({}, {'_id': 0}).sort('created_at', -1).to_list(500)
+    matched: List[dict] = []
+    for d in docs:
+        _ensure_hashtag(d)
+        if d.get('hashtag') == key:
+            matched.append(d)
+    voted_map: dict = {}
+    if user and matched:
+        voted_map = await _user_voted_ids(user['user_id'], [d['feud_id'] for d in matched])
+    for d in matched:
+        my_vote = voted_map.get(d['feud_id']) if user else None
+        _attach_percentages(d, revealed=bool(my_vote))
+        d['my_vote'] = my_vote
+    display = matched[0]['hashtag_display'] if matched else f"#{tag}"
+    return {'feuds': matched, 'hashtag': key, 'hashtag_display': display}
 
 
 def _filter_relevant_sources(feud: dict) -> list:
@@ -1669,8 +1701,36 @@ async def _generate_feud_for_category(cat: dict, LlmChat, UserMessage) -> Option
         'sources': sources,
         'engagement_score': engagement,
         'engagement_reason': data.get('engagement_reason') or '',
+        'hashtag': _hashtag_key(data.get('party_a') or '', data.get('party_b') or ''),
+        'hashtag_display': _hashtag_display(data.get('party_a') or '', data.get('party_b') or ''),
         'votes_a': 0, 'votes_b': 0, 'created_at': now_utc(), 'source': 'ai',
     }
+
+
+def _hashtag_norm(name: str) -> str:
+    """Normalize a party name to a compact alphanumeric slug."""
+    return re.sub(r'[^a-zA-Z0-9]+', '', (name or '').strip().lower())
+
+
+def _hashtag_key(a: str, b: str) -> str:
+    """Deterministic canonical hashtag key for a pair — sorted so orientation
+    doesn't matter. Used for lookups: two feuds with the same pair (regardless
+    of side order) share the same key."""
+    def _cap(s: str) -> str:
+        return _hashtag_norm(s)[:24]
+    parts = sorted([p for p in (_cap(a), _cap(b)) if p])
+    return ''.join(parts) or 'faida'
+
+
+def _hashtag_display(a: str, b: str) -> str:
+    """Human-readable hashtag: PascalCase concatenation of both party names,
+    e.g. '#MilanInter', '#FabrizioCoronaMagistratura'. Same pair → same string."""
+    def _pascal(s: str) -> str:
+        # Take up to 3 significant words per party, PascalCase, cap at 20 chars.
+        words = re.findall(r"[A-Za-z0-9]+", (s or ''))
+        return ''.join(w.capitalize() for w in words[:3])[:20]
+    parts = sorted([p for p in (_pascal(a), _pascal(b)) if p])
+    return ('#' + ''.join(parts)) if parts else '#Faida'
 
 
 # ----------------------- RSS News Ingestion -----------------------
