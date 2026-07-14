@@ -3,7 +3,7 @@ import {
   View, Text, StyleSheet, ScrollView, Pressable, FlatList, RefreshControl,
   ActivityIndicator, TextInput, Image, useWindowDimensions,
 } from "react-native";
-import { useRouter, useLocalSearchParams } from "expo-router";
+import { useRouter, useLocalSearchParams, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { api, Feud } from "@/src/api";
@@ -94,6 +94,35 @@ export default function HomeFeed() {
     } finally { setRefreshing(false); }
   };
 
+  // Silent refresh whenever the tab regains focus (e.g. after visiting a feud
+  // detail or another tab). Doesn't flash the full loading spinner — we let the
+  // list re-render with fresh data in place.
+  const firstFocusRef = useRef(true);
+  useFocusEffect(
+    useCallback(() => {
+      if (firstFocusRef.current) {
+        firstFocusRef.current = false;
+        return; // initial mount already loaded the feed
+      }
+      let cancelled = false;
+      setRefreshing(true);
+      (async () => {
+        try {
+          if (searchQ.trim()) {
+            const r = await api.search(searchQ.trim());
+            if (!cancelled) setFeuds(r.feuds);
+          } else {
+            await load(selected);
+          }
+        } finally {
+          if (!cancelled) setRefreshing(false);
+        }
+      })();
+      return () => { cancelled = true; };
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [selected, searchQ])
+  );
+
   const runSearch = async (q: string) => {
     if (!q.trim()) { await load(selected); return; }
     setSearching(true);
@@ -171,6 +200,13 @@ export default function HomeFeed() {
         </ScrollView>
       </View>
 
+      {refreshing && !loading && (
+        <View style={styles.refreshPill} pointerEvents="none" testID="home-refresh-pill">
+          <ActivityIndicator size="small" color={colors.brandSecondary} />
+          <Text style={styles.refreshPillTxt}>Aggiornamento</Text>
+        </View>
+      )}
+
       {loading ? (
         <View style={styles.center} testID="home-loading">
           <ActivityIndicator size="large" color={colors.brandPrimary} />
@@ -198,6 +234,12 @@ export default function HomeFeed() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.surface },
+  refreshPill: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center",
+    gap: spacing.sm, paddingVertical: spacing.xs, paddingHorizontal: spacing.sm,
+    backgroundColor: colors.surfaceInverse, borderBottomWidth: 1, borderColor: colors.border,
+  },
+  refreshPillTxt: { color: colors.brandSecondary, fontSize: font.sizes.xs, letterSpacing: 1, fontWeight: "500" },
   header: { paddingHorizontal: spacing.lg, paddingTop: spacing.sm, paddingBottom: spacing.md, borderBottomWidth: 2, borderColor: colors.border, backgroundColor: colors.surfaceInverse },
   headerTop: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   searchBtn: { width: 44, height: 44, borderWidth: 2, borderColor: colors.brandSecondary, alignItems: "center", justifyContent: "center", backgroundColor: colors.surfaceInverse },
