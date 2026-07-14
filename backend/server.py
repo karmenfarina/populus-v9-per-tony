@@ -617,7 +617,9 @@ async def record_view(feud_id: str, user: dict = Depends(get_current_user)):
     await db.feud_views.update_one(
         {'user_id': user['user_id'], 'feud_id': feud_id},
         {
-            '$setOnInsert': {'user_id': user['user_id'], 'feud_id': feud_id, 'category': f.get('category')},
+            # `category` is only in $set — MongoDB refuses to update the same
+            # path via both $setOnInsert and $set (write error code 40).
+            '$setOnInsert': {'user_id': user['user_id'], 'feud_id': feud_id},
             '$set': {'last_viewed_at': now_utc(), 'category': f.get('category')},
             '$inc': {'count': 1},
         },

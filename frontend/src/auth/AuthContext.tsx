@@ -41,6 +41,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     (async () => {
+      // Web-only: Emergent Google Auth redirects back with `#session_id=...`
+      // in the URL fragment. Since fragments never reach the backend, we must
+      // parse them client-side, exchange for a first-party session, then wipe
+      // the fragment via `history.replaceState` so the token doesn't linger.
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        try {
+          const hash = window.location.hash || '';
+          const m = hash.match(/[#&]session_id=([^&]+)/);
+          if (m && m[1]) {
+            const sid = decodeURIComponent(m[1]);
+            const res = await api.googleSession(sid);
+            await setToken(res.token);
+            setUser(res.user);
+            // Strip the fragment from the address bar (keeps path + query).
+            try {
+              const url = window.location.pathname + window.location.search;
+              window.history.replaceState(null, '', url);
+            } catch { /* ignore */ }
+            setLoading(false);
+            return;
+          }
+        } catch {
+          // Fall through to normal refreshMe if the callback exchange failed.
+        }
+      }
       await refreshMe();
       setLoading(false);
     })();
