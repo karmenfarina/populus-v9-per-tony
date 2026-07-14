@@ -77,9 +77,13 @@ export default function HomeFeed() {
   }, [load, user?.favorite_categories]);
 
   const onSelect = async (id: string) => {
-    setSelected(id); setLoading(true);
+    setSelected(id);
     setSearchOpen(false); setSearchQ("");
-    try { await load(id); } finally { setLoading(false); }
+    // Use the "Aggiornamento" pill (not the fullscreen spinner) so users see a
+    // smooth transition when jumping between categories — the previous list
+    // stays visible while the new one loads.
+    setRefreshing(true);
+    try { await load(id); } finally { setRefreshing(false); }
   };
 
   const onRefresh = async () => {
