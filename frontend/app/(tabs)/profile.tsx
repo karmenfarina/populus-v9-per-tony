@@ -523,6 +523,16 @@ export default function Profile() {
         </View>
 
         <Pressable
+          style={styles.supportBtn}
+          onPress={() => router.push("/support")}
+          testID="profile-support"
+        >
+          <Ionicons name="help-circle-outline" size={20} color={colors.brandSecondary} />
+          <Text style={styles.supportTxt}>RICHIEDI ASSISTENZA</Text>
+          <Ionicons name="chevron-forward" size={18} color={colors.brandSecondary} />
+        </Pressable>
+
+        <Pressable
           style={styles.logout}
           onPress={async () => {
             await logout();
@@ -773,6 +783,8 @@ const styles = StyleSheet.create({
   pushRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, marginHorizontal: spacing.lg, marginTop: spacing.md, padding: spacing.md, borderWidth: 2, borderColor: colors.border, backgroundColor: colors.surfaceInverse },
   pushLabel: { color: colors.brandSecondary, fontSize: font.sizes.sm, letterSpacing: 2, fontWeight: "500" },
   pushHint: { color: colors.onSurfaceInverse, fontSize: font.sizes.xs, marginTop: 4, opacity: 0.75 },
+  supportBtn: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginHorizontal: spacing.lg, marginTop: spacing.md, padding: spacing.md, borderWidth: 2, borderColor: colors.brandSecondary, backgroundColor: colors.surfaceInverse },
+  supportTxt: { flex: 1, color: colors.brandSecondary, fontSize: font.sizes.sm, letterSpacing: 2, fontWeight: "500" },
   logoutText: { color: colors.onBrandPrimary, fontSize: font.sizes.lg, letterSpacing: 2, fontWeight: "500" },
   adminLink: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: spacing.md, marginBottom: spacing.lg },
   adminLinkTxt: { fontSize: font.sizes.xs, letterSpacing: 2, color: colors.muted, fontWeight: "500" },

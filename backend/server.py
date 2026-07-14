@@ -1457,6 +1457,105 @@ async def toggle_push(body: PushToggleBody, user: dict = Depends(get_current_use
     return {'enabled': bool(body.enabled)}
 
 
+# --- Support / assistenza -----------------------------------------------------
+
+RESEND_API_KEY = os.environ.get('RESEND_API_KEY', '')
+SUPPORT_EMAIL = os.environ.get('SUPPORT_EMAIL', '')
+
+
+class SupportBody(BaseModel):
+    category: str = Field(min_length=1, max_length=40)
+    description: str = Field(min_length=10, max_length=2000)
+    frequency: str = Field(min_length=1, max_length=30)
+    section: str = Field(min_length=1, max_length=30)
+    contact_email: Optional[str] = None
+
+
+@api_router.post('/support/submit')
+async def support_submit(body: SupportBody, user: dict = Depends(get_current_user)):
+    """Multi-field support form. Fires an email to the developer via Resend.
+    Reply-To is set to the user's registered email (or their optional contact
+    field) so the developer can reply directly from their inbox."""
+    if not RESEND_API_KEY or not SUPPORT_EMAIL:
+        raise HTTPException(status_code=500, detail='Servizio email non configurato. Riprova più tardi.')
+
+    reply_to = (user.get('email') or (body.contact_email or '').strip()) or None
+    provider = user.get('auth_provider') or ('anonymous' if user.get('is_anonymous') else 'unknown')
+
+    def esc(v: str) -> str:
+        return html_lib.escape(str(v or ''))
+
+    reply_note = ("(Reply-To impostato su " + reply_to + ")") if reply_to else (
+        "— nessun contatto disponibile, l" + chr(0x2019) + " utente è anonimo senza email opzionale"
+    )
+    html_body = f"""
+    <div style="font-family:-apple-system,sans-serif;max-width:640px;line-height:1.5">
+      <h2 style="color:#F01A1A;border-bottom:2px solid #F01A1A;padding-bottom:6px">
+        Populus — Nuova richiesta di assistenza
+      </h2>
+      <p><b>Categoria:</b> {esc(body.category)}<br>
+         <b>Frequenza:</b> {esc(body.frequency)}<br>
+         <b>Sezione app:</b> {esc(body.section)}</p>
+      <h3>Descrizione</h3>
+      <blockquote style="border-left:3px solid #ccc;padding-left:12px;color:#333;white-space:pre-wrap">{esc(body.description)}</blockquote>
+      <hr>
+      <h3>Identificativo utente</h3>
+      <p><b>Nickname:</b> {esc(user.get('nickname', '-'))}<br>
+         <b>User ID:</b> <code>{esc(user.get('user_id', '-'))}</code><br>
+         <b>Auth provider:</b> {esc(provider)}<br>
+         <b>Email registrata:</b> {esc(user.get('email') or '(nessuna)')}<br>
+         <b>Email contatto (opzionale):</b> {esc(body.contact_email or '(non fornita)')}</p>
+      <p style="font-size:12px;color:#888">
+        Rispondi direttamente a questa email per contattare l&rsquo;utente
+        {esc(reply_note)}.
+      </p>
+    </div>
+    """.strip()
+
+    payload: dict = {
+        'from': 'Populus Support <onboarding@resend.dev>',
+        'to': [SUPPORT_EMAIL],
+        'subject': f"[Populus] {body.category} — {user.get('nickname', 'utente')}",
+        'html': html_body,
+    }
+    if reply_to:
+        payload['reply_to'] = reply_to
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.post(
+                'https://api.resend.com/emails',
+                headers={
+                    'Authorization': f'Bearer {RESEND_API_KEY}',
+                    'Content-Type': 'application/json',
+                },
+                json=payload,
+            )
+            if r.status_code >= 400:
+                logger.warning(f"Resend error {r.status_code}: {r.text[:200]}")
+                raise HTTPException(
+                    status_code=502,
+                    detail="Impossibile inviare la richiesta ora. Riprova tra qualche minuto.",
+                )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning(f"support email error: {e}")
+        raise HTTPException(status_code=502, detail='Servizio email non raggiungibile.')
+
+    # Also archive the ticket in Mongo for the admin to browse.
+    await db.support_tickets.insert_one({
+        'ticket_id': new_id('tkt'),
+        'user_id': user.get('user_id'),
+        'nickname': user.get('nickname'),
+        'category': body.category, 'frequency': body.frequency,
+        'section': body.section, 'description': body.description,
+        'contact_email': body.contact_email,
+        'created_at': now_utc(),
+    })
+    return {'sent': True}
+
+
 async def send_push(recipients: List[str], data: dict, idempotency_key: Optional[str] = None) -> None:
     """Trigger a mobile push via Emergent. Caller must handle exceptions —
     push failures should NEVER block the primary operation."""

@@ -137,6 +137,10 @@ export const api = {
     }),
   togglePush: (enabled: boolean) =>
     request('/settings/push', { method: 'POST', body: JSON.stringify({ enabled }) }),
+  submitSupport: (data: {
+    category: string; description: string; frequency: string;
+    section: string; contact_email?: string;
+  }) => request('/support/submit', { method: 'POST', body: JSON.stringify(data) }),
   vote: (id: string, side: 'A' | 'B') =>
     request(`/feuds/${id}/vote`, { method: 'POST', body: JSON.stringify({ side }) }),
   comments: (id: string) => request(`/feuds/${id}/comments`),
