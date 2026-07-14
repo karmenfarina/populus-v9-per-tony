@@ -96,6 +96,12 @@ export default function HomeFeed() {
       }
     } finally { setPullRefreshing(false); }
   };
+  // Keep the latest onRefresh in a ref so the PanResponder (created once via
+  // useRef) always invokes the current callback with the up-to-date `selected`
+  // category and search state — otherwise a stale closure would refresh the
+  // wrong category (bug: category=X pulls to refresh but shows category=all).
+  const onRefreshRef = useRef(onRefresh);
+  onRefreshRef.current = onRefresh;
 
   // Web-only pull-to-refresh via PanResponder. RefreshControl doesn't render on
   // react-native-web, so we manually track vertical drag from the top of the
@@ -121,7 +127,7 @@ export default function HomeFeed() {
       },
       onPanResponderRelease: (_e, g) => {
         if (g.dy >= PULL_THRESHOLD) {
-          onRefresh();
+          onRefreshRef.current();
         }
         pullProgressRef.current = 0;
         setPullProgress(0);
