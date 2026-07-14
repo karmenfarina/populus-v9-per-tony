@@ -110,14 +110,12 @@ export default function HomeFeed() {
   const scrollAtTopRef = useRef(true);
   const [pullProgress, setPullProgress] = useState(0);
   const pullProgressRef = useRef(0);
-  const PULL_THRESHOLD = 70; // pixels
+  const PULL_THRESHOLD = 40; // pixels — lowered so a small flick is enough
   const webPan = useRef(
     PanResponder.create({
-      // Only claim the gesture when the list is at the top AND the user is
-      // pulling DOWN — otherwise let scrolling behave normally.
       onStartShouldSetPanResponder: () => false,
       onMoveShouldSetPanResponder: (_e, g) =>
-        isWeb && scrollAtTopRef.current && g.dy > 6 && Math.abs(g.dy) > Math.abs(g.dx),
+        isWeb && scrollAtTopRef.current && g.dy > 3 && Math.abs(g.dy) > Math.abs(g.dx),
       onPanResponderMove: (_e, g) => {
         if (g.dy > 0) {
           const p = Math.min(1, g.dy / PULL_THRESHOLD);
@@ -126,7 +124,9 @@ export default function HomeFeed() {
         }
       },
       onPanResponderRelease: (_e, g) => {
-        if (g.dy >= PULL_THRESHOLD) {
+        // Trigger either by pulling past the threshold OR by a quick downward
+        // flick (velocity-based) — both feel immediate to the user.
+        if (g.dy >= PULL_THRESHOLD || (g.dy >= 15 && g.vy >= 0.4)) {
           onRefreshRef.current();
         }
         pullProgressRef.current = 0;
