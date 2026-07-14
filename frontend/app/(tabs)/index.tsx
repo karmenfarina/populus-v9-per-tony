@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   View, Text, StyleSheet, ScrollView, Pressable, FlatList, RefreshControl,
   ActivityIndicator, TextInput, Image, useWindowDimensions, Platform,
-  GestureResponderEvent,
+  PanResponder,
 } from "react-native";
 import { useRouter, useLocalSearchParams, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -97,29 +97,41 @@ export default function HomeFeed() {
     } finally { setPullRefreshing(false); }
   };
 
-  // Web-only pull-to-refresh: RefreshControl doesn't render on react-native-web,
-  // so we simulate the gesture with touch events. Users can drag their finger
-  // downwards when the list is at the top to trigger a manual reload.
+  // Web-only pull-to-refresh via PanResponder. RefreshControl doesn't render on
+  // react-native-web, so we manually track vertical drag from the top of the
+  // list and expose a live "pullProgress" (0..1) to show a growing spinner.
   const isWeb = Platform.OS === 'web';
   const scrollAtTopRef = useRef(true);
-  const pullStartYRef = useRef<number | null>(null);
-  const pulledRef = useRef(false);
-  const onWebTouchStart = (e: GestureResponderEvent) => {
-    if (!isWeb || !scrollAtTopRef.current) return;
-    pullStartYRef.current = e.nativeEvent.pageY;
-    pulledRef.current = false;
-  };
-  const onWebTouchMove = (e: GestureResponderEvent) => {
-    if (!isWeb || pullStartYRef.current === null) return;
-    const dy = e.nativeEvent.pageY - pullStartYRef.current;
-    if (dy > 60 && !pulledRef.current) {
-      pulledRef.current = true;
-      onRefresh();
-    }
-  };
-  const onWebTouchEnd = () => {
-    pullStartYRef.current = null;
-  };
+  const [pullProgress, setPullProgress] = useState(0);
+  const pullProgressRef = useRef(0);
+  const PULL_THRESHOLD = 70; // pixels
+  const webPan = useRef(
+    PanResponder.create({
+      // Only claim the gesture when the list is at the top AND the user is
+      // pulling DOWN — otherwise let scrolling behave normally.
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (_e, g) =>
+        isWeb && scrollAtTopRef.current && g.dy > 6 && Math.abs(g.dy) > Math.abs(g.dx),
+      onPanResponderMove: (_e, g) => {
+        if (g.dy > 0) {
+          const p = Math.min(1, g.dy / PULL_THRESHOLD);
+          pullProgressRef.current = p;
+          setPullProgress(p);
+        }
+      },
+      onPanResponderRelease: (_e, g) => {
+        if (g.dy >= PULL_THRESHOLD) {
+          onRefresh();
+        }
+        pullProgressRef.current = 0;
+        setPullProgress(0);
+      },
+      onPanResponderTerminate: () => {
+        pullProgressRef.current = 0;
+        setPullProgress(0);
+      },
+    })
+  ).current;
 
   // Silent refresh whenever the tab regains focus (e.g. after visiting a feud
   // detail or another tab). No visual indicator — data is swapped in place.
@@ -223,8 +235,12 @@ export default function HomeFeed() {
         </ScrollView>
       </View>
 
-      {pullRefreshing && (
-        <View style={styles.refreshPill} pointerEvents="none" testID="home-refresh-pill">
+      {(pullRefreshing || pullProgress > 0) && (
+        <View
+          style={[styles.refreshPill, { opacity: pullRefreshing ? 1 : Math.max(0.2, pullProgress) }]}
+          pointerEvents="none"
+          testID="home-refresh-pill"
+        >
           <ActivityIndicator size="small" color={colors.brandSecondary} />
         </View>
       )}
@@ -234,12 +250,7 @@ export default function HomeFeed() {
           <ActivityIndicator size="large" color={colors.brandPrimary} />
         </View>
       ) : (
-        <View
-          style={{ flex: 1 }}
-          onTouchStart={isWeb ? onWebTouchStart : undefined}
-          onTouchMove={isWeb ? onWebTouchMove : undefined}
-          onTouchEnd={isWeb ? onWebTouchEnd : undefined}
-        >
+        <View style={{ flex: 1 }} {...(isWeb ? webPan.panHandlers : {})}>
         <FlatList
           data={feuds}
           keyExtractor={(f) => f.feud_id}
