@@ -1971,6 +1971,7 @@ async def _generate_feud_for_category(cat: dict, LlmChat, UserMessage) -> Option
     # earlier items more heavily, so this dramatically improves the chance
     # that hot topics (e.g. "Temptation Island", "Sanremo") become feuds when
     # they surface in any category feed.
+    hot_indices: set = set()
     if headlines and hot_topics:
         def _norm(s: str) -> str:
             return re.sub(r'\s+', ' ', (s or '').lower()).strip()
@@ -1987,11 +1988,14 @@ async def _generate_feud_for_category(cat: dict, LlmChat, UserMessage) -> Option
             return sum(1 for term in topic_terms if term in t)
         # Stable sort: hot-topic hits first, ties keep original RSS order.
         headlines = sorted(headlines, key=lambda h: -_score(h))
-        hot_hits = [h for h in headlines if _score(h) > 0]
-        if hot_hits:
+        # After sorting, hot headlines occupy the leading indices — record them
+        # so the prompt can mark and REQUIRE the AI to pick from them.
+        hot_indices = {i for i, h in enumerate(headlines) if _score(h) > 0}
+        if hot_indices:
+            top_hot = headlines[0]['title'][:80]
             logger.info(
-                f"hot-topic boost for {cat['id']}: {len(hot_hits)} headline(s) match "
-                f"→ top: '{hot_hits[0]['title'][:80]}'"
+                f"hot-topic boost for {cat['id']}: {len(hot_indices)} headline(s) match "
+                f"→ top: '{top_hot}'"
             )
 
     chat = LlmChat(
@@ -2024,16 +2028,34 @@ async def _generate_feud_for_category(cat: dict, LlmChat, UserMessage) -> Option
     ).with_model('anthropic', 'claude-sonnet-4-6')
 
     if headlines:
-        sources_block = "\n".join([f"[{i}] {h['title']} — fonte: {h['source']}" for i, h in enumerate(headlines)])
+        def _fmt_headline(i: int, h: dict) -> str:
+            tag = "[HOT] " if i in hot_indices else ""
+            return f"[{i}] {tag}{h['title']} — fonte: {h['source']}"
+        sources_block = "\n".join([_fmt_headline(i, h) for i, h in enumerate(headlines)])
         hot_topics_block = ""
         if hot_topics:
             bullets = "\n".join(f"  • {t}" for t in hot_topics)
+            hot_rule = ""
+            if hot_indices:
+                hot_ids = ", ".join(str(i) for i in sorted(hot_indices))
+                hot_rule = (
+                    f"\n\n### VINCOLO CRITICO — NON NEGOZIABILE ###\n"
+                    f"Nel pool ci sono notizie marcate [HOT] agli indici: {hot_ids}. "
+                    f"DEVI OBBLIGATORIAMENTE scegliere una di queste. "
+                    f"NON puoi selezionare una notizia non-[HOT] finché esiste almeno "
+                    f"una [HOT] nel pool. Anche se ti sembra 'meno succosa', è priorità "
+                    f"assoluta perché è l'argomento del momento su cui il pubblico si "
+                    f"divide di più. UNICA eccezione ammessa: se TUTTE le notizie [HOT] "
+                    f"sono palesemente inadatte (comunicati istituzionali, meteo, "
+                    f"necrologi, elenco cast senza conflitto), allora restituisci "
+                    f'esattamente {{"skip": true, "reason": "hot topics not feud-worthy"}} '
+                    f"— NON ripiegare su una notizia non-[HOT].\n"
+                )
             hot_topics_block = (
-                "\n\nARGOMENTI PRIORITARI DA MONITORARE (aggiorna dinamicamente il programmatore):\n"
+                "\n\nARGOMENTI PRIORITARI DA MONITORARE (aggiornati dinamicamente):\n"
                 f"{bullets}\n"
-                "Se una delle notizie nel pool tocca uno di questi argomenti, DAI PRIORITÀ "
-                "assoluta alla sua selezione (a parità di altri criteri). Questi sono i temi "
-                "più caldi/discussi del momento su cui il pubblico si divide di più.\n"
+                "Le notizie del pool che toccano questi argomenti sono marcate con [HOT]."
+                f"{hot_rule}"
             )
         prompt = (
             f"Categoria: {cat['label']}.\n\n"
@@ -2098,6 +2120,49 @@ async def _generate_feud_for_category(cat: dict, LlmChat, UserMessage) -> Option
     if not isinstance(idx, int) or idx < 0 or idx >= len(headlines):
         logger.info(f"AI returned invalid source_index for {cat['id']}: {idx}, discarding")
         return None
+
+    # HOT-TOPIC ENFORCEMENT: if the AI ignored the [HOT] constraint, retry
+    # once with a pool restricted to the [HOT] items only. This guarantees
+    # trending topics get promoted to feuds when they surface in the feeds.
+    if hot_indices and idx not in hot_indices:
+        logger.info(
+            f"AI picked non-HOT idx {idx} for {cat['id']} despite {len(hot_indices)} "
+            f"HOT items available — forcing retry with HOT-only pool"
+        )
+        hot_headlines = [headlines[i] for i in sorted(hot_indices)]
+        hot_sources = "\n".join(
+            [f"[{i}] {h['title']} — fonte: {h['source']}" for i, h in enumerate(hot_headlines)]
+        )
+        retry_prompt = (
+            f"Categoria: {cat['label']}.\n\n"
+            f"POOL RISTRETTO — SOLO ARGOMENTI CALDI DI OGGI:\n{hot_sources}\n\n"
+            f"Queste sono le notizie di tendenza del momento. Scegli LA più adatta "
+            f"a diventare una faida a due parti (o due posizioni opposte su un "
+            f"singolo soggetto). Se davvero nessuna funziona, restituisci "
+            f'{{"skip": true, "reason": "..."}}.\n\n'
+            f"Regole di stile e schema JSON identici a prima. Ricorda: nomi e cognomi "
+            f"completi, dettagli concreti dalla notizia, niente riassunti vaghi.\n\n"
+            f"Rispondi SOLO con lo stesso JSON di prima, con `source_index` in "
+            f"[0..{len(hot_headlines)-1}] riferito a QUESTO pool ristretto."
+        )
+        try:
+            retry_text = await chat.send_message(UserMessage(text=retry_prompt))
+            retry_match = re.search(r'\{[\s\S]*\}', retry_text)
+            if retry_match:
+                retry_data = json.loads(retry_match.group(0))
+                if retry_data.get('skip') is True:
+                    logger.info(f"AI skipped {cat['id']} on HOT-retry: {retry_data.get('reason','')}")
+                    return None
+                ridx = retry_data.get('source_index')
+                if isinstance(ridx, int) and 0 <= ridx < len(hot_headlines):
+                    # Remap to the original headlines list index for downstream code
+                    remapped = sorted(hot_indices)[ridx]
+                    idx = remapped
+                    data = retry_data
+                    data['source_index'] = idx
+                    logger.info(f"HOT-retry succeeded for {cat['id']}: idx={idx}")
+        except Exception as e:
+            logger.warning(f"HOT-retry failed for {cat['id']}: {e}")
 
     chosen = headlines[idx]
 

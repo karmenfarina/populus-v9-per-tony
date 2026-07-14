@@ -3,12 +3,32 @@ import { LinearGradient } from "expo-linear-gradient";
 import { Feud } from "@/src/api";
 import { colors, spacing, font } from "@/src/theme";
 
+function formatRelativeTime(iso?: string): string {
+  if (!iso) return "";
+  const then = new Date(iso).getTime();
+  if (isNaN(then)) return "";
+  const diffSec = Math.max(0, Math.floor((Date.now() - then) / 1000));
+  if (diffSec < 60) return "ORA";
+  const min = Math.floor(diffSec / 60);
+  if (min < 60) return `${min} MIN FA`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `${h} H FA`;
+  const d = Math.floor(h / 24);
+  if (d < 7) return `${d} G FA`;
+  // Older than a week → show absolute short date (DD/MM)
+  const dt = new Date(iso);
+  const dd = String(dt.getDate()).padStart(2, "0");
+  const mm = String(dt.getMonth() + 1).padStart(2, "0");
+  return `${dd}/${mm}`;
+}
+
 export default function FeudCard({ feud, onPress, showArchivedBadge = false }: {
   feud: Feud;
   onPress: () => void;
   showArchivedBadge?: boolean;
 }) {
   const revealed = feud.revealed;
+  const timeLabel = formatRelativeTime(feud.created_at);
   return (
     <Pressable style={styles.card} onPress={onPress} testID={`feud-card-${feud.feud_id}`}>
       <ImageBackground source={{ uri: feud.image_url }} style={styles.cardImage}>
@@ -21,6 +41,11 @@ export default function FeudCard({ feud, onPress, showArchivedBadge = false }: {
             <Text style={styles.archivedBadgeTxt}>ARCHIVIATA</Text>
           </View>
         )}
+        {!showArchivedBadge && timeLabel ? (
+          <View style={styles.timeBadge} testID={`feud-time-${feud.feud_id}`}>
+            <Text style={styles.timeBadgeTxt}>{timeLabel}</Text>
+          </View>
+        ) : null}
         <View style={styles.cardImageContent}>
           <Text style={styles.cardCat}>{feud.category_label.toUpperCase()}</Text>
           <Text style={styles.cardTitle} numberOfLines={3}>{feud.title}</Text>
@@ -58,4 +83,6 @@ const styles = StyleSheet.create({
   cardFooterText: { color: colors.onSurfaceInverse, fontSize: font.sizes.sm, letterSpacing: 1 },
   archivedBadge: { position: "absolute", top: spacing.sm, right: spacing.sm, backgroundColor: colors.brandSecondary, paddingHorizontal: spacing.sm, paddingVertical: 4, borderWidth: 2, borderColor: colors.onSurface, zIndex: 2 },
   archivedBadgeTxt: { color: colors.onBrandSecondary, fontSize: font.sizes.xs, letterSpacing: 2, fontWeight: "500" },
+  timeBadge: { position: "absolute", top: spacing.sm, right: spacing.sm, backgroundColor: "rgba(0,0,0,0.6)", paddingHorizontal: spacing.sm, paddingVertical: 4, borderWidth: 1, borderColor: "rgba(255,255,255,0.35)", zIndex: 2 },
+  timeBadgeTxt: { color: "#FFFFFF", fontSize: font.sizes.xs, letterSpacing: 1.5, fontWeight: "500" },
 });
