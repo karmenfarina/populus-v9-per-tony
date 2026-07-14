@@ -8,6 +8,7 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { api, ApiError } from "@/src/api";
 import { colors, spacing, font } from "@/src/theme";
+import { useAuth } from "@/src/auth/AuthContext";
 
 const CATEGORIES = [
   { id: "Bug", label: "Bug o malfunzionamento" },
@@ -21,6 +22,8 @@ const SECTIONS = ["Home", "Faida", "Profilo", "Notifiche", "Archivio", "Altro"];
 
 export default function SupportScreen() {
   const router = useRouter();
+  const { user, logout } = useAuth();
+  const isAnonymous = !!user && user.auth_provider === "anonymous";
   const [category, setCategory] = useState<string | null>(null);
   const [frequency, setFrequency] = useState<string | null>(null);
   const [section, setSection] = useState<string | null>(null);
@@ -58,6 +61,39 @@ export default function SupportScreen() {
       setErr(e instanceof ApiError ? e.detail : (e?.message || "Errore nell'invio."));
     } finally { setSending(false); }
   };
+
+  if (isAnonymous) {
+    return (
+      <SafeAreaView style={styles.safe} edges={["top"]} testID="support-anon-lock">
+        <View style={styles.headerBar}>
+          <Pressable onPress={() => router.back()} style={styles.backBtn} testID="support-back">
+            <Ionicons name="chevron-back" size={22} color={colors.brandSecondary} />
+          </Pressable>
+          <Text style={styles.title}>ASSISTENZA</Text>
+        </View>
+        <View style={styles.centerBox}>
+          <View style={styles.anonLockCircle}>
+            <Ionicons name="lock-closed-outline" size={64} color={colors.brandSecondary} />
+          </View>
+          <Text style={styles.thanksBig}>SOLO PER ACCOUNT REGISTRATI</Text>
+          <Text style={styles.thanksSmall}>
+            Come utente anonimo non puoi inviare richieste di assistenza. Registrati
+            con un account per poterci scrivere e ricevere una risposta.
+          </Text>
+          <Pressable
+            style={styles.homeBtn}
+            onPress={async () => { await logout(); router.replace("/auth"); }}
+            testID="support-register-cta"
+          >
+            <Text style={styles.homeBtnTxt}>REGISTRATI ORA  ›</Text>
+          </Pressable>
+          <Pressable onPress={() => router.replace("/")} testID="support-back-home" hitSlop={8}>
+            <Text style={styles.anonSecondaryTxt}>Torna alle faide</Text>
+          </Pressable>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   if (sent) {
     return (
@@ -209,4 +245,6 @@ const styles = StyleSheet.create({
   thanksSmall: { color: colors.muted, fontSize: font.sizes.base, textAlign: "center" },
   homeBtn: { marginTop: spacing.md, borderWidth: 2, borderColor: colors.brandPrimary, paddingHorizontal: spacing.lg, paddingVertical: spacing.md, backgroundColor: colors.brandPrimary },
   homeBtnTxt: { color: colors.onBrandPrimary, letterSpacing: 2, fontWeight: "500" },
+  anonLockCircle: { width: 120, height: 120, borderRadius: 60, borderWidth: 2, borderColor: colors.brandSecondary, alignItems: "center", justifyContent: "center", backgroundColor: colors.surfaceInverse, marginBottom: spacing.sm },
+  anonSecondaryTxt: { color: colors.muted, fontSize: font.sizes.xs, letterSpacing: 1, marginTop: spacing.sm, textDecorationLine: "underline" },
 });

@@ -1475,7 +1475,18 @@ class SupportBody(BaseModel):
 async def support_submit(body: SupportBody, user: dict = Depends(get_current_user)):
     """Multi-field support form. Fires an email to the developer via Resend.
     Reply-To is set to the user's registered email (or their optional contact
-    field) so the developer can reply directly from their inbox."""
+    field) so the developer can reply directly from their inbox.
+
+    Anonymous accounts cannot submit tickets: we require a real account so we
+    can actually reach the user back and to avoid spam from throwaway sessions.
+    """
+    is_anon = bool(user.get('is_anonymous')) or (user.get('auth_provider') == 'anonymous')
+    if is_anon:
+        raise HTTPException(
+            status_code=403,
+            detail='Devi registrarti con un account per inviare una richiesta di assistenza.',
+        )
+
     if not RESEND_API_KEY or not SUPPORT_EMAIL:
         raise HTTPException(status_code=500, detail='Servizio email non configurato. Riprova più tardi.')
 
