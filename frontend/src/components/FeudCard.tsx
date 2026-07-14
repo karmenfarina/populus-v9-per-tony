@@ -5,7 +5,11 @@ import { colors, spacing, font } from "@/src/theme";
 
 function formatRelativeTime(iso?: string): string {
   if (!iso) return "";
-  const then = new Date(iso).getTime();
+  // Backend sometimes returns naive ISO (no Z / offset) but the value is
+  // actually UTC. Force UTC interpretation when timezone info is missing.
+  const hasTz = /[zZ]$|[+-]\d{2}:?\d{2}$/.test(iso);
+  const normalized = hasTz ? iso : `${iso}Z`;
+  const then = new Date(normalized).getTime();
   if (isNaN(then)) return "";
   const diffSec = Math.max(0, Math.floor((Date.now() - then) / 1000));
   if (diffSec < 60) return "ORA";

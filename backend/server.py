@@ -44,6 +44,22 @@ def now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _iso_utc(dt) -> str:
+    """Serialize a datetime as ISO 8601 with an explicit UTC marker.
+
+    Mongo strips tzinfo when it stores datetimes, so values read back are
+    typically NAIVE even though they represent UTC instants. Calling plain
+    `.isoformat()` on them yields a string that JavaScript interprets as
+    LOCAL time — off by the client's timezone offset. Always append `Z`
+    (or the aware offset) so clients get the correct absolute instant.
+    """
+    if not isinstance(dt, datetime):
+        return str(dt)
+    if dt.tzinfo is None:
+        return dt.isoformat() + 'Z'
+    return dt.isoformat()
+
+
 def new_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:12]}"
 
@@ -416,7 +432,7 @@ async def my_photos(user: dict = Depends(get_current_user)):
     ).sort('position', 1).to_list(MAX_PHOTOS + 1)
     for d in docs:
         if isinstance(d.get('created_at'), datetime):
-            d['created_at'] = d['created_at'].isoformat()
+            d['created_at'] = _iso_utc(d['created_at'])
         d['is_primary'] = (d['photo_id'] == user.get('primary_photo_id'))
     return {'photos': docs, 'primary_photo_id': user.get('primary_photo_id')}
 
@@ -469,7 +485,7 @@ async def public_user(user_id: str):
     ).sort('position', 1).to_list(MAX_PHOTOS + 1)
     for p in photos:
         if isinstance(p.get('created_at'), datetime):
-            p['created_at'] = p['created_at'].isoformat()
+            p['created_at'] = _iso_utc(p['created_at'])
     return {
         'user_id': u['user_id'],
         'nickname': u.get('nickname'),
@@ -551,6 +567,8 @@ async def list_feuds(category: Optional[str] = None, user: Optional[dict] = Depe
         my_vote = voted_map.get(d['feud_id']) if user else None
         _attach_percentages(d, revealed=bool(my_vote))
         d['my_vote'] = my_vote
+        if isinstance(d.get('created_at'), datetime):
+            d['created_at'] = _iso_utc(d['created_at'])
     # Personalization: on the "all" feed, blend recency with the user's category
     # affinity (votes+comments+views+favorites). Users without any signal keep
     # the pure chronological order.
@@ -689,6 +707,8 @@ async def archive_feuds(
         _attach_percentages(d, revealed=bool(my_vote))
         d['my_vote'] = my_vote
         d['archived'] = True
+        if isinstance(d.get('created_at'), datetime):
+            d['created_at'] = _iso_utc(d['created_at'])
     return {'feuds': docs, 'date': date}
 
 
@@ -730,7 +750,7 @@ async def share_feud(feud_id: str):
     _attach_percentages(doc, revealed=True)
     doc['my_vote'] = None
     if isinstance(doc.get('created_at'), datetime):
-        doc['created_at'] = doc['created_at'].isoformat()
+        doc['created_at'] = _iso_utc(doc['created_at'])
     return {'feud': doc}
 
 
@@ -872,6 +892,8 @@ async def feuds_by_hashtag(tag: str, user: Optional[dict] = Depends(get_current_
         my_vote = voted_map.get(d['feud_id']) if user else None
         _attach_percentages(d, revealed=bool(my_vote))
         d['my_vote'] = my_vote
+        if isinstance(d.get('created_at'), datetime):
+            d['created_at'] = _iso_utc(d['created_at'])
     display = matched[0]['hashtag_display'] if matched else f"#{tag}"
     return {'feuds': matched, 'hashtag': key, 'hashtag_display': display}
 
@@ -1185,7 +1207,7 @@ async def _build_history_item(v: dict) -> Optional[dict]:
         'winning_side': winning_side,
         'aligned': aligned,
         'feud_deleted': feud_deleted,
-        'voted_at': v['created_at'].isoformat() if isinstance(v['created_at'], datetime) else v['created_at'],
+        'voted_at': _iso_utc(v['created_at']) if isinstance(v['created_at'], datetime) else v['created_at'],
     }
 
 
@@ -1258,6 +1280,9 @@ async def get_comments(feud_id: str):
             for c in docs:
                 c['reply_count'] = reply_counts.get(c['comment_id'], 0)
                 c['nickname_side'] = c['side']
+    for c in docs:
+        if isinstance(c.get('created_at'), datetime):
+            c['created_at'] = _iso_utc(c['created_at'])
     a = [c for c in docs if c['side'] == 'A']
     b = [c for c in docs if c['side'] == 'B']
     return {'side_a': a, 'side_b': b}
@@ -1281,7 +1306,7 @@ async def add_comment(feud_id: str, body: CommentBody, user: dict = Depends(get_
     doc.pop('_id', None)
     doc['reply_count'] = 0
     # normalize datetime
-    doc['created_at'] = doc['created_at'].isoformat()
+    doc['created_at'] = _iso_utc(doc['created_at'])
     return {'comment': doc}
 
 
@@ -1302,6 +1327,9 @@ async def list_replies(comment_id: str):
             docs = [r for r in docs if current.get(r['user_id'], r['side']) == r['side']]
             for r in docs:
                 r['nickname_side'] = r['side']
+    for r in docs:
+        if isinstance(r.get('created_at'), datetime):
+            r['created_at'] = _iso_utc(r['created_at'])
     return {'replies': docs}
 
 
@@ -1323,7 +1351,7 @@ async def add_reply(comment_id: str, body: ReplyBody, user: dict = Depends(get_c
     }
     await db.replies.insert_one(doc)
     doc.pop('_id', None)
-    doc['created_at'] = doc['created_at'].isoformat()
+    doc['created_at'] = _iso_utc(doc['created_at'])
     # Emit an in-app notification to the parent-comment author (unless they
     # replied to themselves). Fire-and-forget: notification failures never
     # break the reply flow.
@@ -1652,7 +1680,7 @@ async def list_notifications(user: dict = Depends(get_current_user)):
     ).sort('created_at', -1).to_list(50)
     for d in docs:
         if isinstance(d.get('created_at'), datetime):
-            d['created_at'] = d['created_at'].isoformat()
+            d['created_at'] = _iso_utc(d['created_at'])
     return {'notifications': docs}
 
 
@@ -1769,7 +1797,7 @@ async def generate_daily(count: int = 3, _: bool = Depends(require_admin)):
                 await db.feuds.insert_one(feud)
                 feud.pop('_id', None)
                 _attach_percentages(feud, revealed=True)
-                feud['created_at'] = feud['created_at'].isoformat()
+                feud['created_at'] = _iso_utc(feud['created_at'])
                 created.append(feud)
         except Exception as e:
             logger.warning(f"AI generation failed for {cat['id']}: {e}")
