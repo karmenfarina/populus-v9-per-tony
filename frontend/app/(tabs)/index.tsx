@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   View, Text, StyleSheet, ScrollView, Pressable, FlatList, RefreshControl,
-  ActivityIndicator, TextInput, Image, useWindowDimensions,
+  ActivityIndicator, TextInput, Image, useWindowDimensions, Platform,
+  GestureResponderEvent,
 } from "react-native";
 import { useRouter, useLocalSearchParams, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -21,7 +22,7 @@ export default function HomeFeed() {
   const [selected, setSelected] = useState<string>((params.category as string) || "all");
   const [feuds, setFeuds] = useState<Feud[]>([]);
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
+  const [pullRefreshing, setPullRefreshing] = useState(false); // ONLY set on manual pull-to-refresh
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQ, setSearchQ] = useState("");
   const [searching, setSearching] = useState(false);
@@ -79,15 +80,13 @@ export default function HomeFeed() {
   const onSelect = async (id: string) => {
     setSelected(id);
     setSearchOpen(false); setSearchQ("");
-    // Use the "Aggiornamento" pill (not the fullscreen spinner) so users see a
-    // smooth transition when jumping between categories — the previous list
-    // stays visible while the new one loads.
-    setRefreshing(true);
-    try { await load(id); } finally { setRefreshing(false); }
+    // Silent refresh on category switch — no indicator, previous list stays
+    // visible until the new data arrives.
+    try { await load(id); } catch { /* keep the old list */ }
   };
 
   const onRefresh = async () => {
-    setRefreshing(true);
+    setPullRefreshing(true);
     try {
       if (searchQ.trim()) {
         const r = await api.search(searchQ.trim());
@@ -95,21 +94,43 @@ export default function HomeFeed() {
       } else {
         await load(selected);
       }
-    } finally { setRefreshing(false); }
+    } finally { setPullRefreshing(false); }
+  };
+
+  // Web-only pull-to-refresh: RefreshControl doesn't render on react-native-web,
+  // so we simulate the gesture with touch events. Users can drag their finger
+  // downwards when the list is at the top to trigger a manual reload.
+  const isWeb = Platform.OS === 'web';
+  const scrollAtTopRef = useRef(true);
+  const pullStartYRef = useRef<number | null>(null);
+  const pulledRef = useRef(false);
+  const onWebTouchStart = (e: GestureResponderEvent) => {
+    if (!isWeb || !scrollAtTopRef.current) return;
+    pullStartYRef.current = e.nativeEvent.pageY;
+    pulledRef.current = false;
+  };
+  const onWebTouchMove = (e: GestureResponderEvent) => {
+    if (!isWeb || pullStartYRef.current === null) return;
+    const dy = e.nativeEvent.pageY - pullStartYRef.current;
+    if (dy > 60 && !pulledRef.current) {
+      pulledRef.current = true;
+      onRefresh();
+    }
+  };
+  const onWebTouchEnd = () => {
+    pullStartYRef.current = null;
   };
 
   // Silent refresh whenever the tab regains focus (e.g. after visiting a feud
-  // detail or another tab). Doesn't flash the full loading spinner — we let the
-  // list re-render with fresh data in place.
+  // detail or another tab). No visual indicator — data is swapped in place.
   const firstFocusRef = useRef(true);
   useFocusEffect(
     useCallback(() => {
       if (firstFocusRef.current) {
         firstFocusRef.current = false;
-        return; // initial mount already loaded the feed
+        return;
       }
       let cancelled = false;
-      setRefreshing(true);
       (async () => {
         try {
           if (searchQ.trim()) {
@@ -118,9 +139,7 @@ export default function HomeFeed() {
           } else {
             await load(selected);
           }
-        } finally {
-          if (!cancelled) setRefreshing(false);
-        }
+        } catch { /* silent */ }
       })();
       return () => { cancelled = true; };
       // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -204,10 +223,9 @@ export default function HomeFeed() {
         </ScrollView>
       </View>
 
-      {refreshing && !loading && (
+      {pullRefreshing && (
         <View style={styles.refreshPill} pointerEvents="none" testID="home-refresh-pill">
           <ActivityIndicator size="small" color={colors.brandSecondary} />
-          <Text style={styles.refreshPillTxt}>Aggiornamento</Text>
         </View>
       )}
 
@@ -216,12 +234,22 @@ export default function HomeFeed() {
           <ActivityIndicator size="large" color={colors.brandPrimary} />
         </View>
       ) : (
+        <View
+          style={{ flex: 1 }}
+          onTouchStart={isWeb ? onWebTouchStart : undefined}
+          onTouchMove={isWeb ? onWebTouchMove : undefined}
+          onTouchEnd={isWeb ? onWebTouchEnd : undefined}
+        >
         <FlatList
           data={feuds}
           keyExtractor={(f) => f.feud_id}
           contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xxxl }}
           ItemSeparatorComponent={() => <View style={{ height: spacing.lg }} />}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.brandPrimary} />}
+          refreshControl={<RefreshControl refreshing={pullRefreshing} onRefresh={onRefresh} tintColor={colors.brandSecondary} colors={[colors.brandSecondary]} />}
+          onScroll={(e) => {
+            scrollAtTopRef.current = e.nativeEvent.contentOffset.y <= 4;
+          }}
+          scrollEventThrottle={100}
           ListEmptyComponent={
             <View style={styles.center} testID="home-empty">
               <Text style={styles.empty}>NESSUNA FAIDA IN QUESTA CATEGORIA.</Text>
@@ -231,6 +259,7 @@ export default function HomeFeed() {
             <FeudCard feud={item} onPress={() => router.push(`/feud/${item.feud_id}`)} />
           )}
         />
+        </View>
       )}
     </SafeAreaView>
   );
