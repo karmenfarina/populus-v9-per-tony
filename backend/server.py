@@ -985,7 +985,7 @@ async def _log_flagged(user_id: str, feud_id: str, text: str, hits: list[str]):
 # ----------------------- RSS cache -----------------------
 
 _RSS_CACHE: dict = {}  # key: cat_id -> (expires_ts, results)
-_RSS_TTL_SECONDS = 30 * 60  # 30 minutes
+_RSS_TTL_SECONDS = 15 * 60  # 15 minutes — keep pool fresh across scheduler ticks
 
 
 MAX_VOTE_CHANGES = 2
@@ -1942,9 +1942,57 @@ async def admin_stats(_: bool = Depends(require_admin)):
 
 
 async def _generate_feud_for_category(cat: dict, LlmChat, UserMessage) -> Optional[dict]:
-    # Fetch a wider pool of real news headlines so the AI has room to pick the juiciest
-    headlines = await _fetch_headlines_for_category(cat['id'], max_items=12)
+    # Fetch a wide pool of real news headlines so the AI has room to pick the juiciest
+    headlines = await _fetch_headlines_for_category(cat['id'], max_items=18)
     hot_topics = _load_hot_topics()
+
+    # --- STEP 1: filter out headlines whose source link we already turned into a
+    # feud in the last 3 days. Prevents the AI from repeatedly picking the same
+    # top-of-feed story only to have it rejected as a duplicate later, which
+    # would silently waste the whole 30-min tick.
+    if headlines:
+        three_days_ago = now_utc() - timedelta(days=3)
+        used_links_docs = await db.feuds.find(
+            {'created_at': {'$gte': three_days_ago}},
+            {'_id': 0, 'sources.link': 1, 'source_url': 1},
+        ).to_list(2000)
+        used_links: set = set()
+        for d in used_links_docs:
+            for s in (d.get('sources') or []):
+                lk = s.get('link') if isinstance(s, dict) else None
+                if lk:
+                    used_links.add(lk)
+            if d.get('source_url'):
+                used_links.add(d['source_url'])
+        headlines = [h for h in headlines if h.get('link') not in used_links]
+
+    # --- STEP 2: hot-topic boost — reorder the pool so headlines mentioning a
+    # trending topic from hot_topics.md appear FIRST. The LLM tends to weigh
+    # earlier items more heavily, so this dramatically improves the chance
+    # that hot topics (e.g. "Temptation Island", "Sanremo") become feuds when
+    # they surface in any category feed.
+    if headlines and hot_topics:
+        def _norm(s: str) -> str:
+            return re.sub(r'\s+', ' ', (s or '').lower()).strip()
+        topic_terms: List[str] = []
+        for t in hot_topics:
+            # Drop parenthetical notes and split "A / B" into separate matchers.
+            cleaned = re.sub(r'\([^)]*\)', '', t).strip()
+            for part in re.split(r'[/,]', cleaned):
+                p = _norm(part)
+                if len(p) >= 4:  # avoid noise like "TV", "AI"
+                    topic_terms.append(p)
+        def _score(h: dict) -> int:
+            t = _norm(h.get('title', ''))
+            return sum(1 for term in topic_terms if term in t)
+        # Stable sort: hot-topic hits first, ties keep original RSS order.
+        headlines = sorted(headlines, key=lambda h: -_score(h))
+        hot_hits = [h for h in headlines if _score(h) > 0]
+        if hot_hits:
+            logger.info(
+                f"hot-topic boost for {cat['id']}: {len(hot_hits)} headline(s) match "
+                f"→ top: '{hot_hits[0]['title'][:80]}'"
+            )
 
     chat = LlmChat(
         api_key=EMERGENT_LLM_KEY,
@@ -2074,7 +2122,7 @@ async def _generate_feud_for_category(cat: dict, LlmChat, UserMessage) -> Option
     for p in (data.get('party_a') or '', data.get('party_b') or ''):
         key_terms |= set(t for t in re.findall(r"\w{4,}", (p or '').lower()))
     parties_lc = [(data.get('party_a') or '').lower(), (data.get('party_b') or '').lower()]
-    for i, h in enumerate(headlines[:12]):
+    for i, h in enumerate(headlines[:18]):
         if i == idx or h in sources:
             continue
         ht = (h.get('title') or '').lower()
@@ -2232,31 +2280,44 @@ RSS_FEEDS: dict = {
         ('ANSA Politica', 'https://www.ansa.it/sito/notizie/politica/politica_rss.xml'),
         ('Il Fatto Quotidiano', 'https://www.ilfattoquotidiano.it/politica/feed/'),
         ('Corriere Politica', 'https://xml2.corriereobjects.it/rss/politica.xml'),
+        ('Fanpage Politica', 'https://www.fanpage.it/politica/feed/'),
     ],
     'tv': [
         ('TvBlog', 'https://www.tvblog.it/feed'),
-        ('ANSA Spettacolo', 'https://www.ansa.it/sito/notizie/cultura/cinema/cinema_rss.xml'),
+        ('BubinoBlog', 'https://www.bubinoblog.altervista.org/feed/'),
+        ('Fanpage Spettacolo', 'https://www.fanpage.it/spettacolo/feed/'),
+        ('IsaeChia', 'https://www.isaechia.it/feed/'),
+        ('Biccy', 'https://www.biccy.it/feed/'),
+        ('DavideMaggio', 'https://www.davidemaggio.it/feed'),
     ],
     'musica': [
         ('Rolling Stone Italia', 'https://www.rollingstone.it/feed/'),
         ('AllMusicItalia', 'https://www.allmusicitalia.it/feed'),
+        ('Fanpage Musica', 'https://music.fanpage.it/feed/'),
     ],
     'sport': [
         ('Gazzetta', 'https://www.gazzetta.it/rss/homepage.xml'),
         ('ANSA Sport', 'https://www.ansa.it/sito/notizie/sport/sport_rss.xml'),
         ('Tuttosport', 'https://www.tuttosport.com/rss/calcio-serie-a.xml'),
+        ('Corriere Sport', 'https://xml2.corriereobjects.it/rss/sport.xml'),
     ],
     'cinema': [
         ('BadTaste', 'https://www.badtaste.it/feed/'),
         ('ANSA Cinema', 'https://www.ansa.it/sito/notizie/cultura/cinema/cinema_rss.xml'),
+        ('Fanpage Cinema', 'https://cinema.fanpage.it/feed/'),
     ],
     'social': [
         ('DDay', 'https://www.dday.it/rss'),
         ('GossipeTV', 'https://www.gossipetv.com/feed'),
+        ('Fanpage Innovazione', 'https://www.fanpage.it/innovazione/feed/'),
     ],
     'gossip': [
         ('Novella 2000', 'https://www.novella2000.it/feed/'),
         ('GossipeTV', 'https://www.gossipetv.com/feed'),
+        ('Biccy', 'https://www.biccy.it/feed/'),
+        ('IsaeChia', 'https://www.isaechia.it/feed/'),
+        ('BubinoBlog', 'https://www.bubinoblog.altervista.org/feed/'),
+        ('DavideMaggio', 'https://www.davidemaggio.it/feed'),
     ],
     'tech': [
         ('HDblog', 'https://www.hdblog.it/rss/'),
@@ -2268,7 +2329,7 @@ RSS_FEEDS: dict = {
 }
 
 
-async def _fetch_headlines_for_category(cat_id: str, max_items: int = 6) -> List[dict]:
+async def _fetch_headlines_for_category(cat_id: str, max_items: int = 18) -> List[dict]:
     # Cache hit
     entry = _RSS_CACHE.get(cat_id)
     if entry and entry[0] > time.time():
@@ -2444,7 +2505,7 @@ async def _daily_generation_loop():
     gets up to MAX_FRESH_PER_CATEGORY_24H feuds within a rolling 24h window.
     The RSS+dedup logic prevents duplicate stories."""
     import asyncio as _asyncio
-    MAX_FRESH_PER_CATEGORY_24H = 4
+    MAX_FRESH_PER_CATEGORY_24H = 6
     while True:
         try:
             try:
