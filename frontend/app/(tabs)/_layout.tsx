@@ -1,7 +1,23 @@
 import { Tabs } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { View, Text, StyleSheet } from "react-native";
 import { colors } from "@/src/theme";
+import { useNotifications } from "@/src/notifications/NotificationsContext";
+
+function NotifIcon({ color, size }: { color: string; size: number }) {
+  const { unread } = useNotifications();
+  return (
+    <View>
+      <Ionicons name="notifications" color={color} size={size} />
+      {unread > 0 && (
+        <View style={styles.badge} testID="tab-notif-badge">
+          <Text style={styles.badgeTxt}>{unread > 99 ? "99+" : String(unread)}</Text>
+        </View>
+      )}
+    </View>
+  );
+}
 
 export default function TabsLayout() {
   const insets = useSafeAreaInsets();
@@ -32,6 +48,13 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
+        name="notifications"
+        options={{
+          title: "NOTIFICHE",
+          tabBarIcon: ({ color, size }) => <NotifIcon color={color} size={size} />,
+        }}
+      />
+      <Tabs.Screen
         name="profile"
         options={{
           title: "PROFILO",
@@ -50,3 +73,21 @@ export default function TabsLayout() {
     </Tabs>
   );
 }
+
+const styles = StyleSheet.create({
+  badge: {
+    position: "absolute",
+    top: -4,
+    right: -10,
+    minWidth: 16,
+    height: 16,
+    paddingHorizontal: 4,
+    borderRadius: 8,
+    backgroundColor: colors.brandPrimary,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: colors.surfaceInverse,
+  },
+  badgeTxt: { color: colors.onBrandPrimary, fontSize: 9, fontWeight: "700" },
+});

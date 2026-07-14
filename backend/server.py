@@ -1278,7 +1278,86 @@ async def add_reply(comment_id: str, body: ReplyBody, user: dict = Depends(get_c
     await db.replies.insert_one(doc)
     doc.pop('_id', None)
     doc['created_at'] = doc['created_at'].isoformat()
+    # Emit an in-app notification to the parent-comment author (unless they
+    # replied to themselves). Fire-and-forget: notification failures never
+    # break the reply flow.
+    try:
+        if parent.get('user_id') and parent['user_id'] != user['user_id']:
+            feud = await db.feuds.find_one(
+                {'feud_id': parent['feud_id']}, {'_id': 0, 'title': 1}
+            )
+            feud_title = (feud or {}).get('title') or 'una faida'
+            await _emit_notification(
+                parent['user_id'],
+                'reply',
+                title=f"{user.get('nickname', 'Qualcuno')} ha risposto al tuo commento",
+                body=f"Su «{feud_title[:60]}»: {clean_text[:80]}",
+                feud_id=parent['feud_id'],
+                comment_id=comment_id,
+            )
+    except Exception as e:
+        logger.warning(f"notification emit (reply) failed: {e}")
     return {'reply': doc}
+
+
+async def _emit_notification(user_id: str, ntype: str, *, title: str, body: str,
+                              feud_id: Optional[str] = None,
+                              comment_id: Optional[str] = None) -> None:
+    """Write a lightweight in-app notification. Bounded auto-cleanup keeps at
+    most 200 notifications per user (oldest pruned)."""
+    doc = {
+        'notif_id': new_id('notif'),
+        'user_id': user_id,
+        'type': ntype,
+        'title': title[:120],
+        'body': body[:280],
+        'feud_id': feud_id,
+        'comment_id': comment_id,
+        'read': False,
+        'created_at': now_utc(),
+    }
+    await db.notifications.insert_one(doc)
+    # Best-effort prune: keep only the newest 200 per user.
+    count = await db.notifications.count_documents({'user_id': user_id})
+    if count > 200:
+        overflow = count - 200
+        # Find the oldest `overflow` notif_ids and delete them.
+        to_del = await db.notifications.find(
+            {'user_id': user_id}, {'_id': 0, 'notif_id': 1, 'created_at': 1}
+        ).sort('created_at', 1).limit(overflow).to_list(overflow)
+        ids = [d['notif_id'] for d in to_del]
+        if ids:
+            await db.notifications.delete_many({'notif_id': {'$in': ids}})
+
+
+@api_router.get('/notifications')
+async def list_notifications(user: dict = Depends(get_current_user)):
+    """Latest 50 notifications for the current user, newest first."""
+    docs = await db.notifications.find(
+        {'user_id': user['user_id']}, {'_id': 0}
+    ).sort('created_at', -1).to_list(50)
+    for d in docs:
+        if isinstance(d.get('created_at'), datetime):
+            d['created_at'] = d['created_at'].isoformat()
+    return {'notifications': docs}
+
+
+@api_router.get('/notifications/unread-count')
+async def unread_count(user: dict = Depends(get_current_user)):
+    n = await db.notifications.count_documents(
+        {'user_id': user['user_id'], 'read': False}
+    )
+    return {'count': n}
+
+
+@api_router.post('/notifications/mark-read')
+async def mark_read(user: dict = Depends(get_current_user)):
+    """Mark ALL notifications for the current user as read."""
+    r = await db.notifications.update_many(
+        {'user_id': user['user_id'], 'read': False},
+        {'$set': {'read': True, 'read_at': now_utc()}},
+    )
+    return {'updated': r.modified_count}
 
 
 def _image_for_category(cat_id: str, seed: Optional[str] = None) -> str:

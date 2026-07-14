@@ -61,6 +61,9 @@ export const api = {
   recordView: (id: string) =>
     request(`/feuds/${id}/view`, { method: 'POST' }).catch(() => null),
   hashtag: (tag: string) => request(`/hashtags/${encodeURIComponent(tag)}`),
+  notifications: () => request('/notifications'),
+  notificationsUnreadCount: () => request('/notifications/unread-count'),
+  notificationsMarkRead: () => request('/notifications/mark-read', { method: 'POST' }),
   vote: (id: string, side: 'A' | 'B') =>
     request(`/feuds/${id}/vote`, { method: 'POST', body: JSON.stringify({ side }) }),
   comments: (id: string) => request(`/feuds/${id}/comments`),

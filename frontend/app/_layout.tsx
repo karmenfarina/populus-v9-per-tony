@@ -8,6 +8,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { useIconFonts } from "@/src/hooks/use-icon-fonts";
 import { AuthProvider } from "@/src/auth/AuthContext";
 import { UIPrefsProvider } from "@/src/ui/UIPrefs";
+import { NotificationsProvider } from "@/src/notifications/NotificationsContext";
 
 LogBox.ignoreAllLogs(true);
 SplashScreen.preventAutoHideAsync();
@@ -28,7 +29,9 @@ export default function RootLayout() {
       <SafeAreaProvider>
         <AuthProvider>
           <UIPrefsProvider>
-            <Stack screenOptions={{ headerShown: false, animation: "fade" }} />
+            <NotificationsProvider>
+              <Stack screenOptions={{ headerShown: false, animation: "fade" }} />
+            </NotificationsProvider>
           </UIPrefsProvider>
         </AuthProvider>
       </SafeAreaProvider>
