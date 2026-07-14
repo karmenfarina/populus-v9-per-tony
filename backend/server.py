@@ -194,6 +194,7 @@ def _public_user(u: dict) -> dict:
         'primary_photo_id': u.get('primary_photo_id'),
         'photos_count': u.get('photos_count', 0),
         'badge': compute_badge(u),
+        'push_notifications': u.get('push_notifications', True),
     }
 
 
@@ -1008,6 +1009,8 @@ async def vote_feud(feud_id: str, body: VoteBody, user: dict = Depends(get_curre
         old_side = existing['side']
         dec_field = 'votes_a' if old_side == 'A' else 'votes_b'
         inc_field = 'votes_a' if body.side == 'A' else 'votes_b'
+        pre = await db.feuds.find_one({'feud_id': feud_id}, {'_id': 0, 'votes_a': 1, 'votes_b': 1})
+        pre_leader = 'A' if (pre.get('votes_a', 0) > pre.get('votes_b', 0)) else ('B' if pre.get('votes_b', 0) > pre.get('votes_a', 0) else None)
         await db.votes.update_one(
             {'vote_id': existing['vote_id']},
             {'$set': {
@@ -1030,6 +1033,7 @@ async def vote_feud(feud_id: str, body: VoteBody, user: dict = Depends(get_curre
         updated['my_vote'] = body.side
         updated['my_vote_changes'] = change_count + 1
         updated['my_vote_changes_left'] = MAX_VOTE_CHANGES - (change_count + 1)
+        await _notify_vote_flip(updated, pre_leader, user['user_id'])
         return {'feud': updated, 'changed': True}
     await db.votes.insert_one({
         'vote_id': new_id('vote'), 'feud_id': feud_id, 'user_id': user['user_id'],
@@ -1046,6 +1050,10 @@ async def vote_feud(feud_id: str, body: VoteBody, user: dict = Depends(get_curre
         },
     })
     inc_field = 'votes_a' if body.side == 'A' else 'votes_b'
+    # Snapshot the current leader BEFORE applying the new vote so we can
+    # detect a result flip caused by this vote.
+    pre = await db.feuds.find_one({'feud_id': feud_id}, {'_id': 0, 'votes_a': 1, 'votes_b': 1})
+    pre_leader = 'A' if (pre.get('votes_a', 0) > pre.get('votes_b', 0)) else ('B' if pre.get('votes_b', 0) > pre.get('votes_a', 0) else None)
     await db.feuds.update_one({'feud_id': feud_id}, {'$inc': {inc_field: 1}})
     await _recompute_user_alignment(user['user_id'])
     updated = await db.feuds.find_one({'feud_id': feud_id}, {'_id': 0})
@@ -1053,7 +1061,43 @@ async def vote_feud(feud_id: str, body: VoteBody, user: dict = Depends(get_curre
     updated['my_vote'] = body.side
     updated['my_vote_changes'] = 0
     updated['my_vote_changes_left'] = MAX_VOTE_CHANGES
+    await _notify_vote_flip(updated, pre_leader, user['user_id'])
     return {'feud': updated, 'changed': False}
+
+
+async def _notify_vote_flip(feud: dict, pre_leader: Optional[str], acting_user_id: str) -> None:
+    """If this vote flipped the leading side, notify the voters who now find
+    themselves on the losing side. Max 1 push per user per day."""
+    va = feud.get('votes_a', 0)
+    vb = feud.get('votes_b', 0)
+    if va == vb:
+        return
+    new_leader = 'A' if va > vb else 'B'
+    if pre_leader is None or new_leader == pre_leader:
+        return
+    losing_side = pre_leader
+    voters = await db.votes.find(
+        {'feud_id': feud['feud_id'], 'side': losing_side, 'user_id': {'$ne': acting_user_id}},
+        {'_id': 0, 'user_id': 1},
+    ).to_list(200)
+    if not voters:
+        return
+    title_short = (feud.get('title') or 'una faida')[:50]
+    for v in voters:
+        uid = v['user_id']
+        try:
+            if not await _daily_lock(uid, 'vote_flip'):
+                continue
+            await _emit_notification(
+                uid,
+                'vote_flip',
+                title="Il risultato si è ribaltato!",
+                body=f"«{title_short}»: ora è in vantaggio la fazione opposta alla tua.",
+                feud_id=feud['feud_id'],
+                send_push_too=True,
+            )
+        except Exception as e:
+            logger.warning(f"vote-flip notify failed for {uid}: {e}")
 
 
 # ----------------------- Sponsors -----------------------
@@ -1297,6 +1341,7 @@ async def add_reply(comment_id: str, body: ReplyBody, user: dict = Depends(get_c
                 feud_id=parent['feud_id'],
                 comment_id=comment_id,
                 side=parent.get('side'),
+                send_push_too=True,
             )
     except Exception as e:
         logger.warning(f"notification emit (reply) failed: {e}")
@@ -1306,9 +1351,11 @@ async def add_reply(comment_id: str, body: ReplyBody, user: dict = Depends(get_c
 async def _emit_notification(user_id: str, ntype: str, *, title: str, body: str,
                               feud_id: Optional[str] = None,
                               comment_id: Optional[str] = None,
-                              side: Optional[str] = None) -> None:
+                              side: Optional[str] = None,
+                              send_push_too: bool = False) -> None:
     """Write a lightweight in-app notification. Bounded auto-cleanup keeps at
-    most 200 notifications per user (oldest pruned)."""
+    most 200 notifications per user (oldest pruned). When `send_push_too` is
+    true, also fires a mobile push notification via the Emergent relay."""
     doc = {
         'notif_id': new_id('notif'),
         'user_id': user_id,
@@ -1326,13 +1373,165 @@ async def _emit_notification(user_id: str, ntype: str, *, title: str, body: str,
     count = await db.notifications.count_documents({'user_id': user_id})
     if count > 200:
         overflow = count - 200
-        # Find the oldest `overflow` notif_ids and delete them.
         to_del = await db.notifications.find(
             {'user_id': user_id}, {'_id': 0, 'notif_id': 1, 'created_at': 1}
         ).sort('created_at', 1).limit(overflow).to_list(overflow)
         ids = [d['notif_id'] for d in to_del]
         if ids:
             await db.notifications.delete_many({'notif_id': {'$in': ids}})
+    if send_push_too:
+        try:
+            deeplink = f"/feud/{feud_id}" if feud_id else "/notifications"
+            if comment_id:
+                deeplink += f"?comment={comment_id}"
+                if side:
+                    deeplink += f"&side={side}"
+            await send_push(
+                recipients=[user_id],
+                data={'title': title[:60], 'message': body[:120], 'action_url': deeplink},
+            )
+        except Exception as e:
+            logger.warning(f"push notification failed (non-blocking): {e}")
+
+
+# --- Emergent Push relay -----------------------------------------------------
+PUSH_BASE_URL = 'https://integrations.emergentagent.com'
+PUSH_KEY = os.environ.get('EMERGENT_PUSH_KEY', 'placeholder')
+_push_client = httpx.AsyncClient(
+    base_url=PUSH_BASE_URL,
+    headers={'X-Push-Key': PUSH_KEY},
+    timeout=10.0,
+)
+
+
+class RegisterPushBody(BaseModel):
+    platform: str
+    device_token: str
+
+
+class PushToggleBody(BaseModel):
+    enabled: bool
+
+
+@api_router.post('/register-push', status_code=201)
+async def register_push(body: RegisterPushBody, user: dict = Depends(get_current_user)):
+    """Store the device push token via Emergent's relay (SuprSend). We don't
+    persist tokens locally — SuprSend handles rotation and resolution."""
+    # Also flip the user's push-enabled flag on if it's not explicitly off.
+    await db.users.update_one(
+        {'user_id': user['user_id']},
+        {'$setOnInsert': {'push_notifications': True}},
+        upsert=False,
+    )
+    try:
+        resp = await _push_client.post(
+            '/api/v1/push/users/register',
+            json={
+                'user_id': user['user_id'],
+                'platform': body.platform,
+                'device_token': body.device_token,
+            },
+        )
+        if resp.status_code == 401:
+            raise HTTPException(status_code=500, detail='EMERGENT_PUSH_KEY missing or invalid')
+        if resp.status_code >= 500:
+            raise HTTPException(status_code=502, detail='Push provider unavailable')
+        resp.raise_for_status()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning(f"register-push relay failed: {e}")
+        raise HTTPException(status_code=502, detail='Push provider unreachable')
+    return {'status': 'registered'}
+
+
+@api_router.post('/settings/push')
+async def toggle_push(body: PushToggleBody, user: dict = Depends(get_current_user)):
+    """User-controlled ON/OFF switch (Profilo → Notifiche push). When off, the
+    hot-news fanout skips them; the tap-registration endpoint still runs but
+    the flag governs delivery choice."""
+    await db.users.update_one(
+        {'user_id': user['user_id']},
+        {'$set': {'push_notifications': bool(body.enabled)}},
+    )
+    return {'enabled': bool(body.enabled)}
+
+
+async def send_push(recipients: List[str], data: dict, idempotency_key: Optional[str] = None) -> None:
+    """Trigger a mobile push via Emergent. Caller must handle exceptions —
+    push failures should NEVER block the primary operation."""
+    if not recipients:
+        return
+    if len(recipients) > 100:
+        raise ValueError('max 100 recipients per /trigger call')
+    if 'title' not in data or 'message' not in data:
+        raise ValueError('data must include title and message')
+    payload: dict = {'recipients': recipients, 'data': data}
+    if idempotency_key:
+        payload['$idempotency_key'] = idempotency_key
+    resp = await _push_client.post('/api/v1/push/trigger', json=payload)
+    if resp.status_code == 401:
+        raise HTTPException(status_code=500, detail='EMERGENT_PUSH_KEY missing or invalid')
+    if resp.status_code >= 500:
+        raise HTTPException(status_code=502, detail='Push provider unavailable')
+    resp.raise_for_status()
+
+
+async def _daily_lock(user_id: str, kind: str) -> bool:
+    """Returns True if the user has NOT yet received a `kind` push today (UTC).
+    Also atomically marks it as sent. Ensures max-1-per-day semantics for the
+    hot-news and vote-flip triggers."""
+    today = now_utc().date().isoformat()
+    key = f"{user_id}:{kind}:{today}"
+    res = await db.notification_locks.update_one(
+        {'key': key},
+        {'$setOnInsert': {'key': key, 'created_at': now_utc()}},
+        upsert=True,
+    )
+    return res.upserted_id is not None
+
+
+async def _fanout_hot_news(feud: dict) -> None:
+    """When a fresh, high-engagement faida lands in an interesting category,
+    push a mobile notification to users who have that category among their
+    onboarding favorites. Guardrails:
+      - Requires engagement_score >= 7 (Claude's own self-rating).
+      - Requires push_notifications setting to be enabled for the user (default on).
+      - Rate-limited to at most 1 hot-news push per user per day.
+    """
+    score = int(feud.get('engagement_score') or 0)
+    if score < 7:
+        return
+    cat = feud.get('category')
+    if not cat:
+        return
+    users = await db.users.find(
+        {
+            'favorite_categories': cat,
+            'is_anonymous': {'$ne': True},
+            '$or': [{'push_notifications': True}, {'push_notifications': {'$exists': False}}],
+        },
+        {'_id': 0, 'user_id': 1},
+    ).to_list(500)
+    if not users:
+        return
+    title = "Nuova faida calda per te"
+    body = (feud.get('title') or '')[:120]
+    fid = feud.get('feud_id')
+    for u in users:
+        uid = u['user_id']
+        try:
+            if not await _daily_lock(uid, 'hot_news'):
+                continue
+            await _emit_notification(
+                uid, 'hot_news',
+                title=title,
+                body=body,
+                feud_id=fid,
+                send_push_too=True,
+            )
+        except Exception as e:
+            logger.warning(f"hot-news notify failed for {uid}: {e}")
 
 
 @api_router.get('/notifications')
@@ -2158,6 +2357,14 @@ async def _daily_generation_loop():
                     if feud:
                         await db.feuds.insert_one(feud)
                         logger.info(f"scheduler: inserted feud for {cat['id']}")
+                        # Hot-news trigger: high-engagement faide fan out a push
+                        # to users who have this category among their favorites.
+                        # Rate-limited to 1 push per user per day (across all
+                        # categories), so even multiple hot faide won't spam.
+                        try:
+                            await _fanout_hot_news(feud)
+                        except Exception as e:
+                            logger.warning(f"hot-news fanout failed: {e}")
                 except Exception as e:
                     logger.warning(f"scheduler gen failed for {cat['id']}: {e}")
             await db.system_meta.update_one(

@@ -2,6 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useRef, useSt
 import { AppState } from "react-native";
 import { api } from "@/src/api";
 import { useAuth } from "@/src/auth/AuthContext";
+import { registerForPush } from "@/src/notifications/push";
 
 /**
  * Lightweight polling context that exposes the unread notification count.
@@ -29,15 +30,23 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
 
   useEffect(() => {
     refresh();
+    // Best-effort mobile push registration for the logged-in user. Runs on
+    // every auth transition — tokens can rotate so re-registration is safe.
+    if (user && !user.is_anonymous) {
+      registerForPush();
+    }
     tick.current = setInterval(refresh, 30_000);
     const sub = AppState.addEventListener("change", (state) => {
-      if (state === "active") refresh();
+      if (state === "active") {
+        refresh();
+        if (user && !user.is_anonymous) registerForPush();
+      }
     });
     return () => {
       if (tick.current) clearInterval(tick.current);
       sub.remove();
     };
-  }, [refresh]);
+  }, [refresh, user]);
 
   return (
     <NotificationsContext.Provider value={{ unread, refresh }}>

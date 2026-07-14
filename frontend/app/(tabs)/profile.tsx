@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Modal, TextInput, Image, KeyboardAvoidingView, Platform } from "react-native";
+import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Modal, TextInput, Image, KeyboardAvoidingView, Platform, Switch } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import * as ImageManipulator from "expo-image-manipulator";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -24,6 +24,7 @@ export default function Profile() {
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [loadingH, setLoadingH] = useState(false);
   const [prefsOpen, setPrefsOpen] = useState(false);
+  const [pushEnabled, setPushEnabled] = useState<boolean>(user?.push_notifications !== false);
   const [cats, setCats] = useState<{ id: string; label: string }[]>([]);
   const [editSel, setEditSel] = useState<Set<string>>(new Set());
   const [savingPrefs, setSavingPrefs] = useState(false);
@@ -497,6 +498,30 @@ export default function Profile() {
           )}
         </View>
 
+        <View style={styles.pushRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.pushLabel}>NOTIFICHE PUSH</Text>
+            <Text style={styles.pushHint}>Riceverai avvisi sul telefono per faide calde, ribaltamenti e risposte.</Text>
+          </View>
+          <Switch
+            testID="push-toggle"
+            value={pushEnabled}
+            onValueChange={async (v) => {
+              setPushEnabled(v); // optimistic
+              try { await api.togglePush(v); } catch { setPushEnabled(!v); }
+              if (v && Platform.OS !== 'web') {
+                // Immediately register so the switch has an effect on-device.
+                try {
+                  const { registerForPush } = await import('@/src/notifications/push');
+                  await registerForPush();
+                } catch { /* silent */ }
+              }
+            }}
+            trackColor={{ false: colors.border, true: colors.brandPrimary }}
+            thumbColor={pushEnabled ? colors.onBrandPrimary : colors.muted}
+          />
+        </View>
+
         <Pressable
           style={styles.logout}
           onPress={async () => {
@@ -745,6 +770,9 @@ const styles = StyleSheet.create({
   hBadgeMaj: { backgroundColor: colors.brandPrimary, color: colors.onBrandPrimary },
   hBadgeMin: { backgroundColor: colors.brandSecondary, color: colors.onBrandSecondary },
   logout: { margin: spacing.lg, borderWidth: 2, borderColor: colors.border, padding: spacing.md, alignItems: "center", backgroundColor: colors.brandPrimary },
+  pushRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, marginHorizontal: spacing.lg, marginTop: spacing.md, padding: spacing.md, borderWidth: 2, borderColor: colors.border, backgroundColor: colors.surfaceInverse },
+  pushLabel: { color: colors.brandSecondary, fontSize: font.sizes.sm, letterSpacing: 2, fontWeight: "500" },
+  pushHint: { color: colors.onSurfaceInverse, fontSize: font.sizes.xs, marginTop: 4, opacity: 0.75 },
   logoutText: { color: colors.onBrandPrimary, fontSize: font.sizes.lg, letterSpacing: 2, fontWeight: "500" },
   adminLink: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: spacing.md, marginBottom: spacing.lg },
   adminLinkTxt: { fontSize: font.sizes.xs, letterSpacing: 2, color: colors.muted, fontWeight: "500" },

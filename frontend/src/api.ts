@@ -130,6 +130,13 @@ export const api = {
   notifications: () => request('/notifications'),
   notificationsUnreadCount: () => request('/notifications/unread-count'),
   notificationsMarkRead: () => request('/notifications/mark-read', { method: 'POST' }),
+  registerPush: (platform: string, device_token: string) =>
+    request('/register-push', {
+      method: 'POST',
+      body: JSON.stringify({ platform, device_token }),
+    }),
+  togglePush: (enabled: boolean) =>
+    request('/settings/push', { method: 'POST', body: JSON.stringify({ enabled }) }),
   vote: (id: string, side: 'A' | 'B') =>
     request(`/feuds/${id}/vote`, { method: 'POST', body: JSON.stringify({ side }) }),
   comments: (id: string) => request(`/feuds/${id}/comments`),
@@ -176,6 +183,7 @@ export type User = {
   sex?: 'F' | 'M' | 'other' | 'na' | null;
   region?: string | null;
   favorite_categories?: string[];
+  push_notifications?: boolean;
   onboarding_completed?: boolean;
   bio?: string | null;
   social_links?: { instagram?: string; tiktok?: string; twitter?: string; youtube?: string; website?: string };
@@ -198,6 +206,7 @@ export type PublicUser = {
   nickname: string;
   auth_provider?: string;
   is_anonymous?: boolean;
+  push_notifications?: boolean;
   bio?: string | null;
   social_links?: User['social_links'];
   primary_photo_id?: string | null;
