@@ -22,7 +22,27 @@ export default function AuthScreen() {
   const [error, setError] = useState<string | null>(null);
 
   const handle = async () => {
-    setError(null); setLoading(true);
+    setError(null);
+    // Client-side validation for immediate, clear feedback.
+    if (mode === "email") {
+      const e = email.trim();
+      if (!e) { setError("Inserisci la tua email."); return; }
+      if (!/^\S+@\S+\.\S+$/.test(e)) { setError("Inserisci un indirizzo email valido."); return; }
+      if (!password) { setError("Inserisci la password."); return; }
+      if (password.length < 6) { setError("La password deve avere almeno 6 caratteri."); return; }
+      if (isSignup) {
+        const n = nickname.trim();
+        if (!n) { setError("Scegli un nickname."); return; }
+        if (n.length < 2) { setError("Il nickname deve avere almeno 2 caratteri."); return; }
+        if (n.length > 24) { setError("Il nickname è troppo lungo (max 24 caratteri)."); return; }
+      }
+    } else if (mode === "anon") {
+      const n = nickname.trim();
+      if (!n) { setError("Scegli un nickname."); return; }
+      if (n.length < 2) { setError("Il nickname deve avere almeno 2 caratteri."); return; }
+      if (n.length > 24) { setError("Il nickname è troppo lungo (max 24 caratteri)."); return; }
+    }
+    setLoading(true);
     try {
       if (mode === "email") {
         if (isSignup) await signup(email.trim(), password, nickname.trim());
@@ -36,7 +56,9 @@ export default function AuthScreen() {
       // but here we push explicitly for immediacy.
       router.replace("/");
     } catch (e: any) {
-      setError(e?.message || "Errore");
+      // The API layer already returns human-friendly Italian messages via
+      // ApiError.detail. Any other thrown value falls back to a generic label.
+      setError(e?.detail || e?.message || "Errore imprevisto. Riprova.");
     } finally { setLoading(false); }
   };
 

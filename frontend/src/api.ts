@@ -25,6 +25,45 @@ export class ApiError extends Error {
   }
 }
 
+// Human-friendly Italian messages for Pydantic FastAPI validation errors.
+// FastAPI returns `detail: [{loc, msg, type}, ...]` on 422 — the raw payload
+// is unreadable, so we translate common cases here.
+function friendlyValidation(item: any): string {
+  if (!item || typeof item !== 'object') return '';
+  const loc = Array.isArray(item.loc) ? item.loc : [];
+  const field = String(loc[loc.length - 1] || '').toLowerCase();
+  const type = String(item.type || '').toLowerCase();
+  const msg = String(item.msg || '').toLowerCase();
+  // Field-specific
+  if (field === 'email') {
+    if (type.includes('value_error') || type.includes('email') || msg.includes('email')) {
+      return 'Inserisci un indirizzo email valido.';
+    }
+    if (type.includes('missing') || msg.includes('required')) return 'Inserisci la tua email.';
+  }
+  if (field === 'password') {
+    if (type.includes('too_short') || msg.includes('at least') || msg.includes('min_length')) {
+      return 'La password deve avere almeno 6 caratteri.';
+    }
+    if (type.includes('missing') || msg.includes('required')) return 'Inserisci la password.';
+  }
+  if (field === 'nickname') {
+    if (type.includes('too_short') || msg.includes('at least 2')) {
+      return 'Il nickname deve avere almeno 2 caratteri.';
+    }
+    if (type.includes('too_long') || msg.includes('at most 24')) {
+      return 'Il nickname è troppo lungo (max 24 caratteri).';
+    }
+    if (type.includes('missing') || msg.includes('required')) return 'Inserisci un nickname.';
+  }
+  if (field === 'age') return "Inserisci un'età compresa tra 13 e 120.";
+  if (field === 'region') return 'Seleziona una regione valida.';
+  if (field === 'favorite_categories') return 'Seleziona almeno una categoria preferita.';
+  // Fallback: uppercase the field name in Italian style
+  const nice = field ? `Campo "${field}" non valido.` : (item.msg || 'Dati non validi.');
+  return nice;
+}
+
 async function request<T = any>(path: string, opts: RequestInit = {}): Promise<T> {
   const token = await getToken();
   const headers: Record<string, string> = {
@@ -32,14 +71,41 @@ async function request<T = any>(path: string, opts: RequestInit = {}): Promise<T
     ...(opts.headers as any),
   };
   if (token) headers['Authorization'] = `Bearer ${token}`;
-  const res = await fetch(`${BASE}/api${path}`, { ...opts, headers });
+  let res: Response;
+  try {
+    res = await fetch(`${BASE}/api${path}`, { ...opts, headers });
+  } catch {
+    // Fetch itself failed → offline, DNS, CORS block, etc.
+    throw new ApiError(0, 'Impossibile contattare il server. Controlla la connessione.');
+  }
   const text = await res.text();
   let data: any = null;
   try { data = text ? JSON.parse(text) : null; } catch { data = text; }
   if (!res.ok) {
-    const detail = (data && (data.detail || data.message)) || `HTTP ${res.status}`;
-    const message = typeof detail === 'string' ? detail : JSON.stringify(detail);
-    throw new ApiError(res.status, message);
+    const rawDetail = data && (data.detail ?? data.message);
+    let userMsg: string;
+    if (Array.isArray(rawDetail)) {
+      // Pydantic 422 — extract every field message.
+      const items = rawDetail.map(friendlyValidation).filter(Boolean);
+      userMsg = items.length > 0 ? items.join('\n') : 'Dati non validi.';
+    } else if (typeof rawDetail === 'string' && rawDetail.trim()) {
+      userMsg = rawDetail;
+    } else if (res.status >= 500) {
+      userMsg = 'Errore del server. Riprova tra poco.';
+    } else if (res.status === 401) {
+      userMsg = 'Credenziali non valide.';
+    } else if (res.status === 403) {
+      userMsg = "Non hai i permessi per questa operazione.";
+    } else if (res.status === 404) {
+      userMsg = 'Contenuto non trovato.';
+    } else if (res.status === 409) {
+      userMsg = 'Conflitto: la risorsa esiste già.';
+    } else if (res.status === 429) {
+      userMsg = 'Troppe richieste. Aspetta qualche istante e riprova.';
+    } else {
+      userMsg = `Errore imprevisto (HTTP ${res.status}).`;
+    }
+    throw new ApiError(res.status, userMsg);
   }
   return data as T;
 }
