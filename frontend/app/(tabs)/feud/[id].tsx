@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   View, Text, StyleSheet, ScrollView, Pressable, TextInput, ActivityIndicator,
   KeyboardAvoidingView, Platform, ImageBackground, Linking, Share,
@@ -14,7 +14,7 @@ import FeudMediaBlock from "@/src/components/FeudMediaBlock";
 import { useUIPrefs } from "@/src/ui/UIPrefs";
 
 export default function FeudDetail() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, comment: commentParam, side: sideParam } = useLocalSearchParams<{ id: string; comment?: string; side?: string }>();
   const router = useRouter();
   const [feud, setFeud] = useState<Feud | null>(null);
   const [sponsor, setSponsor] = useState<Sponsor | null>(null);
@@ -58,6 +58,28 @@ export default function FeudDetail() {
     // Fire-and-forget engagement signal for the personalized feed.
     if (id) { api.recordView(id); }
   }, [loadAll, id]);
+
+  // Deep-link from a notification: if a `comment` param is present, activate
+  // the correct side tab and auto-expand that comment's reply thread so the
+  // user sees the reply without any extra taps.
+  const deepLinkHandledRef = useRef(false);
+  useEffect(() => {
+    if (deepLinkHandledRef.current) return;
+    if (!feud || !commentParam) return;
+    // Wait until comments are loaded before deciding which side hosts it.
+    const cA = sideA.find((c) => c.comment_id === commentParam);
+    const cB = sideB.find((c) => c.comment_id === commentParam);
+    const target: "A" | "B" | null =
+      (sideParam === "A" || sideParam === "B")
+        ? (sideParam as "A" | "B")
+        : (cA ? "A" : cB ? "B" : null);
+    if (!target) return;
+    deepLinkHandledRef.current = true;
+    setActiveSide(target);
+    // Auto-expand replies to reveal the notification's context.
+    toggleReplies(commentParam).catch(() => { /* silent */ });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [feud, sideA, sideB, commentParam, sideParam]);
 
   const vote = async (side: "A" | "B") => {
     if (!feud) return;

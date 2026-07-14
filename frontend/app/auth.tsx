@@ -61,7 +61,20 @@ export default function AuthScreen() {
                 key={m}
                 testID={`auth-tab-${m}`}
                 style={[styles.tab, mode === m && styles.tabActive]}
-                onPress={() => { setMode(m); setError(null); }}
+                onPress={async () => {
+                  setError(null);
+                  // Google is a one-tap flow: fire the redirect immediately
+                  // instead of switching the form layout (avoids a UI flash
+                  // before the browser leaves the app).
+                  if (m === "google") {
+                    setLoading(true);
+                    try { await loginWithGoogle(); }
+                    catch (e: any) { setError(e?.message || "Errore"); }
+                    finally { setLoading(false); }
+                    return;
+                  }
+                  setMode(m);
+                }}
               >
                 <Text style={[styles.tabText, mode === m && styles.tabTextActive]}>
                   {m === "email" ? "EMAIL" : m === "google" ? "GOOGLE" : "ANONIMO"}

@@ -21,7 +21,7 @@ type Sex = "F" | "M" | "other" | "na";
 
 export default function Onboarding() {
   const router = useRouter();
-  const { user, refreshMe } = useAuth();
+  const { user, refreshMe, logout } = useAuth();
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [cats, setCats] = useState<{ id: string; label: string }[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -211,14 +211,30 @@ export default function Onboarding() {
         </ScrollView>
 
         <View style={styles.footer}>
-          {step > 1 && (
+          {step > 1 ? (
             <Pressable onPress={goBack} testID="onboarding-back" style={styles.backBtn}>
+              <Ionicons name="chevron-back" size={20} color={colors.onSurface} />
+              <Text style={styles.backTxt}>INDIETRO</Text>
+            </Pressable>
+          ) : (
+            <Pressable
+              onPress={async () => {
+                // On step 1, "INDIETRO" cancels the onboarding entirely and
+                // returns the user to the login screen. We log out silently so
+                // that the auth token from the fresh signup doesn't keep the
+                // user auto-logged-in the moment they hit /auth.
+                try { await logout(); } catch { /* silent */ }
+                router.replace("/auth");
+              }}
+              testID="onboarding-cancel"
+              style={styles.backBtn}
+            >
               <Ionicons name="chevron-back" size={20} color={colors.onSurface} />
               <Text style={styles.backTxt}>INDIETRO</Text>
             </Pressable>
           )}
           {step < 3 ? (
-            <Pressable onPress={goNext} testID="onboarding-next" style={[styles.cta, step === 1 && styles.ctaFull]}>
+            <Pressable onPress={goNext} testID="onboarding-next" style={styles.cta}>
               <Text style={styles.ctaTxt}>AVANTI ›</Text>
             </Pressable>
           ) : (

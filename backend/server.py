@@ -1296,6 +1296,7 @@ async def add_reply(comment_id: str, body: ReplyBody, user: dict = Depends(get_c
                 body=f"Su «{feud_title[:60]}»: {clean_text[:80]}",
                 feud_id=parent['feud_id'],
                 comment_id=comment_id,
+                side=parent.get('side'),
             )
     except Exception as e:
         logger.warning(f"notification emit (reply) failed: {e}")
@@ -1304,7 +1305,8 @@ async def add_reply(comment_id: str, body: ReplyBody, user: dict = Depends(get_c
 
 async def _emit_notification(user_id: str, ntype: str, *, title: str, body: str,
                               feud_id: Optional[str] = None,
-                              comment_id: Optional[str] = None) -> None:
+                              comment_id: Optional[str] = None,
+                              side: Optional[str] = None) -> None:
     """Write a lightweight in-app notification. Bounded auto-cleanup keeps at
     most 200 notifications per user (oldest pruned)."""
     doc = {
@@ -1315,6 +1317,7 @@ async def _emit_notification(user_id: str, ntype: str, *, title: str, body: str,
         'body': body[:280],
         'feud_id': feud_id,
         'comment_id': comment_id,
+        'side': side,
         'read': False,
         'created_at': now_utc(),
     }

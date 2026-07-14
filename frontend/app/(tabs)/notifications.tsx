@@ -17,6 +17,7 @@ type Notif = {
   body: string;
   feud_id?: string | null;
   comment_id?: string | null;
+  side?: "A" | "B" | null;
   read: boolean;
   created_at: string;
 };
@@ -118,7 +119,15 @@ export default function NotificationsScreen() {
               <Pressable
                 testID={`notif-${item.notif_id}`}
                 onPress={() => {
-                  if (item.feud_id) router.push(`/feud/${item.feud_id}`);
+                  if (item.feud_id) {
+                    // Deep-link into the feud so the specific comment (and its
+                    // reply thread) is opened automatically without extra taps.
+                    const q = new URLSearchParams();
+                    if (item.comment_id) q.set("comment", item.comment_id);
+                    if (item.side) q.set("side", item.side);
+                    const qs = q.toString();
+                    router.push(`/feud/${item.feud_id}${qs ? `?${qs}` : ""}`);
+                  }
                 }}
                 style={[styles.row, !item.read && styles.rowUnread]}
               >
