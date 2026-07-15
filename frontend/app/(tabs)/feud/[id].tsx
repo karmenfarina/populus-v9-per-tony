@@ -218,15 +218,6 @@ export default function FeudDetail() {
         </Pressable>
         <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
           <Text style={styles.topCat}>{feud.category_label.toUpperCase()}</Text>
-          {!isAnonymous && (
-            <Pressable onPress={toggleFavorite} testID="favorite-button" style={styles.shareBtn} hitSlop={6}>
-              <Ionicons
-                name={feud.is_favorite ? "bookmark" : "bookmark-outline"}
-                size={18}
-                color={feud.is_favorite ? colors.brandPrimary : colors.brandSecondary}
-              />
-            </Pressable>
-          )}
           <Pressable onPress={onShare} testID="share-button" style={styles.shareBtn}>
             <Ionicons name="share-outline" size={18} color={colors.brandSecondary} />
           </Pressable>
@@ -237,6 +228,20 @@ export default function FeudDetail() {
         <ScrollView contentContainerStyle={{ paddingBottom: spacing.xxxl }}>
           <ImageBackground source={{ uri: feud.image_url }} style={styles.hero}>
             <LinearGradient colors={["rgba(0,0,0,0)", "rgba(0,0,0,0.9)"]} style={StyleSheet.absoluteFill} />
+            {!isAnonymous && (
+              <Pressable
+                onPress={toggleFavorite}
+                testID="favorite-button"
+                hitSlop={8}
+                style={[styles.favBtn, feud.is_favorite && styles.favBtnActive]}
+              >
+                <Ionicons
+                  name={feud.is_favorite ? "bookmark" : "bookmark-outline"}
+                  size={22}
+                  color={feud.is_favorite ? colors.onBrandPrimary : "#FFFFFF"}
+                />
+              </Pressable>
+            )}
             <View style={styles.heroContent}>
               <Text style={styles.title}>{feud.title}</Text>
             </View>
@@ -589,6 +594,24 @@ const styles = StyleSheet.create({
   topCat: { color: colors.brandSecondary, fontSize: font.sizes.sm, letterSpacing: 2 },
   hero: { height: 220, justifyContent: "flex-end" },
   heroContent: { padding: spacing.lg },
+  favBtn: {
+    position: "absolute",
+    top: spacing.md,
+    right: spacing.md,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.35)",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 3,
+  },
+  favBtnActive: {
+    backgroundColor: colors.brandPrimary,
+    borderColor: colors.brandPrimary,
+  },
   title: { color: "#FFFFFF", fontSize: font.sizes.xxxl, lineHeight: 36, letterSpacing: 0.5, fontWeight: "500" },
   article: { padding: spacing.lg, borderBottomWidth: 2, borderColor: colors.border, backgroundColor: colors.surfaceSecondary },
   hashtagPill: { alignSelf: "flex-start", marginTop: spacing.sm, borderWidth: 1, borderColor: colors.brandPrimary, paddingHorizontal: spacing.sm, paddingVertical: 3, backgroundColor: colors.brandPrimary },
