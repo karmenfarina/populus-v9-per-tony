@@ -848,7 +848,8 @@ def _ensure_hashtag(feud: dict) -> None:
     the stored `subject` field or the feud title.
     """
     subject = (feud.get('subject') or '').strip() or None
-    if not subject:
+    hs = feud.get('hashtag_subjects') if isinstance(feud.get('hashtag_subjects'), list) else None
+    if not subject and not hs:
         # Legacy heuristic: if either party looks like a stance, extract the
         # subject from the title.
         pa, pb = feud.get('party_a', ''), feud.get('party_b', '')
@@ -857,8 +858,14 @@ def _ensure_hashtag(feud: dict) -> None:
             if subject:
                 feud['subject'] = subject  # cache for the response only
     # Always recompute to reflect the current rules on legacy rows.
-    feud['hashtag'] = _hashtag_key(feud.get('party_a', ''), feud.get('party_b', ''), subject=subject)
-    feud['hashtag_display'] = _hashtag_display(feud.get('party_a', ''), feud.get('party_b', ''), subject=subject)
+    feud['hashtag'] = _hashtag_key(
+        feud.get('party_a', ''), feud.get('party_b', ''),
+        subject=subject, hashtag_subjects=hs,
+    )
+    feud['hashtag_display'] = _hashtag_display(
+        feud.get('party_a', ''), feud.get('party_b', ''),
+        subject=subject, hashtag_subjects=hs,
+    )
 
 
 @api_router.get('/hashtags/{tag}')
@@ -2124,6 +2131,7 @@ async def _generate_feud_for_category(cat: dict, LlmChat, UserMessage) -> Option
             '"subject": "SOLO in modalità B (singolo soggetto con posizioni opposte): il NOME del soggetto della faida — persona, gruppo, cosa (es. \"Fabrizio Corona\", \"Samsung\", \"il nuovo film Marvel\"). In modalità A (due contendenti) lascia stringa vuota.", '
             '"party_a": "prima parte (contendente OPPURE posizione)", '
             '"party_b": "seconda parte antitetica alla prima", '
+            '"hashtag_subjects": "Array di 1 o 2 NOMI PROPRI PULITI per l\'hashtag di raggruppamento. In modalità A metti [\\"NomeA\\", \\"NomeB\\"] (es. [\\"Milan\\", \\"Inter\\"] oppure [\\"Fabrizio Corona\\", \\"Selvaggia Lucarelli\\"]). In modalità B metti UN SOLO nome [\\"NomeSoggetto\\"] (es. [\\"Fabrizio Corona\\"], [\\"Sanremo 2026\\"], [\\"Temptation Island\\"]). REGOLE FERREE: SOLO nomi propri di persona/brand/prodotto/evento; MAI articoli/preposizioni (\\"il\\", \\"la\\", \\"di\\", \\"del\\"); MAI descrizioni tra parentesi; MAI frasi retoriche (\\"Chi difende…\\", \\"contrari\\"); MAI emoji; MAI titoli lunghi (\\"Il resort di Bill Gates in Puglia\\" → [\\"Bill Gates\\"] o [\\"Bill Gates\\", \\"Puglia\\"]); max 3 parole per nome; cognome incluso quando esiste (\\"Fabrizio Corona\\" non solo \\"Corona\\"). Questo hashtag deve permettere di raggruppare tutte le faide future sugli stessi protagonisti.", '
             '"summary": "mini-articolo di 90-150 parole strutturato nei 3 blocchi (COSA È SUCCESSO / IL DETTAGLIO CHIAVE / PERCHÉ LA GENTE SI DIVIDE) separati da \\n\\n. Basato ESCLUSIVAMENTE su titolo + estratto della notizia scelta.", '
             '"question": "domanda schierante e provocatoria, non neutra", '
             '"source_index": indice (0-based) della notizia scelta nel pool (obbligatorio), '
@@ -2264,6 +2272,12 @@ async def _generate_feud_for_category(cat: dict, LlmChat, UserMessage) -> Option
         engagement = None
 
     subject = (data.get('subject') or '').strip() or None
+    raw_subjects = data.get('hashtag_subjects')
+    hashtag_subjects: List[str] = []
+    if isinstance(raw_subjects, list):
+        for x in raw_subjects[:2]:
+            if isinstance(x, str) and x.strip():
+                hashtag_subjects.append(x.strip()[:60])
     return {
         'feud_id': new_id('feud'),
         'category': cat['id'], 'category_label': cat['label'],
@@ -2278,8 +2292,15 @@ async def _generate_feud_for_category(cat: dict, LlmChat, UserMessage) -> Option
         'engagement_score': engagement,
         'engagement_reason': data.get('engagement_reason') or '',
         'subject': subject,
-        'hashtag': _hashtag_key(data.get('party_a') or '', data.get('party_b') or '', subject=subject),
-        'hashtag_display': _hashtag_display(data.get('party_a') or '', data.get('party_b') or '', subject=subject),
+        'hashtag_subjects': hashtag_subjects or None,
+        'hashtag': _hashtag_key(
+            data.get('party_a') or '', data.get('party_b') or '',
+            subject=subject, hashtag_subjects=hashtag_subjects,
+        ),
+        'hashtag_display': _hashtag_display(
+            data.get('party_a') or '', data.get('party_b') or '',
+            subject=subject, hashtag_subjects=hashtag_subjects,
+        ),
         'votes_a': 0, 'votes_b': 0, 'created_at': now_utc(), 'source': 'ai',
     }
 
@@ -2346,29 +2367,121 @@ def _hashtag_norm(name: str) -> str:
     return re.sub(r'[^a-zA-Z0-9]+', '', (name or '').strip().lower())
 
 
-def _hashtag_key(a: str, b: str, subject: Optional[str] = None) -> str:
-    """Deterministic canonical hashtag key.
-    - If `subject` is given → hashtag is derived from the subject alone
-      (single-subject mode with two opposing stances).
-    - Otherwise → sorted concat of both party names (two-contender mode).
+# Italian articles/prepositions/connectives that vary between feuds. Stripping
+# them lets "il Milan" and "Milan" collapse to the same hashtag bucket.
+_HASHTAG_STOPWORDS = {
+    'il', 'lo', 'la', 'i', 'gli', 'le',
+    'un', 'uno', 'una',
+    'di', 'a', 'da', 'in', 'con', 'su', 'per', 'tra', 'fra', 'e', 'ed',
+    'del', 'dello', 'della', 'dei', 'degli', 'delle',
+    'dal', 'dallo', 'dalla', 'dai', 'dagli', 'dalle',
+    'sul', 'sullo', 'sulla', 'sui', 'sugli', 'sulle',
+    'nel', 'nello', 'nella', 'nei', 'negli', 'nelle',
+    'al', 'allo', 'alla', 'ai', 'agli', 'alle',
+    'l', 'd', 'ch', 'che', 'chi',
+}
+
+
+def _clean_subject(name: str) -> str:
+    """Extract a canonical PascalCase form of a party/subject name.
+    - Drops parenthesised segments (e.g. "Milan (rimonta col PSG)" → "Milan")
+    - Removes emoji and punctuation
+    - Filters Italian articles / prepositions so variants collapse
+    - Capitalizes each surviving word
+    Returns "" if nothing usable remains.
     """
-    if subject:
-        return _hashtag_norm(subject)[:32] or 'faida'
-    def _cap(s: str) -> str:
-        return _hashtag_norm(s)[:24]
-    parts = sorted([p for p in (_cap(a), _cap(b)) if p])
-    return ''.join(parts) or 'faida'
+    if not name:
+        return ''
+    s = str(name)
+    # Drop anything inside parentheses (usually clarifying context)
+    s = re.sub(r'\([^)]*\)', ' ', s)
+    # Drop anything inside quotes ("…", '…', «…», “…”)
+    s = re.sub(r'[«»“”"\'\']+', ' ', s)
+    # Extract alphanumeric words (keep accented letters)
+    words = re.findall(r"[A-Za-zÀ-ÿ0-9]+", s)
+    kept: List[str] = []
+    for w in words:
+        if w.lower() in _HASHTAG_STOPWORDS:
+            continue
+        kept.append(w)
+    if not kept:
+        return ''
+    # PascalCase each token
+    return ''.join(w[0].upper() + w[1:].lower() for w in kept)[:40]
 
 
-def _hashtag_display(a: str, b: str, subject: Optional[str] = None) -> str:
-    """Human-readable hashtag: '#Subject' (mode B) or '#PartyAPartyB' (mode A)."""
-    def _pascal(s: str) -> str:
-        words = re.findall(r"[A-Za-zÀ-Ù0-9]+", (s or ''))
-        return ''.join(w.capitalize() for w in words[:3])[:24]
-    if subject:
-        return ('#' + _pascal(subject)) or '#Faida'
-    parts = sorted([p for p in (_pascal(a), _pascal(b)) if p])
-    return ('#' + ''.join(parts)) if parts else '#Faida'
+def _canonical_hashtag_subjects(
+    party_a: Optional[str],
+    party_b: Optional[str],
+    subject: Optional[str] = None,
+    hashtag_subjects: Optional[List[str]] = None,
+) -> List[str]:
+    """Return the ordered list of clean subject names for hashtag building.
+
+    Order of preference:
+    1. Explicit `hashtag_subjects` provided by the AI (best case)
+    2. Single `subject` (stance mode B)
+    3. Two-contender fallback: party_a + party_b, each cleaned
+    Final output is sorted alphabetically to guarantee 'Inter/Milan' == 'Milan/Inter'.
+    """
+    subs: List[str] = []
+    if hashtag_subjects and isinstance(hashtag_subjects, list):
+        for x in hashtag_subjects:
+            c = _clean_subject(x or '')
+            if c:
+                subs.append(c)
+    if not subs and subject:
+        c = _clean_subject(subject)
+        if c:
+            subs.append(c)
+    if not subs:
+        for x in (party_a, party_b):
+            c = _clean_subject(x or '')
+            if c:
+                subs.append(c)
+    # Dedup (case-insensitive) preserving order
+    seen: set = set()
+    unique: List[str] = []
+    for s in subs:
+        k = s.lower()
+        if k not in seen:
+            seen.add(k)
+            unique.append(s)
+    # Cap at 2 subjects, then alphabetical order (case-insensitive)
+    unique = sorted(unique[:2], key=lambda s: s.lower())
+    return unique
+
+
+def _hashtag_key(
+    a: str,
+    b: str,
+    subject: Optional[str] = None,
+    hashtag_subjects: Optional[List[str]] = None,
+) -> str:
+    """Canonical hashtag key (alphanumeric, lowercase, alphabetically ordered).
+
+    Used for grouping: any two feuds featuring the same subject(s) produce the
+    same key regardless of A/B order.
+    """
+    subs = _canonical_hashtag_subjects(a, b, subject=subject, hashtag_subjects=hashtag_subjects)
+    if not subs:
+        return 'faida'
+    return re.sub(r'[^a-z0-9]', '', ''.join(s.lower() for s in subs))[:64] or 'faida'
+
+
+def _hashtag_display(
+    a: str,
+    b: str,
+    subject: Optional[str] = None,
+    hashtag_subjects: Optional[List[str]] = None,
+) -> str:
+    """Human-readable hashtag '#SubjectASubjectB' (or '#Subject' for stance mode).
+    Names are already PascalCased and alphabetically sorted.
+    """
+    subs = _canonical_hashtag_subjects(a, b, subject=subject, hashtag_subjects=hashtag_subjects)
+    if not subs:
+        return '#Faida'
+    return '#' + ''.join(subs)[:64]
 
 
 # ----------------------- RSS News Ingestion -----------------------
