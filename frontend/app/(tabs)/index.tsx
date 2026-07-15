@@ -181,7 +181,7 @@ export default function HomeFeed() {
             <View style={styles.brandRow}>
               <Text style={styles.brand}>POPULUS</Text>
               <Image
-                source={require("../../assets/images/icon.png")}
+                source={require("../../assets/images/icon-dark.png")}
                 style={styles.brandLogo}
                 resizeMode="contain"
               />
