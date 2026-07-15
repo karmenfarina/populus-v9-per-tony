@@ -39,6 +39,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  // Extract `session_id` from a redirect URL and exchange it for a session token.
+  // Supports both hash fragment (#session_id=...) and query param (?session_id=...).
+  const processSessionUrl = useCallback(async (url: string): Promise<boolean> => {
+    if (!url) return false;
+    const m = url.match(/[#?&]session_id=([^&]+)/);
+    if (!m || !m[1]) return false;
+    try {
+      const sid = decodeURIComponent(m[1]);
+      const res = await api.googleSession(sid);
+      await setToken(res.token);
+      setUser(res.user);
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
+
   useEffect(() => {
     (async () => {
       // Web-only: Emergent Google Auth redirects back with `#session_id=...`
@@ -47,29 +64,43 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // the fragment via `history.replaceState` so the token doesn't linger.
       if (Platform.OS === 'web' && typeof window !== 'undefined') {
         try {
-          const hash = window.location.hash || '';
-          const m = hash.match(/[#&]session_id=([^&]+)/);
-          if (m && m[1]) {
-            const sid = decodeURIComponent(m[1]);
-            const res = await api.googleSession(sid);
-            await setToken(res.token);
-            setUser(res.user);
-            // Strip the fragment from the address bar (keeps path + query).
+          const hash = window.location.hash || window.location.search || '';
+          if (await processSessionUrl(hash)) {
             try {
-              const url = window.location.pathname + window.location.search;
+              const url = window.location.pathname;
               window.history.replaceState(null, '', url);
             } catch { /* ignore */ }
             setLoading(false);
             return;
           }
-        } catch {
-          // Fall through to normal refreshMe if the callback exchange failed.
-        }
+        } catch { /* fall through to refreshMe */ }
+      }
+      // Mobile cold-start: if the app was launched by a deep link containing
+      // a session_id (Expo Go/native standalone build), pick it up now.
+      if (Platform.OS !== 'web') {
+        try {
+          const initial = await Linking.getInitialURL();
+          if (initial && await processSessionUrl(initial)) {
+            setLoading(false);
+            return;
+          }
+        } catch { /* ignore */ }
       }
       await refreshMe();
       setLoading(false);
     })();
-  }, [refreshMe]);
+  }, [refreshMe, processSessionUrl]);
+
+  // Hot deep-link listener: if the app is already running and the OS delivers
+  // a deep link (e.g. user completed OAuth in an in-app browser), process the
+  // session_id immediately. Only for mobile — web uses URL hash on mount.
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    const sub = Linking.addEventListener('url', async ({ url }) => {
+      if (url) await processSessionUrl(url);
+    });
+    return () => { try { sub.remove(); } catch { /* ignore */ } };
+  }, [processSessionUrl]);
 
   const applyAuthResult = async (res: { token: string; user: User }) => {
     await setToken(res.token);
@@ -101,11 +132,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    const result = await WebBrowser.openAuthSessionAsync(authUrl, redirectUrl);
-    if (result.type !== 'success' || !result.url) throw new Error('Login Google annullato');
-    const url = result.url;
-    const hashMatch = url.match(/[#?]session_id=([^&]+)/);
-    if (!hashMatch) throw new Error('Session ID mancante');
+    // On mobile the session_id can arrive via two paths:
+    // 1) `result.url` returned by openAuthSessionAsync (happy path)
+    // 2) A deep link delivered to the running app while the browser is still open
+    //    (some Android/Expo Go configurations bypass the WebBrowser return channel)
+    // We watch both simultaneously and race whichever wins.
+    let handled = false;
+    const linkPromise = new Promise<string | null>((resolve) => {
+      const sub = Linking.addEventListener('url', ({ url }) => {
+        if (!handled && url && /session_id=/.test(url)) {
+          handled = true;
+          try { sub.remove(); } catch { /* ignore */ }
+          resolve(url);
+        }
+      });
+      // Timeout fallback so this listener doesn't hang forever if the user aborts.
+      setTimeout(() => { try { sub.remove(); } catch { /* ignore */ } resolve(null); }, 300000);
+    });
+
+    const browserPromise = WebBrowser.openAuthSessionAsync(authUrl, redirectUrl)
+      .then((res) => (res.type === 'success' && res.url ? res.url : null));
+
+    const url = (await Promise.race([browserPromise, linkPromise])) as string | null;
+    handled = true;
+    if (!url) throw new Error('Login Google annullato');
+    const hashMatch = url.match(/[#?&]session_id=([^&]+)/);
+    if (!hashMatch) throw new Error('Session ID mancante nella risposta di Google');
     const session_id = decodeURIComponent(hashMatch[1]);
     const res = await api.googleSession(session_id);
     await applyAuthResult(res);
