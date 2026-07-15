@@ -1086,7 +1086,7 @@ async def _log_flagged(user_id: str, feud_id: str, text: str, hits: list[str]):
 # ----------------------- RSS cache -----------------------
 
 _RSS_CACHE: dict = {}  # key: cat_id -> (expires_ts, results)
-_RSS_TTL_SECONDS = 15 * 60  # 15 minutes — keep pool fresh across scheduler ticks
+_RSS_TTL_SECONDS = 5 * 60  # 5 minutes — match aggressive scheduler cadence
 
 
 MAX_VOTE_CHANGES = 2
@@ -2841,39 +2841,42 @@ async def _cleanup_expired_feuds() -> None:
 
 
 async def _daily_generation_loop():
-    """Every 30 minutes, top up each category with fresh feuds.
+    """Continuous feud generator. Tries every category every SCHEDULER_TICK_MIN
+    minutes. A category is skipped only if it already produced a feud in the
+    last CATEGORY_COOLDOWN_MIN minutes — otherwise we attempt a fresh one.
 
-    Rate limit: at most 1 fresh feud per category per rolling 60 minutes.
-    This distributes generation UNIFORMLY across the day (day and night)
-    instead of front-loading everything during active dev hours and then
-    starving the feed for 24h when the old fixed 24h cap was hit.
-
-    Combined with the used-links filter + hot-topic boost, this keeps the
-    feed alive whenever RSS sources actually publish something. Categories
-    with no fresh news simply skip that tick without consuming a slot.
+    Design goals:
+    - Users opening the app should never see feuds older than ~15-20 min in
+      *some* category. Bursts are avoided because the tick is small.
+    - Categories with sparse RSS (e.g. `social` overnight) fail gracefully
+      via AI-skip without consuming a cooldown slot.
+    - Combined with the used-links filter + hot-topic boost, this yields
+      distributed generation day and night.
     """
     import asyncio as _asyncio
-    HOURLY_LIMIT_PER_CATEGORY = 1
+    SCHEDULER_TICK_MIN = 10        # try each category every 10 min
+    CATEGORY_COOLDOWN_MIN = 20     # min gap between successful feuds for the same category
     while True:
         try:
             try:
                 from emergentintegrations.llm.chat import LlmChat, UserMessage
             except Exception as e:
                 logger.warning(f"scheduler LLM import failed: {e}")
-                await _asyncio.sleep(1800)
+                await _asyncio.sleep(SCHEDULER_TICK_MIN * 60)
                 continue
 
-            one_hour_ago = now_utc() - timedelta(hours=1)
+            cooldown_ago = now_utc() - timedelta(minutes=CATEGORY_COOLDOWN_MIN)
             for cat in CATEGORIES:
                 try:
                     recent_count = await db.feuds.count_documents(
-                        {'category': cat['id'], 'source': 'ai', 'created_at': {'$gte': one_hour_ago}}
+                        {'category': cat['id'], 'source': 'ai', 'created_at': {'$gte': cooldown_ago}}
                     )
-                    if recent_count >= HOURLY_LIMIT_PER_CATEGORY:
+                    if recent_count >= 1:
+                        # In cooldown — skip silently to keep logs clean.
                         continue
                     logger.info(
                         f"scheduler: attempting fresh feud for {cat['id']} "
-                        f"({recent_count}/{HOURLY_LIMIT_PER_CATEGORY} in last 60 min)"
+                        f"(cooldown {CATEGORY_COOLDOWN_MIN}min cleared)"
                     )
                     feud = await _generate_feud_for_category(cat, LlmChat, UserMessage)
                     if feud:
@@ -2901,7 +2904,7 @@ async def _daily_generation_loop():
                 logger.warning(f"cleanup error: {e}")
         except Exception as e:
             logger.warning(f"scheduler loop error: {e}")
-        await _asyncio.sleep(1800)  # 30 min cadence
+        await _asyncio.sleep(SCHEDULER_TICK_MIN * 60)
 
 
 @api_router.get('/')
