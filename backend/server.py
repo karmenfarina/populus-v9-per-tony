@@ -2654,11 +2654,19 @@ async def _cleanup_expired_feuds() -> None:
 
 
 async def _daily_generation_loop():
-    """Every 30 minutes, top up each category with fresh feuds. Each category
-    gets up to MAX_FRESH_PER_CATEGORY_24H feuds within a rolling 24h window.
-    The RSS+dedup logic prevents duplicate stories."""
+    """Every 30 minutes, top up each category with fresh feuds.
+
+    Rate limit: at most 1 fresh feud per category per rolling 60 minutes.
+    This distributes generation UNIFORMLY across the day (day and night)
+    instead of front-loading everything during active dev hours and then
+    starving the feed for 24h when the old fixed 24h cap was hit.
+
+    Combined with the used-links filter + hot-topic boost, this keeps the
+    feed alive whenever RSS sources actually publish something. Categories
+    with no fresh news simply skip that tick without consuming a slot.
+    """
     import asyncio as _asyncio
-    MAX_FRESH_PER_CATEGORY_24H = 6
+    HOURLY_LIMIT_PER_CATEGORY = 1
     while True:
         try:
             try:
@@ -2668,15 +2676,18 @@ async def _daily_generation_loop():
                 await _asyncio.sleep(1800)
                 continue
 
-            one_day_ago = now_utc() - timedelta(hours=24)
+            one_hour_ago = now_utc() - timedelta(hours=1)
             for cat in CATEGORIES:
                 try:
-                    fresh_count = await db.feuds.count_documents(
-                        {'category': cat['id'], 'source': 'ai', 'created_at': {'$gte': one_day_ago}}
+                    recent_count = await db.feuds.count_documents(
+                        {'category': cat['id'], 'source': 'ai', 'created_at': {'$gte': one_hour_ago}}
                     )
-                    if fresh_count >= MAX_FRESH_PER_CATEGORY_24H:
+                    if recent_count >= HOURLY_LIMIT_PER_CATEGORY:
                         continue
-                    logger.info(f"scheduler: attempting fresh feud for {cat['id']} ({fresh_count}/{MAX_FRESH_PER_CATEGORY_24H})")
+                    logger.info(
+                        f"scheduler: attempting fresh feud for {cat['id']} "
+                        f"({recent_count}/{HOURLY_LIMIT_PER_CATEGORY} in last 60 min)"
+                    )
                     feud = await _generate_feud_for_category(cat, LlmChat, UserMessage)
                     if feud:
                         await db.feuds.insert_one(feud)
