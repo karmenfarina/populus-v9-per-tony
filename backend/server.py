@@ -559,6 +559,11 @@ async def list_feuds(category: Optional[str] = None, user: Optional[dict] = Depe
         q['category'] = category
     # Only feuds from the last 24h appear in the live feed. Older ones live in the archive.
     q['created_at'] = {'$gte': now_utc() - timedelta(hours=24)}
+    # Strict chronological order (newest first) across all categories. The
+    # previous personalization ranking (affinity * recency) was reverted per
+    # user request: the feed must feel like a news timeline where "1 min ago"
+    # always precedes "20 min ago" which precedes "1 h ago", regardless of
+    # which category the user engages with most.
     docs = await db.feuds.find(q, {'_id': 0}).sort('created_at', -1).to_list(200)
     voted_map: dict = {}
     if user and docs:
@@ -569,24 +574,7 @@ async def list_feuds(category: Optional[str] = None, user: Optional[dict] = Depe
         d['my_vote'] = my_vote
         if isinstance(d.get('created_at'), datetime):
             d['created_at'] = _iso_utc(d['created_at'])
-    # Personalization: on the "all" feed, blend recency with the user's category
-    # affinity (votes+comments+views+favorites). Users without any signal keep
-    # the pure chronological order.
-    personalized = False
-    if user and docs and (not category or category == 'all'):
-        affinity = await _compute_user_affinity(user)
-        if affinity:
-            n = len(docs)
-            max_aff = max(affinity.values()) or 1.0
-            for i, d in enumerate(docs):
-                aff_norm = (affinity.get(d.get('category'), 0.0)) / max_aff
-                rec_norm = (n - i) / n  # 1.0 = newest
-                d['_rank'] = 0.65 * aff_norm + 0.35 * rec_norm
-            docs.sort(key=lambda x: x.get('_rank', 0.0), reverse=True)
-            for d in docs:
-                d.pop('_rank', None)
-            personalized = True
-    return {'feuds': docs, 'personalized': personalized}
+    return {'feuds': docs, 'personalized': False}
 
 
 async def _compute_user_affinity(user: dict) -> dict:
