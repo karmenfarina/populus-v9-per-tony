@@ -29,15 +29,18 @@ export default function TabsLayout() {
         headerShown: false,
         tabBarActiveTintColor: colors.brandPrimary,
         tabBarInactiveTintColor: colors.muted,
+        // Icon-only tab bar: labels are permanently hidden per product decision.
+        // Any new tab added in the future will automatically follow the same rule.
+        tabBarShowLabel: false,
         tabBarStyle: {
           backgroundColor: colors.surfaceInverse,
           borderTopWidth: 2,
           borderTopColor: colors.border,
-          height: 60 + bottomPad,
+          height: 56 + bottomPad,
           paddingTop: 8,
           paddingBottom: bottomPad,
         },
-        tabBarLabelStyle: { fontSize: 11, letterSpacing: 1 },
+        tabBarIconStyle: { marginTop: 2 },
       }}
     >
       <Tabs.Screen
