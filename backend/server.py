@@ -1894,6 +1894,112 @@ AGE_BUCKETS = [
 ]
 
 
+@api_router.get('/feuds/{feud_id}/stats')
+async def feud_stats(feud_id: str, user: dict = Depends(get_current_user)):
+    """Aggregated real-time stats for a single feud. Requires the user to have
+    already voted (percentages contract is `vote-to-reveal`, and stats are a
+    stronger reveal). Anonymous users can call it too as long as they've cast
+    a vote on this feud.
+
+    Returns per-side breakdowns for age buckets, macro-region (Nord/Centro/Sud)
+    and gender. Computed live from the votes+users collections — no caching.
+    """
+    feud = await db.feuds.find_one({'feud_id': feud_id}, {'_id': 0, 'feud_id': 1})
+    if not feud:
+        raise HTTPException(status_code=404, detail='Faida non trovata')
+    # Gate: user must have voted (contract with the frontend UI).
+    my_vote = await db.votes.find_one(
+        {'feud_id': feud_id, 'user_id': user['user_id']}, {'_id': 0, 'side': 1}
+    )
+    if not my_vote:
+        raise HTTPException(
+            status_code=403,
+            detail='Devi votare prima di consultare le statistiche.',
+        )
+
+    pipeline = [
+        {'$match': {'feud_id': feud_id}},
+        {'$lookup': {
+            'from': 'users', 'localField': 'user_id', 'foreignField': 'user_id', 'as': 'u',
+        }},
+        {'$unwind': {'path': '$u', 'preserveNullAndEmptyArrays': True}},
+        {'$project': {
+            '_id': 0,
+            'side': 1,
+            'age': '$u.age',
+            'sex': '$u.sex',
+            'region': '$u.region',
+        }},
+    ]
+    rows = await db.votes.aggregate(pipeline).to_list(50000)
+
+    def _empty_side() -> dict:
+        return {
+            'total': 0,
+            'age': {name: 0 for (name, _lo, _hi) in AGE_BUCKETS} | {'unknown': 0},
+            'region': {'Nord': 0, 'Centro': 0, 'Sud': 0, 'unknown': 0},
+            'sex': {'F': 0, 'M': 0, 'other': 0, 'unknown': 0},
+        }
+    sides: dict = {'A': _empty_side(), 'B': _empty_side()}
+    for r in rows:
+        s = r.get('side')
+        if s not in sides:
+            continue
+        sides[s]['total'] += 1
+        sides[s]['age'][_bucket_age(r.get('age'))] += 1
+        sides[s]['region'][_macro_region(r.get('region'))] += 1
+        sides[s]['sex'][_norm_sex(r.get('sex'))] += 1
+
+    return {
+        'feud_id': feud_id,
+        'total_votes': sides['A']['total'] + sides['B']['total'],
+        'sides': sides,
+    }
+
+
+
+# Italian macro-regions used for per-feud vote breakdowns. Values must match
+# the region names stored on the user document (onboarding form).
+REGION_MACRO = {
+    # Nord
+    'Piemonte': 'Nord', 'Valle d\'Aosta': 'Nord', 'Lombardia': 'Nord',
+    'Trentino-Alto Adige': 'Nord', 'Veneto': 'Nord', 'Friuli-Venezia Giulia': 'Nord',
+    'Liguria': 'Nord', 'Emilia-Romagna': 'Nord',
+    # Centro
+    'Toscana': 'Centro', 'Umbria': 'Centro', 'Marche': 'Centro', 'Lazio': 'Centro',
+    'Abruzzo': 'Centro',
+    # Sud e Isole
+    'Molise': 'Sud', 'Campania': 'Sud', 'Puglia': 'Sud', 'Basilicata': 'Sud',
+    'Calabria': 'Sud', 'Sicilia': 'Sud', 'Sardegna': 'Sud',
+}
+
+
+def _bucket_age(age) -> str:
+    if not isinstance(age, int):
+        return 'unknown'
+    for name, lo, hi in AGE_BUCKETS:
+        if lo <= age < hi:
+            return name
+    return 'unknown'
+
+
+def _macro_region(region) -> str:
+    if not region or not isinstance(region, str):
+        return 'unknown'
+    return REGION_MACRO.get(region.strip(), 'unknown')
+
+
+def _norm_sex(sex) -> str:
+    if not sex or not isinstance(sex, str):
+        return 'unknown'
+    s = sex.strip().lower()
+    if s in ('f', 'm'):
+        return s.upper()
+    if s == 'other':
+        return 'other'
+    return 'unknown'
+
+
 @api_router.post('/admin/backfill_media')
 async def admin_backfill_media(limit: int = 200, force: bool = False, _: bool = Depends(require_admin)):
     """Re-run OG/YouTube extraction on existing feuds. By default only enriches

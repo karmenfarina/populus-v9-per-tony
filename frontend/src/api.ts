@@ -176,6 +176,7 @@ export const api = {
   favorites: () => request('/favorites'),
   addFavorite: (id: string) => request(`/feuds/${id}/favorite`, { method: 'POST' }),
   removeFavorite: (id: string) => request(`/feuds/${id}/favorite`, { method: 'DELETE' }),
+  feudStats: (id: string) => request(`/feuds/${id}/stats`),
 };
 
 export type User = {
@@ -300,3 +301,15 @@ export type Comment = {
 };
 
 export type Reply = Comment & { reply_id: string; comment_id: string };
+
+export type FeudStatsSide = {
+  total: number;
+  age: Record<string, number>;
+  region: { Nord: number; Centro: number; Sud: number; unknown: number };
+  sex: { F: number; M: number; other: number; unknown: number };
+};
+export type FeudStats = {
+  feud_id: string;
+  total_votes: number;
+  sides: { A: FeudStatsSide; B: FeudStatsSide };
+};

@@ -11,6 +11,7 @@ import * as Haptics from "expo-haptics";
 import { api, ApiError, Comment, Feud, Reply, Sponsor } from "@/src/api";
 import { colors, spacing, font, sideColor, onSideColor } from "@/src/theme";
 import FeudMediaBlock from "@/src/components/FeudMediaBlock";
+import FeudStatsModal from "@/src/components/FeudStatsModal";
 import { useUIPrefs } from "@/src/ui/UIPrefs";
 import { useAuth } from "@/src/auth/AuthContext";
 
@@ -44,6 +45,7 @@ export default function FeudDetail() {
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
   const [replyText, setReplyText] = useState("");
   const [activeSide, setActiveSide] = useState<"A" | "B" | null>(null);
+  const [statsOpen, setStatsOpen] = useState(false);
   const { sourcesExpanded, setSourcesExpanded } = useUIPrefs();
 
   const loadAll = useCallback(async () => {
@@ -374,6 +376,18 @@ export default function FeudDetail() {
                   : "Hai esaurito i cambi voto disponibili"}
               </Text>
             )}
+            {feud.my_vote && (
+              <Pressable
+                onPress={() => setStatsOpen(true)}
+                testID="stats-button"
+                style={styles.statsBtn}
+                hitSlop={6}
+              >
+                <Ionicons name="stats-chart" size={16} color={colors.brandPrimary} />
+                <Text style={styles.statsBtnTxt}>VEDI STATISTICHE DETTAGLIATE</Text>
+                <Ionicons name="chevron-forward" size={16} color={colors.brandPrimary} />
+              </Pressable>
+            )}
           </View>
 
           {error && <Text style={styles.err}>{error}</Text>}
@@ -474,6 +488,13 @@ export default function FeudDetail() {
           )}
         </ScrollView>
       </KeyboardAvoidingView>
+      <FeudStatsModal
+        visible={statsOpen}
+        feudId={feud.feud_id}
+        partyA={feud.party_a}
+        partyB={feud.party_b}
+        onClose={() => setStatsOpen(false)}
+      />
     </SafeAreaView>
   );
 }
@@ -653,6 +674,14 @@ const styles = StyleSheet.create({
   pollVotes: { color: colors.onBrandPrimary, fontSize: font.sizes.xs, opacity: 0.85, marginTop: 2 },
   checkPill: { position: "absolute", top: 6, right: 6, width: 22, height: 22, borderRadius: 11, backgroundColor: colors.onBrandPrimary, alignItems: "center", justifyContent: "center" },
   pollHint: { color: colors.brandSecondary, fontSize: font.sizes.sm, textAlign: "center", marginTop: spacing.md, letterSpacing: 1 },
+  statsBtn: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.xs,
+    marginTop: spacing.md,
+    borderWidth: 2, borderColor: colors.brandPrimary,
+    backgroundColor: colors.surface,
+    paddingVertical: spacing.sm, paddingHorizontal: spacing.md,
+  },
+  statsBtnTxt: { color: colors.brandPrimary, letterSpacing: 1.5, fontSize: font.sizes.sm, fontWeight: "500" },
   err: { color: colors.error, padding: spacing.md, borderWidth: 2, borderColor: colors.error, margin: spacing.lg },
   commentInputWrap: { padding: spacing.md, borderBottomWidth: 2, borderColor: colors.border, backgroundColor: colors.surface, gap: spacing.sm },
   commentInput: { borderWidth: 2, borderColor: colors.border, padding: spacing.sm, minHeight: 60, fontSize: font.sizes.base, color: colors.onSurface, backgroundColor: colors.surfaceSecondary },
