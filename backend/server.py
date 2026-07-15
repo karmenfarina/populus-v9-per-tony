@@ -2058,8 +2058,12 @@ async def _generate_feud_for_category(cat: dict, LlmChat, UserMessage) -> Option
     if headlines:
         def _fmt_headline(i: int, h: dict) -> str:
             tag = "[HOT] " if i in hot_indices else ""
-            return f"[{i}] {tag}{h['title']} — fonte: {h['source']}"
-        sources_block = "\n".join([_fmt_headline(i, h) for i, h in enumerate(headlines)])
+            head = f"[{i}] {tag}TITOLO: {h['title']}\n     FONTE: {h['source']}"
+            excerpt = (h.get('excerpt') or '').strip()
+            if excerpt:
+                head += f"\n     ESTRATTO: {excerpt}"
+            return head
+        sources_block = "\n\n".join([_fmt_headline(i, h) for i, h in enumerate(headlines)])
         hot_topics_block = ""
         if hot_topics:
             bullets = "\n".join(f"  • {t}" for t in hot_topics)
@@ -2105,7 +2109,7 @@ async def _generate_feud_for_category(cat: dict, LlmChat, UserMessage) -> Option
             "Il titolo deve essere DA TABLOID: incisivo, esplicito nel conflitto (usa 'contro', 'vs', "
             "'attacca', 'smaschera', 'accusa', 'insulta', 'gela', 'demolisce', 'inguaia', 'divide'), "
             "max 90 caratteri. Ma tutti i fatti, i nomi e i dettagli DEVONO derivare dalla notizia "
-            "scelta, non dalla tua fantasia.\n"
+            "scelta (titolo + ESTRATTO fornito), non dalla tua fantasia.\n"
             "MODALITÀ PARTI ammesse:\n"
             "  A) Due contendenti reali: nomi propri/gruppi citati nella notizia (es. Milan vs Inter).\n"
             "  B) Due POSIZIONI ANTITETICHE su UN singolo soggetto quando non esiste una vera "
@@ -2113,12 +2117,26 @@ async def _generate_feud_for_category(cat: dict, LlmChat, UserMessage) -> Option
             "su una decisione politica: 'Giusta' vs 'Sbagliata'; su un fenomeno: 'Utile' vs 'Dannoso'). "
             "In modalità B i nomi devono essere brevi (max 40 caratteri) e schierarsi in modo netto.\n"
             "La domanda finale deve essere provocatoria e schierante.\n\n"
+            "REGOLA PER `summary` (obbligatoria): il summary NON è uno slogan, è un mini-articolo "
+            "informativo che permette al lettore di capire la notizia SENZA cliccare sulla fonte. "
+            "Deve avere ESATTAMENTE 3 blocchi separati da doppia interlinea (\\n\\n):\n"
+            "  1) COSA È SUCCESSO — 2-3 frasi che raccontano il fatto: chi (nomi e cognomi completi), "
+            "quando, dove, cosa è accaduto esattamente, ruoli/qualifiche/programma/contesto. Include "
+            "la citazione più forte tra virgolette se presente nell'estratto. Se non hai il dato, "
+            "scrivi 'non specificato' invece di inventarlo.\n"
+            "  2) IL DETTAGLIO CHIAVE — 1-2 frasi con il retroscena/aneddoto/numero-shock/frase "
+            "incriminata che rende la storia degna di essere raccontata. Deve derivare dall'estratto.\n"
+            "  3) PERCHÉ LA GENTE SI DIVIDE — 1-2 frasi che chiariscono le DUE posizioni contrapposte "
+            "e cosa esattamente le divide (chi la pensa come `party_a` argomenta X, chi sta con "
+            "`party_b` risponde Y). Zero neutralità, ma nessuna delle due parti va delegittimata.\n"
+            "In totale il summary deve essere 90-150 parole. Vietato aprire con 'polemica', 'scoppia "
+            "il caso', 'si litiga': entra subito nel merito dei fatti.\n\n"
             "Rispondi SOLO con questo JSON:\n"
             '{"title": "titolo tabloid max 90 caratteri", '
             '"subject": "SOLO in modalità B (singolo soggetto con posizioni opposte): il NOME del soggetto della faida — persona, gruppo, cosa (es. \"Fabrizio Corona\", \"Samsung\", \"il nuovo film Marvel\"). In modalità A (due contendenti) lascia stringa vuota.", '
             '"party_a": "prima parte (contendente OPPURE posizione)", '
             '"party_b": "seconda parte antitetica alla prima", '
-            '"summary": "3-4 frasi DENSE di dettagli concreti presi dalla notizia: nomi e COGNOMI completi dei protagonisti, ruoli, fatti verificabili, date/luoghi se disponibili, cifre, dichiarazioni testuali brevi tra virgolette se presenti, e IL DETTAGLIO PIÙ SUCCOSO che rende la storia interessante (il retroscena, la frase incriminata, l\'aneddoto, il numero shock). Vietato riassunti generici tipo \'litigano\', \'polemica sui social\': scrivi cosa è successo esattamente, chi ha detto/fatto cosa, e perché la gente si sta dividendo.", '
+            '"summary": "mini-articolo di 90-150 parole strutturato nei 3 blocchi (COSA È SUCCESSO / IL DETTAGLIO CHIAVE / PERCHÉ LA GENTE SI DIVIDE) separati da \\n\\n. Basato ESCLUSIVAMENTE su titolo + estratto della notizia scelta.", '
             '"question": "domanda schierante e provocatoria, non neutra", '
             '"source_index": indice (0-based) della notizia scelta nel pool (obbligatorio), '
             '"engagement_score": numero da 1 a 10 che stimi per la faida che hai creato, '
@@ -2431,6 +2449,44 @@ async def _fetch_headlines_for_category(cat_id: str, max_items: int = 18) -> Lis
     feeds = RSS_FEEDS.get(cat_id, [])
     if not feeds:
         return []
+
+    def _clean_rss_text(raw: str) -> str:
+        """Strip HTML tags & entities from RSS summary/content and squash whitespace."""
+        if not raw:
+            return ''
+        try:
+            txt = html_lib.unescape(raw)
+        except Exception:
+            txt = raw
+        # Remove tags including <script> / <style> content
+        txt = re.sub(r'<script[\s\S]*?</script>', ' ', txt, flags=re.IGNORECASE)
+        txt = re.sub(r'<style[\s\S]*?</style>', ' ', txt, flags=re.IGNORECASE)
+        txt = re.sub(r'<[^>]+>', ' ', txt)
+        txt = re.sub(r'\s+', ' ', txt).strip()
+        return txt
+
+    def _extract_entry_text(entry) -> str:
+        # Prefer full content, then summary/description, in this order.
+        for key in ('content', 'summary_detail'):
+            val = entry.get(key)
+            if isinstance(val, list) and val:
+                v = val[0]
+                if isinstance(v, dict) and v.get('value'):
+                    t = _clean_rss_text(v['value'])
+                    if t:
+                        return t
+            elif isinstance(val, dict) and val.get('value'):
+                t = _clean_rss_text(val['value'])
+                if t:
+                    return t
+        for key in ('summary', 'description'):
+            val = entry.get(key)
+            if isinstance(val, str) and val.strip():
+                t = _clean_rss_text(val)
+                if t:
+                    return t
+        return ''
+
     results: List[dict] = []
     async with httpx.AsyncClient(timeout=10.0, follow_redirects=True, headers={'User-Agent': 'PopulusBot/1.0'}) as hx:
         for source_name, url in feeds:
@@ -2448,6 +2504,10 @@ async def _fetch_headlines_for_category(cat_id: str, max_items: int = 18) -> Lis
                             'link': link,
                             'source': source_name,
                             'image': _image_from_entry(entry),
+                            # Article excerpt (max ~800 chars) — gives the AI real
+                            # context to write informative summaries instead of
+                            # improvising from just the headline.
+                            'excerpt': _extract_entry_text(entry)[:800],
                         })
                     if len(results) >= max_items * 2:
                         break

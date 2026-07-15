@@ -213,7 +213,9 @@ export default function FeudDetail() {
 
           <View style={styles.article}>
             <Text style={styles.sectionKicker}>LA FAIDA</Text>
-            <Text style={styles.summary}>{feud.summary}</Text>
+            {(feud.summary || "").split(/\n{2,}/).filter(p => p.trim()).map((para, idx) => (
+              <Text key={idx} style={styles.summary}>{para.trim()}</Text>
+            ))}
             {feud.hashtag && (
               <Pressable
                 onPress={() => router.push(`/hashtag/${feud.hashtag}`)}
@@ -562,7 +564,7 @@ const styles = StyleSheet.create({
   hashtagText: { fontSize: font.sizes.xs, color: colors.onBrandPrimary, letterSpacing: 0.5, fontWeight: "500" },
   sectionKicker: { fontSize: font.sizes.sm, letterSpacing: 2, color: colors.brandPrimary, marginBottom: spacing.xs },
   mediaSection: { paddingHorizontal: spacing.lg, marginBottom: spacing.md },
-  summary: { fontSize: font.sizes.lg, lineHeight: 24, color: colors.onSurface },
+  summary: { fontSize: font.sizes.lg, lineHeight: 24, color: colors.onSurface, marginBottom: spacing.sm },
   sourcesBox: { padding: spacing.lg, borderBottomWidth: 2, borderColor: colors.border, backgroundColor: colors.surface, gap: spacing.sm },
   sourcesHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: spacing.xs },
   sourcesCount: { color: colors.muted, fontSize: font.sizes.sm, letterSpacing: 1, minWidth: 20 },
