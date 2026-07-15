@@ -635,6 +635,87 @@ async def record_view(feud_id: str, user: dict = Depends(get_current_user)):
     return {'ok': True}
 
 
+# --- Favorites -----------------------------------------------------------------
+
+async def _is_favorited(user_id: str, feud_id: str) -> bool:
+    doc = await db.favorites.find_one(
+        {'user_id': user_id, 'feud_id': feud_id}, {'_id': 1}
+    )
+    return doc is not None
+
+
+async def _favorite_ids_for(user_id: str, feud_ids: List[str]) -> set:
+    if not feud_ids:
+        return set()
+    cur = db.favorites.find(
+        {'user_id': user_id, 'feud_id': {'$in': feud_ids}},
+        {'_id': 0, 'feud_id': 1},
+    )
+    docs = await cur.to_list(len(feud_ids))
+    return {d['feud_id'] for d in docs}
+
+
+@api_router.post('/feuds/{feud_id}/favorite')
+async def add_favorite(feud_id: str, user: dict = Depends(get_current_user)):
+    """Add the feud to the user's favorites. Idempotent — if it already exists
+    the `created_at` is REFRESHED so re-favoriting bumps it to the top of the
+    favorites list (chronological order = most-recently-added first)."""
+    f = await db.feuds.find_one({'feud_id': feud_id}, {'_id': 0, 'feud_id': 1})
+    if not f:
+        raise HTTPException(status_code=404, detail='Faida non trovata')
+    await db.favorites.update_one(
+        {'user_id': user['user_id'], 'feud_id': feud_id},
+        {
+            '$setOnInsert': {
+                'user_id': user['user_id'],
+                'feud_id': feud_id,
+            },
+            '$set': {'created_at': now_utc()},
+        },
+        upsert=True,
+    )
+    return {'ok': True, 'is_favorite': True}
+
+
+@api_router.delete('/feuds/{feud_id}/favorite')
+async def remove_favorite(feud_id: str, user: dict = Depends(get_current_user)):
+    """Remove the feud from the user's favorites. No-op if not present."""
+    await db.favorites.delete_one(
+        {'user_id': user['user_id'], 'feud_id': feud_id}
+    )
+    return {'ok': True, 'is_favorite': False}
+
+
+@api_router.get('/favorites')
+async def list_favorites(user: dict = Depends(get_current_user)):
+    """List the user's favorited feuds, most-recently-added first.
+
+    If a favorited feud has been purged from Mongo (14-day retention) the entry
+    is skipped silently — the client never sees dangling references.
+    """
+    fav_docs = await db.favorites.find(
+        {'user_id': user['user_id']}, {'_id': 0}
+    ).sort('created_at', -1).to_list(500)
+    if not fav_docs:
+        return {'feuds': []}
+    order = {d['feud_id']: i for i, d in enumerate(fav_docs)}
+    feud_ids = list(order.keys())
+    feuds = await db.feuds.find(
+        {'feud_id': {'$in': feud_ids}}, {'_id': 0}
+    ).to_list(len(feud_ids))
+    # Restore favorites order (most-recently-added first)
+    feuds.sort(key=lambda f: order.get(f['feud_id'], 10**9))
+    voted_map = await _user_voted_ids(user['user_id'], [f['feud_id'] for f in feuds])
+    for d in feuds:
+        my_vote = voted_map.get(d['feud_id'])
+        _attach_percentages(d, revealed=bool(my_vote))
+        d['my_vote'] = my_vote
+        d['is_favorite'] = True
+        if isinstance(d.get('created_at'), datetime):
+            d['created_at'] = _iso_utc(d['created_at'])
+    return {'feuds': feuds}
+
+
 ARCHIVE_MAX_DAYS = 7
 
 
@@ -837,7 +918,10 @@ async def get_feud(feud_id: str, user: Optional[dict] = Depends(get_current_user
     doc['my_vote_changes'] = my_vote_changes
     doc['my_vote_changes_left'] = max(0, MAX_VOTE_CHANGES - my_vote_changes)
     doc['sources'] = _filter_relevant_sources(doc)
+    doc['is_favorite'] = bool(user and await _is_favorited(user['user_id'], feud_id))
     _ensure_hashtag(doc)
+    if isinstance(doc.get('created_at'), datetime):
+        doc['created_at'] = _iso_utc(doc['created_at'])
     return {'feud': doc}
 
 
@@ -2698,6 +2782,8 @@ async def on_startup():
     await db.sponsors.create_index('category')
     await db.user_photos.create_index('user_id')
     await db.user_photos.create_index([('user_id', 1), ('position', 1)])
+    await db.favorites.create_index([('user_id', 1), ('feud_id', 1)], unique=True)
+    await db.favorites.create_index([('user_id', 1), ('created_at', -1)])
     # Full-text index for search
     try:
         await db.feuds.create_index([('title', 'text'), ('summary', 'text'), ('party_a', 'text'), ('party_b', 'text')])

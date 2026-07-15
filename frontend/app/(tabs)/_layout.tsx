@@ -48,6 +48,13 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
+        name="top"
+        options={{
+          title: "TOP",
+          tabBarIcon: ({ color, size }) => <Ionicons name="bookmark" color={color} size={size} />,
+        }}
+      />
+      <Tabs.Screen
         name="notifications"
         options={{
           title: "NOTIFICHE",

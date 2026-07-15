@@ -173,6 +173,9 @@ export const api = {
     if (category && category !== 'all') params.set('category', category);
     return request(`/feuds/archive?${params.toString()}`);
   },
+  favorites: () => request('/favorites'),
+  addFavorite: (id: string) => request(`/feuds/${id}/favorite`, { method: 'POST' }),
+  removeFavorite: (id: string) => request(`/feuds/${id}/favorite`, { method: 'DELETE' }),
 };
 
 export type User = {
@@ -281,6 +284,7 @@ export type Feud = {
   sources?: { title: string; link: string; source: string }[];
   hashtag?: string;
   hashtag_display?: string;
+  is_favorite?: boolean;
 };
 
 export type Comment = {

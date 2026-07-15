@@ -12,10 +12,13 @@ import { api, ApiError, Comment, Feud, Reply, Sponsor } from "@/src/api";
 import { colors, spacing, font, sideColor, onSideColor } from "@/src/theme";
 import FeudMediaBlock from "@/src/components/FeudMediaBlock";
 import { useUIPrefs } from "@/src/ui/UIPrefs";
+import { useAuth } from "@/src/auth/AuthContext";
 
 export default function FeudDetail() {
   const { id, comment: commentParam, side: sideParam } = useLocalSearchParams<{ id: string; comment?: string; side?: string }>();
   const router = useRouter();
+  const { user } = useAuth();
+  const isAnonymous = !!user && user.auth_provider === "anonymous";
   const [feud, setFeud] = useState<Feud | null>(null);
   const [sponsor, setSponsor] = useState<Sponsor | null>(null);
   const [sideA, setSideA] = useState<Comment[]>([]);
@@ -116,6 +119,25 @@ export default function FeudDetail() {
     finally { setPosting(false); }
   };
 
+  const toggleFavorite = async () => {
+    if (!feud || isAnonymous) return;
+    const nextVal = !feud.is_favorite;
+    // Optimistic UI: flip the icon instantly, revert on error
+    setFeud({ ...feud, is_favorite: nextVal });
+    try { await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch {}
+    try {
+      if (nextVal) {
+        await api.addFavorite(feud.feud_id);
+      } else {
+        await api.removeFavorite(feud.feud_id);
+      }
+    } catch (e: any) {
+      // Revert on failure
+      setFeud({ ...feud, is_favorite: !nextVal });
+      setError(e?.detail || e?.message || "Errore nel salvataggio del preferito");
+    }
+  };
+
   const toggleReplies = async (commentId: string) => {
     if (expanded[commentId]) {
       const copy = { ...expanded }; delete copy[commentId]; setExpanded(copy);
@@ -196,6 +218,15 @@ export default function FeudDetail() {
         </Pressable>
         <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
           <Text style={styles.topCat}>{feud.category_label.toUpperCase()}</Text>
+          {!isAnonymous && (
+            <Pressable onPress={toggleFavorite} testID="favorite-button" style={styles.shareBtn} hitSlop={6}>
+              <Ionicons
+                name={feud.is_favorite ? "bookmark" : "bookmark-outline"}
+                size={18}
+                color={feud.is_favorite ? colors.brandPrimary : colors.brandSecondary}
+              />
+            </Pressable>
+          )}
           <Pressable onPress={onShare} testID="share-button" style={styles.shareBtn}>
             <Ionicons name="share-outline" size={18} color={colors.brandSecondary} />
           </Pressable>
