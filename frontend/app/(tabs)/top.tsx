@@ -124,7 +124,10 @@ export default function TopScreen() {
             />
           }
           renderItem={({ item }) => (
-            <FeudCard feud={item} onPress={() => router.push(`/feud/${item.feud_id}`)} />
+            <FeudCard
+              feud={item}
+              onPress={() => router.push({ pathname: `/feud/${item.feud_id}`, params: { from: 'top' } })}
+            />
           )}
           testID="top-list"
         />

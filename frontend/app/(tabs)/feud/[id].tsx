@@ -15,10 +15,21 @@ import { useUIPrefs } from "@/src/ui/UIPrefs";
 import { useAuth } from "@/src/auth/AuthContext";
 
 export default function FeudDetail() {
-  const { id, comment: commentParam, side: sideParam } = useLocalSearchParams<{ id: string; comment?: string; side?: string }>();
+  const { id, comment: commentParam, side: sideParam, from } =
+    useLocalSearchParams<{ id: string; comment?: string; side?: string; from?: string }>();
   const router = useRouter();
   const { user } = useAuth();
   const isAnonymous = !!user && user.auth_provider === "anonymous";
+
+  // Explicit back destination: when we know which tab launched us we return
+  // there directly (via router.replace) so expo-router's tab-stack doesn't
+  // dump us on the wrong tab. Falls back to router.back() when unknown.
+  const goBack = () => {
+    if (from === "top") { router.replace("/top"); return; }
+    if (from === "notifications") { router.replace("/notifications"); return; }
+    if (router.canGoBack && router.canGoBack()) router.back();
+    else router.replace("/");
+  };
   const [feud, setFeud] = useState<Feud | null>(null);
   const [sponsor, setSponsor] = useState<Sponsor | null>(null);
   const [sideA, setSideA] = useState<Comment[]>([]);
@@ -186,7 +197,7 @@ export default function FeudDetail() {
     return (
       <SafeAreaView style={styles.safe} edges={["top"]} testID="feud-gone-screen">
         <View style={styles.topbar}>
-          <Pressable onPress={() => router.back()} style={styles.backBtn} testID="gone-back-button">
+          <Pressable onPress={goBack} style={styles.backBtn} testID="gone-back-button">
             <Ionicons name="chevron-back" size={22} color={colors.onSurfaceInverse} />
             <Text style={styles.backTxt}>INDIETRO</Text>
           </Pressable>
@@ -212,7 +223,7 @@ export default function FeudDetail() {
   return (
     <SafeAreaView style={styles.safe} edges={["top"]} testID="feud-detail-screen">
       <View style={styles.topbar}>
-        <Pressable onPress={() => router.back()} style={styles.backBtn} testID="back-button">
+        <Pressable onPress={goBack} style={styles.backBtn} testID="back-button">
           <Ionicons name="chevron-back" size={22} color={colors.onSurfaceInverse} />
           <Text style={styles.backTxt}>INDIETRO</Text>
         </Pressable>
