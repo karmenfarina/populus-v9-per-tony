@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -79,8 +79,35 @@ export default function ChatScreen() {
   const [reportText, setReportText] = useState("");
   const [pendingImage, setPendingImage] = useState<string | null>(null);
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
-  const [viewerImage, setViewerImage] = useState<string | null>(null);
+  // We store only the target message id (short string) instead of the raw
+  // base64 payload. This avoids RN's shallow-equality bailout / heavy string
+  // reconciliation glitches when swapping between multi-MB data URIs.
+  const [viewerMessageId, setViewerMessageId] = useState<string | null>(null);
+  // Special sentinel for the composer pending image, which is not persisted
+  // yet and therefore has no message id.
+  const [viewerPending, setViewerPending] = useState<string | null>(null);
   const listRef = useRef<FlatList>(null);
+
+  // Resolve the image to show in the viewer at render time.
+  const viewerSrc: string | null = useMemo(() => {
+    if (viewerPending) return viewerPending;
+    if (!viewerMessageId) return null;
+    const m = messages.find((x) => x.message_id === viewerMessageId);
+    return m?.image_data || null;
+  }, [messages, viewerMessageId, viewerPending]);
+
+  const openViewerForMessage = useCallback((messageId: string) => {
+    setViewerPending(null);
+    setViewerMessageId(messageId);
+  }, []);
+  const openViewerForPending = useCallback((base64: string) => {
+    setViewerMessageId(null);
+    setViewerPending(base64);
+  }, []);
+  const closeViewer = useCallback(() => {
+    setViewerMessageId(null);
+    setViewerPending(null);
+  }, []);
 
   const loadInitial = useCallback(async () => {
     if (!userId) return;
@@ -326,7 +353,7 @@ export default function ChatScreen() {
       const bubbleDeleted = !!item.deleted;
       const handleTap = () => {
         if (bubbleDeleted) return;
-        if (bubbleImage) setViewerImage(bubbleImage);
+        if (bubbleImage) openViewerForMessage(bubbleId);
       };
       const handleLongPress = () => {
         if (bubbleDeleted) return;
@@ -397,7 +424,7 @@ export default function ChatScreen() {
         </View>
       );
     },
-    [user, messages],
+    [user, messages, openViewerForMessage],
   );
 
   if (!user || user.is_anonymous) {
@@ -480,7 +507,7 @@ export default function ChatScreen() {
 
         {pendingImage && (
           <View style={styles.pendingRow}>
-            <Pressable onPress={() => setViewerImage(pendingImage)}>
+            <Pressable onPress={() => openViewerForPending(pendingImage)}>
               <Image source={{ uri: `data:image/jpeg;base64,${pendingImage}` }} style={styles.pendingImg} />
             </Pressable>
             <Pressable onPress={() => setPendingImage(null)} style={styles.pendingClose}>
@@ -646,21 +673,21 @@ export default function ChatScreen() {
 
       {/* Fullscreen image viewer */}
       <Modal
-        visible={!!viewerImage}
+        visible={!!viewerSrc}
         transparent
         animationType="fade"
-        onRequestClose={() => setViewerImage(null)}
+        onRequestClose={closeViewer}
       >
-        <Pressable style={styles.viewerBg} onPress={() => setViewerImage(null)}>
-          <Pressable onPress={() => setViewerImage(null)} style={styles.viewerCloseBtn} testID="viewer-close">
+        <Pressable style={styles.viewerBg} onPress={closeViewer}>
+          <Pressable onPress={closeViewer} style={styles.viewerCloseBtn} testID="viewer-close">
             <Ionicons name="close" size={28} color="#fff" />
           </Pressable>
-          {viewerImage && (
+          {viewerSrc && (
             <Image
-              // Force a fresh <Image> mount whenever the data changes so that RN /
-              // RN-Web never shows a stale cached bitmap for a previous message.
-              key={`viewer-${viewerImage.slice(0, 24)}${viewerImage.length}`}
-              source={{ uri: `data:image/jpeg;base64,${viewerImage}` }}
+              // Force a fresh <Image> mount whenever the underlying message
+              // changes so RN/RN-Web never shows a stale cached bitmap.
+              key={`viewer-${viewerMessageId || 'pending'}`}
+              source={{ uri: `data:image/jpeg;base64,${viewerSrc}` }}
               style={styles.viewerImg}
               resizeMode="contain"
             />
