@@ -420,12 +420,11 @@ export default function FeudDetail() {
               <Pressable
                 onPress={() => setStatsOpen(true)}
                 testID="stats-button"
-                style={styles.statsBtn}
-                hitSlop={6}
+                style={styles.statsIconBtn}
+                hitSlop={10}
+                accessibilityLabel="Vedi statistiche dettagliate"
               >
-                <Ionicons name="stats-chart" size={16} color={colors.brandPrimary} />
-                <Text style={styles.statsBtnTxt}>VEDI STATISTICHE DETTAGLIATE</Text>
-                <Ionicons name="chevron-forward" size={16} color={colors.brandPrimary} />
+                <Ionicons name="stats-chart" size={20} color={colors.brandPrimary} />
               </Pressable>
             )}
           </View>
@@ -722,14 +721,16 @@ const styles = StyleSheet.create({
   pollVotes: { color: colors.onBrandPrimary, fontSize: font.sizes.xs, opacity: 0.85, marginTop: 2 },
   checkPill: { position: "absolute", top: 6, right: 6, width: 22, height: 22, borderRadius: 11, backgroundColor: colors.onBrandPrimary, alignItems: "center", justifyContent: "center" },
   pollHint: { color: colors.brandSecondary, fontSize: font.sizes.sm, textAlign: "center", marginTop: spacing.md, letterSpacing: 1 },
-  statsBtn: {
-    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.xs,
+  statsIconBtn: {
+    // Discreet round icon button placed alongside the poll section. Big
+    // enough hit target (36×36 + hitSlop) without visual weight.
+    alignSelf: "center",
     marginTop: spacing.md,
+    width: 40, height: 40, borderRadius: 20,
     borderWidth: 2, borderColor: colors.brandPrimary,
     backgroundColor: colors.surface,
-    paddingVertical: spacing.sm, paddingHorizontal: spacing.md,
+    alignItems: "center", justifyContent: "center",
   },
-  statsBtnTxt: { color: colors.brandPrimary, letterSpacing: 1.5, fontSize: font.sizes.sm, fontWeight: "500" },
   err: { color: colors.error, padding: spacing.md, borderWidth: 2, borderColor: colors.error, margin: spacing.lg },
   commentInputWrap: { padding: spacing.md, borderBottomWidth: 2, borderColor: colors.border, backgroundColor: colors.surface, gap: spacing.sm },
   commentInput: { borderWidth: 2, borderColor: colors.border, padding: spacing.sm, minHeight: 60, fontSize: font.sizes.base, color: colors.onSurface, backgroundColor: colors.surfaceSecondary },
