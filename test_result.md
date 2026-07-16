@@ -296,11 +296,29 @@ agent_communication:
   - agent: "main"
     message: |
       Applied fixes for iteration 28:
-      1) Backend `_public_user` now always includes `is_anonymous` boolean derived from `auth_provider`.
-         Also added a frontend `normalizeUser` helper in AuthContext that back-fills the flag even
-         if a legacy response lacks it. This keeps the chat/notifications/user-profile guards working.
-      2) Chat sender optimistic append now de-duplicates by `message_id` on the HTTP response: if the
-         WS `message.sent` echo already inserted the real message, the temp is dropped without adding
-         a second bubble. Same for incoming updates via `subscribe`.
-      3) Wrapped ListEmptyComponent Fragment in a View to silence the React `onLayout` warning.
-      Please re-run just the two fixes to confirm.
+      1) Backend `_public_user` now always includes `is_anonymous` boolean.
+      2) Frontend `normalizeUser` in AuthContext back-fills the flag.
+      3) Chat send now dedupes by message_id on HTTP response.
+      4) ListEmptyComponent wrapped in View to silence Fragment warning.
+  - agent: "main"
+    message: |
+      New feature: PhotoCropper for profile photo uploads. Instagram-style square cropper
+      with pan gesture (PanResponder) + zoom controls (1x-4x). Uses expo-image-manipulator
+      to crop the actual pixels. Native ImagePicker editing is disabled — our cropper handles
+      the crop UI so it works consistently on both mobile and web preview.
+  - agent: "testing"
+    message: |
+      Iteration 30: PhotoCropper static review passed (testIDs, Italian strings, zoom/pan
+      clamping, container→image pixel mapping all verified). Bio regression passing. Reported
+      two deprecation warnings: `pointerEvents` as prop should be in style, and
+      `MediaTypeOptions.Images` deprecated in favor of `['images']`.
+      NOTE: Interactive cropper flow could not be tested on web preview because
+      expo-image-picker doesn't expose a file input on RN-Web. Requires Expo Go / device test.
+  - agent: "main"
+    message: |
+      Fixed both deprecation warnings from iteration 30:
+      1) Moved `pointerEvents="none"` from prop to style for 5 View overlays in PhotoCropper.tsx.
+      2) Replaced `ImagePicker.MediaTypeOptions.Images` with `["images"]` in profile.tsx and
+         messages/[userId].tsx.
+      Cropper feature is code-complete. User must validate the interactive crop flow on Expo Go
+      or a real device (web preview cannot deliver a file to expo-image-picker).

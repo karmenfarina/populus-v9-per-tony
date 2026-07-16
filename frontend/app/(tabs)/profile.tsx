@@ -150,7 +150,7 @@ export default function Profile() {
     // the user can always choose which portion of the picture is kept, even on
     // the web preview where the native crop UI is inconsistent.
     const opts: ImagePicker.ImagePickerOptions = {
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ["images"],
       quality: 1,
       base64: false,
       allowsEditing: false,

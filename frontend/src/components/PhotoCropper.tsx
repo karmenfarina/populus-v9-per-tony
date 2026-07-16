@@ -245,12 +245,12 @@ export default function PhotoCropper({
               <ActivityIndicator color={colors.brandPrimary} />
             )}
             {/* Circular mask overlay (visualise how the final avatar will look) */}
-            <View pointerEvents="none" style={[styles.circleGuide, { width: WINDOW, height: WINDOW }]} />
+            <View style={[styles.circleGuide, { width: WINDOW, height: WINDOW, pointerEvents: "none" }]} />
             {/* Grid rule-of-thirds */}
-            <View pointerEvents="none" style={[styles.gridLine, styles.gridV, { left: WINDOW / 3 }]} />
-            <View pointerEvents="none" style={[styles.gridLine, styles.gridV, { left: (2 * WINDOW) / 3 }]} />
-            <View pointerEvents="none" style={[styles.gridLine, styles.gridH, { top: WINDOW / 3 }]} />
-            <View pointerEvents="none" style={[styles.gridLine, styles.gridH, { top: (2 * WINDOW) / 3 }]} />
+            <View style={[styles.gridLine, styles.gridV, { left: WINDOW / 3, pointerEvents: "none" }]} />
+            <View style={[styles.gridLine, styles.gridV, { left: (2 * WINDOW) / 3, pointerEvents: "none" }]} />
+            <View style={[styles.gridLine, styles.gridH, { top: WINDOW / 3, pointerEvents: "none" }]} />
+            <View style={[styles.gridLine, styles.gridH, { top: (2 * WINDOW) / 3, pointerEvents: "none" }]} />
           </View>
 
           <View style={styles.zoomRow}>
