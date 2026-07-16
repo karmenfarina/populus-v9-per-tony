@@ -69,6 +69,15 @@ export default function UserPublicScreen() {
     loadHistory(id, filter);
   }, [id, filter, loadHistory, profile?.is_anonymous, historyExpanded]);
 
+  // Auto-refresh public user history every 30s while section is expanded, so
+  // the per-vote MAGGIORANZA/MINORANZA labels reflect real-time majority
+  // flips even when the observer stays on the page.
+  useEffect(() => {
+    if (!id || profile?.is_anonymous || !historyExpanded) return;
+    const t = setInterval(() => { loadHistory(id, filter); }, 30000);
+    return () => clearInterval(t);
+  }, [id, filter, loadHistory, profile?.is_anonymous, historyExpanded]);
+
   if (loading) {
     return (
       <SafeAreaView style={styles.safe}>

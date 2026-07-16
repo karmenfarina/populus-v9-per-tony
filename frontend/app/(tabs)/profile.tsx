@@ -69,6 +69,17 @@ export default function Profile() {
     if (historyExpanded) loadHistory(filter);
   }, [historyExpanded, filter, loadHistory]);
 
+  // Auto-refresh the vote history every 30s while the section is expanded.
+  // The per-vote `aligned` badge is recomputed by the backend on every call
+  // against the CURRENT feud vote counts, so this keeps the "MAGGIORANZA /
+  // MINORANZA" labels in sync with real-time majority flips caused by other
+  // users voting after us. Cleanup on collapse/unmount avoids leaks.
+  useEffect(() => {
+    if (!historyExpanded) return;
+    const t = setInterval(() => { loadHistory(filter); }, 30000);
+    return () => clearInterval(t);
+  }, [historyExpanded, filter, loadHistory]);
+
   useEffect(() => {
     (async () => {
       try {
@@ -427,17 +438,33 @@ export default function Profile() {
         )}
 
         <View style={styles.historySection} testID="history-section">
-          <Pressable
-            onPress={() => setHistoryExpanded((v) => !v)}
-            testID="history-section-toggle"
-            style={styles.historyHeadRow}
-          >
-            <Text style={styles.historyTitle}>STORICO VOTI</Text>
-            <View style={styles.sectionHeadRight}>
-              <Text style={styles.sectionCountBadge}>{user.total_votes ?? 0}</Text>
-              <Ionicons name={historyExpanded ? "chevron-up" : "chevron-down"} size={20} color={colors.onSurface} />
-            </View>
-          </Pressable>
+          <View style={styles.historyHeadRow}>
+            <Pressable
+              onPress={() => setHistoryExpanded((v) => !v)}
+              testID="history-section-toggle"
+              style={{ flex: 1, flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}
+            >
+              <Text style={styles.historyTitle}>STORICO VOTI</Text>
+              <View style={styles.sectionHeadRight}>
+                <Text style={styles.sectionCountBadge}>{user.total_votes ?? 0}</Text>
+                <Ionicons name={historyExpanded ? "chevron-up" : "chevron-down"} size={20} color={colors.onSurface} />
+              </View>
+            </Pressable>
+            {historyExpanded && (
+              <Pressable
+                onPress={() => loadHistory(filter)}
+                testID="history-refresh"
+                hitSlop={8}
+                style={{ paddingHorizontal: spacing.sm, paddingVertical: spacing.xs }}
+              >
+                <Ionicons
+                  name="refresh"
+                  size={20}
+                  color={loadingH ? colors.muted : colors.brandPrimary}
+                />
+              </Pressable>
+            )}
+          </View>
           {historyExpanded && (
             <View testID="history-body">
               <View style={styles.filterRow}>
