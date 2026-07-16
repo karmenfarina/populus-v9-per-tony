@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   View, Text, StyleSheet, ScrollView, Pressable, TextInput, ActivityIndicator,
-  KeyboardAvoidingView, Platform, ImageBackground, Linking, Share,
+  KeyboardAvoidingView, Platform, ImageBackground, Linking, Share, Alert,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import * as Clipboard from "expo-clipboard";
 import { api, ApiError, Comment, Feud, Reply, Sponsor } from "@/src/api";
 import { colors, spacing, font, sideColor, onSideColor } from "@/src/theme";
 import FeudMediaBlock from "@/src/components/FeudMediaBlock";
@@ -188,34 +189,72 @@ export default function FeudDetail() {
 
   const onShare = async () => {
     if (!feud) return;
-    const base = process.env.EXPO_PUBLIC_BACKEND_URL || "";
+    // Build an ABSOLUTE URL. `navigator.share` in browsers only accepts
+    // absolute URLs; a relative "/api/share/..." makes it silently reject
+    // and bypass the whole share flow (this is the anonymous-preview bug).
+    let base = process.env.EXPO_PUBLIC_BACKEND_URL || "";
+    if (!base && Platform.OS === "web" && typeof window !== "undefined") {
+      base = window.location.origin;
+    }
+    if (!/^https?:\/\//i.test(base)) {
+      // Extra safety: if base is still relative or bogus, use current origin.
+      if (Platform.OS === "web" && typeof window !== "undefined") {
+        base = window.location.origin;
+      }
+    }
     const url = `${base}/api/share/${feud.feud_id}/html`;
     const message = `${feud.title}\n\nCon chi ti schieri? ${feud.party_a} vs ${feud.party_b}\n${url}`;
-    // React Native's `Share` API is a no-op on the web preview. Detect the
-    // web platform and route through the Web Share API when available, else
-    // fall back to clipboard + inline confirmation so the user always gets
-    // *some* feedback.
-    if (Platform.OS === "web") {
+
+    // Helper: last-resort fallbacks that always give the user *something*
+    // (copy link, or prompt to copy manually). Used whenever the primary
+    // share API is unavailable or errors out.
+    const copyLinkFallback = async () => {
+      if (Platform.OS === "web" && typeof window !== "undefined") {
+        try {
+          if (navigator?.clipboard?.writeText) {
+            await navigator.clipboard.writeText(url);
+            try { window.alert("Link copiato negli appunti"); } catch { /* ignore */ }
+            return true;
+          }
+          window.prompt("Copia il link della faida:", url);
+          return true;
+        } catch { /* ignore */ }
+      }
       try {
-        const nav: any = typeof navigator !== "undefined" ? navigator : null;
-        if (nav?.share) {
+        if (Clipboard && typeof Clipboard.setStringAsync === "function") {
+          await Clipboard.setStringAsync(url);
+          Alert.alert("Link copiato", "Il link della faida è stato copiato negli appunti.");
+          return true;
+        }
+      } catch { /* ignore */ }
+      return false;
+    };
+
+    if (Platform.OS === "web") {
+      // Try Web Share API first, then clipboard, then window.prompt.
+      const nav: any = typeof navigator !== "undefined" ? navigator : null;
+      if (nav?.share) {
+        try {
           await nav.share({ title: feud.title, text: message, url });
           return;
+        } catch (e: any) {
+          // User cancelled → do nothing. Any other error → clipboard fallback.
+          if (e?.name === "AbortError") return;
         }
-        if (nav?.clipboard?.writeText) {
-          await nav.clipboard.writeText(url);
-          try { window.alert("Link copiato negli appunti"); } catch { /* ignore */ }
-          return;
-        }
-        try { window.prompt("Copia il link della faida:", url); } catch { /* ignore */ }
-      } catch {
-        // AbortError etc. → user cancelled, do nothing
       }
+      await copyLinkFallback();
       return;
     }
+
+    // Native (iOS / Android / Expo Go on phone): prefer the OS share sheet,
+    // fall back to clipboard if it errors (e.g. some Android Expo Go builds
+    // report `Share.share` as a no-op due to intent restrictions).
     try {
-      await Share.share({ title: feud.title, message });
-    } catch { /* silent */ }
+      const res = await Share.share({ title: feud.title, message, url });
+      if (res.action === Share.dismissedAction) return; // user closed the sheet
+      return;
+    } catch { /* fall through to clipboard */ }
+    await copyLinkFallback();
   };
 
   if (loading) {
