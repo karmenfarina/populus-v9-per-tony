@@ -73,6 +73,7 @@ export default function HomeFeed() {
         const initial = favs[0] && c.categories.some((x: any) => x.id === favs[0]) ? favs[0] : "all";
         setSelected(initial);
         await load(initial);
+        lastLoadAtRef.current = Date.now();
       } finally { setLoading(false); }
     })();
   }, [load, user?.favorite_categories]);
@@ -108,6 +109,7 @@ export default function HomeFeed() {
   // list and expose a live "pullProgress" (0..1) to show a growing spinner.
   const isWeb = Platform.OS === 'web';
   const scrollAtTopRef = useRef(true);
+  const lastLoadAtRef = useRef<number>(0);
   const [pullProgress, setPullProgress] = useState(0);
   const pullProgressRef = useRef(0);
   const PULL_THRESHOLD = 40; // pixels — lowered so a small flick is enough
@@ -148,6 +150,12 @@ export default function HomeFeed() {
         firstFocusRef.current = false;
         return;
       }
+      // Throttle: if we already refreshed in the last 30 seconds, skip. This
+      // avoids reshuffling the feed when the user just returned from a feud
+      // detail (which would otherwise reset scroll to top on Android).
+      if (Date.now() - lastLoadAtRef.current < 30_000) {
+        return;
+      }
       let cancelled = false;
       (async () => {
         try {
@@ -157,6 +165,7 @@ export default function HomeFeed() {
           } else {
             await load(selected);
           }
+          lastLoadAtRef.current = Date.now();
         } catch { /* silent */ }
       })();
       return () => { cancelled = true; };
@@ -267,6 +276,11 @@ export default function HomeFeed() {
             scrollAtTopRef.current = e.nativeEvent.contentOffset.y <= 4;
           }}
           scrollEventThrottle={100}
+          // Preserve scroll offset when the list refreshes on focus (e.g.
+          // returning from a feud detail). Without this the FlatList jumps
+          // back to the top, which is jarring after quickly scrolling through
+          // multiple posts.
+          maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
           ListEmptyComponent={
             <View style={styles.center} testID="home-empty">
               <Text style={styles.empty}>NESSUNA FAIDA IN QUESTA CATEGORIA.</Text>

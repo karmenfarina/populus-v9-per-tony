@@ -127,6 +127,11 @@ export default function NotificationsScreen() {
                     if (item.side) q.set("side", item.side);
                     const qs = q.toString();
                     router.push(`/feud/${item.feud_id}${qs ? `?${qs}` : ""}`);
+                  } else if (item.type === "badge") {
+                    // Badge notifications (new/changed) → open the user's own
+                    // profile so they can see the current badge and the full
+                    // majority/minority stats behind it.
+                    router.push("/profile");
                   }
                 }}
                 style={[styles.row, !item.read && styles.rowUnread]}
