@@ -322,6 +322,123 @@ def _public_user(u: dict) -> dict:
     }
 
 
+import secrets as _secrets
+import hashlib as _hashlib
+
+FRONTEND_BASE_URL = os.environ.get('EXPO_PUBLIC_BACKEND_URL') or os.environ.get('FRONTEND_BASE_URL') or ''
+
+async def _send_verification_email(user_id: str, email: str) -> None:
+    """Generate a fresh verification token and email the link to `email`.
+
+    Idempotent per user: deletes any previous token before inserting a new one,
+    so only ONE active verification link exists at a time (prevents the classic
+    'stale token wins the query' bug). The token is opaque + URL-safe + stored
+    hashed; only the raw token appears in the email link.
+    """
+    raw = _secrets.token_urlsafe(32)
+    token_hash = _hashlib.sha256(raw.encode('utf-8')).hexdigest()
+    expires_at = now_utc() + timedelta(hours=24)
+    await db.verification_tokens.delete_many({'user_id': user_id})
+    await db.verification_tokens.insert_one({
+        'user_id': user_id,
+        'token_hash': token_hash,
+        'created_at': now_utc(),
+        'expires_at': expires_at,
+    })
+    base = FRONTEND_BASE_URL.rstrip('/')
+    link = f"{base}/verify-email?token={raw}" if base else f"/verify-email?token={raw}"
+    if not RESEND_API_KEY:
+        logger.warning('RESEND_API_KEY missing — verification email not sent')
+        return
+    html = (
+        f"<div style='font-family:system-ui,sans-serif;max-width:520px;margin:auto;padding:24px'>"
+        f"<h2>Benvenuto su Populus</h2>"
+        f"<p>Clicca sul pulsante qui sotto per confermare la tua email e attivare l'account.</p>"
+        f"<p><a href='{link}' style='background:#e11d48;color:#fff;padding:12px 20px;text-decoration:none;border-radius:6px;display:inline-block;letter-spacing:1px;font-weight:600'>VERIFICA EMAIL</a></p>"
+        f"<p style='color:#666;font-size:12px'>Se il pulsante non funziona, copia questo link nel browser:<br><span style='word-break:break-all'>{link}</span></p>"
+        f"<p style='color:#999;font-size:11px'>Il link scade tra 24 ore. Se non hai richiesto tu la registrazione, ignora questa email.</p>"
+        f"</div>"
+    )
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as hx:
+            r = await hx.post(
+                'https://api.resend.com/emails',
+                headers={'Authorization': f'Bearer {RESEND_API_KEY}', 'Content-Type': 'application/json'},
+                json={
+                    'from': 'Populus <[email protected]>',
+                    'to': [email],
+                    'subject': 'Verifica la tua email — Populus',
+                    'html': html,
+                },
+            )
+            if r.status_code >= 300:
+                logger.warning(f"Resend verification email failed [{r.status_code}]: {r.text[:200]}")
+    except Exception as e:
+        logger.warning(f"Resend verification email exception: {e}")
+
+
+class VerifyEmailBody(BaseModel):
+    token: str
+
+class ResendVerificationBody(BaseModel):
+    email: str
+
+# Simple in-memory rate limiter for resend-verification (per email + IP).
+_RESEND_RATE: dict = {}  # key -> [timestamps]
+def _rate_limited(key: str, max_hits: int = 3, window_sec: int = 3600) -> bool:
+    now = time.time()
+    hits = [t for t in _RESEND_RATE.get(key, []) if now - t < window_sec]
+    if len(hits) >= max_hits:
+        _RESEND_RATE[key] = hits
+        return True
+    hits.append(now)
+    _RESEND_RATE[key] = hits
+    return False
+
+
+@api_router.post('/auth/verify-email')
+async def verify_email(body: VerifyEmailBody):
+    """Consume a verification token. Idempotent-ish: token is single-use, once
+    the user is verified subsequent calls return 200 (already verified).
+    """
+    if not body.token:
+        raise HTTPException(status_code=400, detail='Token mancante')
+    token_hash = _hashlib.sha256(body.token.encode('utf-8')).hexdigest()
+    doc = await db.verification_tokens.find_one({'token_hash': token_hash, 'expires_at': {'$gt': now_utc()}})
+    if not doc:
+        raise HTTPException(status_code=400, detail='Link non valido o scaduto. Richiedi un nuovo invio.')
+    user_id = doc['user_id']
+    user = await db.users.find_one({'user_id': user_id}, {'_id': 0})
+    if not user:
+        raise HTTPException(status_code=404, detail='Utente non trovato')
+    await db.users.update_one({'user_id': user_id}, {'$set': {'email_verified': True}})
+    await db.verification_tokens.delete_many({'user_id': user_id})
+    fresh = await db.users.find_one({'user_id': user_id}, {'_id': 0})
+    return {'ok': True, 'token': make_jwt(user_id), 'user': _public_user(fresh)}
+
+
+@api_router.post('/auth/resend-verification')
+async def resend_verification(body: ResendVerificationBody, request: Request):
+    email = (body.email or '').strip().lower()
+    if not email:
+        raise HTTPException(status_code=400, detail='Email mancante')
+    client_ip = (request.client.host if request.client else 'unknown') or 'unknown'
+    rl_key = f"{email}|{client_ip}"
+    if _rate_limited(rl_key, max_hits=3, window_sec=3600):
+        raise HTTPException(status_code=429, detail='Troppi tentativi. Riprova tra un\'ora.')
+    user = await db.users.find_one({'email': email}, {'_id': 0, 'user_id': 1, 'email_verified': 1, 'auth_provider': 1})
+    # Return generic success to avoid email enumeration if user doesn't exist / already verified
+    if not user or user.get('auth_provider') != 'email':
+        return {'ok': True, 'message': 'Se questo indirizzo corrisponde a un account non verificato, riceverai una nuova email.'}
+    if user.get('email_verified'):
+        return {'ok': True, 'message': 'Email già verificata. Puoi accedere.'}
+    try:
+        await _send_verification_email(user['user_id'], email)
+    except Exception as e:
+        logger.warning(f"resend verification email failed: {e}")
+    return {'ok': True, 'message': 'Email di verifica inviata. Controlla la casella.'}
+
+
 @api_router.post('/auth/signup')
 async def signup(body: SignupBody):
     existing = await db.users.find_one({'email': body.email.lower()})
@@ -336,9 +453,22 @@ async def signup(body: SignupBody):
         'auth_provider': 'email',
         'created_at': now_utc(),
         'majority_votes': 0, 'minority_votes': 0, 'total_votes': 0,
+        # Email verification is REQUIRED before login. See _send_verification_email.
+        'email_verified': False,
     }
     await db.users.insert_one(user)
-    return {'token': make_jwt(user_id), 'user': _public_user(user)}
+    # Kick off verification email (background, non-blocking). Failures are
+    # logged but don't fail the signup — user can resend later.
+    try:
+        await _send_verification_email(user_id, user['email'])
+    except Exception as e:
+        logger.warning(f"initial verification email failed for {user_id}: {e}")
+    # Do NOT return a session token: user must verify email first.
+    return {
+        'requires_verification': True,
+        'email': user['email'],
+        'message': 'Ti abbiamo inviato una email di conferma. Clicca sul link per attivare il tuo account.',
+    }
 
 
 @api_router.post('/auth/login')
@@ -348,6 +478,17 @@ async def login(body: LoginBody):
         raise HTTPException(status_code=401, detail='Credenziali non valide')
     if not verify_password(body.password, user.get('password_hash', '')):
         raise HTTPException(status_code=401, detail='Credenziali non valide')
+    # Block login for unverified email accounts — 403 with structured detail
+    # so the frontend can show the "resend verification" CTA.
+    if not user.get('email_verified', False):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                'email_not_verified': True,
+                'message': 'Devi verificare la tua email prima di accedere. Controlla la tua casella.',
+                'email': user['email'],
+            },
+        )
     return {'token': make_jwt(user['user_id']), 'user': _public_user(user)}
 
 
@@ -3076,6 +3217,18 @@ async def on_startup():
     await db.user_photos.create_index([('user_id', 1), ('position', 1)])
     await db.favorites.create_index([('user_id', 1), ('feud_id', 1)], unique=True)
     await db.favorites.create_index([('user_id', 1), ('created_at', -1)])
+    # TTL index: expired verification tokens are removed automatically.
+    await db.verification_tokens.create_index([('token_hash', 1)], unique=True)
+    await db.verification_tokens.create_index('expires_at', expireAfterSeconds=0)
+    # Grandfather: existing email users without the new flag are marked as
+    # verified so the new login-block doesn't lock them out.
+    try:
+        await db.users.update_many(
+            {'auth_provider': 'email', 'email_verified': {'$exists': False}},
+            {'$set': {'email_verified': True}},
+        )
+    except Exception as e:
+        logger.warning(f"grandfather email_verified migration failed: {e}")
     # Full-text index for search
     try:
         await db.feuds.create_index([('title', 'text'), ('summary', 'text'), ('party_a', 'text'), ('party_b', 'text')])

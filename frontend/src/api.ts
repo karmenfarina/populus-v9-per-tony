@@ -177,6 +177,8 @@ export const api = {
   addFavorite: (id: string) => request(`/feuds/${id}/favorite`, { method: 'POST' }),
   removeFavorite: (id: string) => request(`/feuds/${id}/favorite`, { method: 'DELETE' }),
   feudStats: (id: string) => request(`/feuds/${id}/stats`),
+  verifyEmail: (token: string) => request('/auth/verify-email', { method: 'POST', body: JSON.stringify({ token }) }),
+  resendVerification: (email: string) => request('/auth/resend-verification', { method: 'POST', body: JSON.stringify({ email }) }),
 };
 
 export type User = {

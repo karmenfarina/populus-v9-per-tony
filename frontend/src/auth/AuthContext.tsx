@@ -108,7 +108,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signup = async (email: string, password: string, nickname: string) => {
-    const res = await api.signup(email, password, nickname);
+    const res: any = await api.signup(email, password, nickname);
+    // New flow: signup does NOT return a session token. The backend just
+    // sends the verification email; the caller must handle the
+    // `requires_verification` response and show a "check your inbox" state.
+    if (res?.requires_verification) {
+      const err: any = new Error(res.message || 'Verifica la tua email per completare la registrazione.');
+      err.requires_verification = true;
+      err.email = res.email || email;
+      throw err;
+    }
     await applyAuthResult(res);
   };
   const login = async (email: string, password: string) => {

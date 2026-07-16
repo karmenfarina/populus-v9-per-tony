@@ -5,7 +5,9 @@ import {
 } from "react-native";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "@/src/auth/AuthContext";
+import { api } from "@/src/api";
 import { colors, spacing, font } from "@/src/theme";
 
 type Mode = "email" | "google" | "anon";
@@ -20,6 +22,8 @@ export default function AuthScreen() {
   const [nickname, setNickname] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pendingVerify, setPendingVerify] = useState<string | null>(null); // email awaiting verification
+  const [resending, setResending] = useState(false);
 
   const handle = async () => {
     setError(null);
@@ -56,10 +60,38 @@ export default function AuthScreen() {
       // but here we push explicitly for immediacy.
       router.replace("/");
     } catch (e: any) {
+      // Signup flow now stops on `requires_verification`: show a "check your
+      // inbox" panel with a resend CTA, no session token was issued.
+      if (e?.requires_verification) {
+        setPendingVerify(e.email || email.trim());
+        setError(null);
+        return;
+      }
+      // Backend blocks login on unverified email accounts with 403 +
+      // structured detail `{email_not_verified: true, email}`. Surface the
+      // same inbox panel so the user can resend.
+      const d = e?.detail;
+      if (d && typeof d === 'object' && d.email_not_verified) {
+        setPendingVerify(d.email || email.trim());
+        setError(null);
+        return;
+      }
       // The API layer already returns human-friendly Italian messages via
       // ApiError.detail. Any other thrown value falls back to a generic label.
-      setError(e?.detail || e?.message || "Errore imprevisto. Riprova.");
+      setError(typeof d === 'string' ? d : (e?.message || "Errore imprevisto. Riprova."));
     } finally { setLoading(false); }
+  };
+
+  const doResend = async () => {
+    if (!pendingVerify) return;
+    setResending(true);
+    setError(null);
+    try {
+      const res: any = await api.resendVerification(pendingVerify);
+      setError(res?.message || "Email di verifica inviata. Controlla la casella.");
+    } catch (e: any) {
+      setError(e?.detail || e?.message || "Errore invio email.");
+    } finally { setResending(false); }
   };
 
   return (
@@ -85,6 +117,7 @@ export default function AuthScreen() {
                 style={[styles.tab, mode === m && styles.tabActive]}
                 onPress={async () => {
                   setError(null);
+                  setPendingVerify(null);
                   // Google is a one-tap flow: fire the redirect immediately
                   // instead of switching the form layout (avoids a UI flash
                   // before the browser leaves the app).
@@ -105,7 +138,35 @@ export default function AuthScreen() {
             ))}
           </View>
 
-          {mode === "email" && (
+          {pendingVerify ? (
+            <View style={styles.form} testID="verify-panel">
+              <View style={styles.verifyBox}>
+                <Ionicons name="mail-open-outline" size={54} color={colors.brandPrimary} style={{ alignSelf: "center", marginBottom: spacing.sm }} />
+                <Text style={styles.verifyTitle}>CONTROLLA LA TUA EMAIL</Text>
+                <Text style={styles.verifyBody}>
+                  Ti abbiamo inviato un link di verifica a{"\n"}
+                  <Text style={{ fontWeight: "700" }}>{pendingVerify}</Text>{"\n\n"}
+                  Clicca sul link per attivare l&apos;account. Se non lo trovi, controlla la cartella spam.
+                </Text>
+                {error && <Text style={styles.error}>{error}</Text>}
+                <Pressable
+                  onPress={doResend}
+                  disabled={resending}
+                  style={[styles.cta, resending && { opacity: 0.6 }]}
+                  testID="verify-resend"
+                >
+                  <Text style={styles.ctaTxt}>{resending ? "INVIO..." : "REINVIA EMAIL"}</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => { setPendingVerify(null); setError(null); }}
+                  style={styles.verifyBack}
+                  testID="verify-back"
+                >
+                  <Text style={styles.verifyBackTxt}>Torna al login</Text>
+                </Pressable>
+              </View>
+            </View>
+          ) : mode === "email" && (
             <View style={styles.form}>
               <View style={styles.switchRow}>
                 <Pressable testID="auth-mode-login" onPress={() => setIsSignup(false)} style={[styles.switchBtn, !isSignup && styles.switchActive]}>
@@ -216,4 +277,28 @@ const styles = StyleSheet.create({
   error: { color: colors.error, fontSize: font.sizes.base, marginBottom: spacing.md, borderWidth: 2, borderColor: colors.error, padding: spacing.sm },
   cta: { backgroundColor: colors.brandPrimary, borderWidth: 2, borderColor: colors.border, paddingVertical: spacing.lg, alignItems: "center" },
   ctaText: { color: colors.onBrandPrimary, fontSize: font.sizes.xl, letterSpacing: 1, fontWeight: "500" },
+  verifyBox: {
+    padding: spacing.lg,
+    borderWidth: 2,
+    borderColor: colors.brandPrimary,
+    backgroundColor: colors.surfaceSecondary,
+    gap: spacing.sm,
+  },
+  verifyTitle: {
+    color: colors.onSurface,
+    fontSize: font.sizes.lg,
+    letterSpacing: 2,
+    fontWeight: "500",
+    textAlign: "center",
+    marginBottom: spacing.xs,
+  },
+  verifyBody: {
+    color: colors.onSurface,
+    fontSize: font.sizes.base,
+    textAlign: "center",
+    lineHeight: 22,
+  },
+  ctaTxt: { color: colors.onBrandPrimary, letterSpacing: 2, fontWeight: "500", textAlign: "center" },
+  verifyBack: { marginTop: spacing.sm, alignItems: "center" },
+  verifyBackTxt: { color: colors.muted, fontSize: font.sizes.sm, textDecorationLine: "underline" },
 });
