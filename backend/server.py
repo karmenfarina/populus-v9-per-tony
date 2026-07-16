@@ -705,23 +705,26 @@ async def upload_photo(body: PhotoUploadBody, user: dict = Depends(get_current_u
     data = _strip_data_url(body.data.strip())
     if len(data) > 3_500_000:  # ~2.5MB decoded upper bound
         raise HTTPException(status_code=400, detail='Foto troppo grande (max ~2.5MB)')
-    # Optional uncropped source — kept so the user can re-open the cropper
-    # later and choose a different portion (including zooming back out). If
-    # the client did not send one, we fall back to the cropped payload so
-    # the field is always populated (the re-crop UX just becomes a
-    # cosmetic reposition rather than a true zoom-out).
-    original = _strip_data_url((body.original_data or body.data).strip())
-    if len(original) > 3_500_000:
-        raise HTTPException(status_code=400, detail='Originale foto troppo grande (max ~2.5MB)')
     photo_id = new_id('ph')
-    doc = {
+    doc: dict = {
         'photo_id': photo_id,
         'user_id': user['user_id'],
         'data': data,
-        'original_data': original,
         'position': current_count,
         'created_at': now_utc(),
     }
+    # Optional uncropped source — kept ONLY when the client actually sends
+    # a distinct source. This preserves accurate semantics for the
+    # `has_original` flag consumed by the client: if the DB has no distinct
+    # original, we can't provide a true zoom-out on re-crop (the source is
+    # already the cropped rectangle). The `GET /.../original` endpoint
+    # transparently falls back to `data` for these rows so the flow still
+    # works — it just doesn't reveal information that was never captured.
+    if body.original_data:
+        original = _strip_data_url(body.original_data.strip())
+        if len(original) > 3_500_000:
+            raise HTTPException(status_code=400, detail='Originale foto troppo grande (max ~2.5MB)')
+        doc['original_data'] = original
     await db.user_photos.insert_one(doc)
     updates: dict = {'photos_count': current_count + 1}
     if current_count == 0:

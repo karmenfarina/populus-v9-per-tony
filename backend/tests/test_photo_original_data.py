@@ -169,9 +169,11 @@ class TestUploadWithoutOriginal:
         created_photos.append(pid)
 
         doc = mongo.user_photos.find_one({"photo_id": pid})
-        # Fallback: original_data equals data when client did not send one
+        # No client-provided original → field NOT stored in DB (accurate
+        # `has_original` semantics). GET /original falls back to `data` at
+        # read time, so the client still gets a usable payload.
         assert doc["data"] == cropped
-        assert doc["original_data"] == cropped
+        assert "original_data" not in doc or doc.get("original_data") is None
 
     def test_get_original_reports_has_original_false_when_fallback(
         self, user_a_token, created_photos
@@ -194,15 +196,13 @@ class TestUploadWithoutOriginal:
         )
         assert r2.status_code == 200, r2.text
         body = r2.json()
-        # Endpoint returns the cropped payload as original for fallback rows
+        # Fallback rows have no `original_data` field in the DB. The endpoint
+        # falls back to `data` at read time so the client still gets a
+        # usable payload, but `has_original` correctly reports False so the
+        # UI can indicate a true zoom-out is not possible for this row.
         assert body["photo_id"] == pid
         assert body["original_data"] == cropped
-        # Note: at the DB level fallback rows DO have original_data == data,
-        # so `has_original` is TRUE. The spec (see server.py comments) counts
-        # this as "distinct original" only when the DB explicitly has the
-        # field. Both interpretations are consistent so long as the payload
-        # is usable — assert the currently-implemented behaviour.
-        assert body["has_original"] is True  # DB field exists (== data)
+        assert body["has_original"] is False
 
 
 # --------------------------- list endpoint hygiene ---------------------------
