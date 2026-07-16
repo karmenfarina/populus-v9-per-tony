@@ -62,15 +62,21 @@ export default function PhotoCropper({
   // Live animated values (drive the image transform + slider every frame).
   const txAnim = useRef(new Animated.Value(0)).current;
   const tyAnim = useRef(new Animated.Value(0)).current;
-  const zoomAnim = useRef(new Animated.Value(MIN_ZOOM)).current;
   const sliderProgressAnim = useRef(new Animated.Value(0)).current;
 
+  // Display scale is a React state (updates only on zoom, at most a few
+  // times per frame). Using state guarantees the JSX transform passes a new
+  // scalar to React Native's transform prop, which reliably diffs and
+  // updates the native view — Animated.Value.setValue is unreliable here
+  // because the RN-Web transform layer does not always subscribe to changes.
+  const [scale, setScale] = useState<number>(1);
+
   // Refs mirroring the animated values (source of truth for gesture math &
-  // crop calculation). Kept in sync via Animated.Value listeners so we can
-  // read them synchronously without waiting for a state update.
+  // crop calculation).
   const tx = useRef(0);
   const ty = useRef(0);
   const zoom = useRef(MIN_ZOOM);
+  const displayScale = useRef(1);
   const sliderProgress = useRef(0);
   const gestureStart = useRef({ tx: 0, ty: 0 });
   const [sliderWidth, setSliderWidth] = useState(0);
@@ -80,15 +86,13 @@ export default function PhotoCropper({
   useEffect(() => {
     const sx = txAnim.addListener(({ value }) => { tx.current = value; });
     const sy = tyAnim.addListener(({ value }) => { ty.current = value; });
-    const sz = zoomAnim.addListener(({ value }) => { zoom.current = value; });
     const sp = sliderProgressAnim.addListener(({ value }) => { sliderProgress.current = value; });
     return () => {
       txAnim.removeListener(sx);
       tyAnim.removeListener(sy);
-      zoomAnim.removeListener(sz);
       sliderProgressAnim.removeListener(sp);
     };
-  }, [txAnim, tyAnim, zoomAnim, sliderProgressAnim]);
+  }, [txAnim, tyAnim, sliderProgressAnim]);
 
   // Read intrinsic image size when needed. Reset dims when the URI changes
   // so a re-crop with a different photo doesn't inherit the previous one's
@@ -118,13 +122,12 @@ export default function PhotoCropper({
     if (!visible) return;
     txAnim.setValue(0);
     tyAnim.setValue(0);
-    zoomAnim.setValue(MIN_ZOOM);
     sliderProgressAnim.setValue(0);
     tx.current = 0;
     ty.current = 0;
     zoom.current = MIN_ZOOM;
     sliderProgress.current = 0;
-  }, [visible, uri, txAnim, tyAnim, zoomAnim, sliderProgressAnim]);
+  }, [visible, uri, txAnim, tyAnim, sliderProgressAnim]);
 
   // Cover-scale so the image always fills the crop window before user zoom.
   const baseCover = useMemo(() => {
@@ -132,12 +135,20 @@ export default function PhotoCropper({
     return Math.max(WINDOW / imgW, WINDOW / imgH);
   }, [imgW, imgH, WINDOW]);
 
+  // Keep the display scale in sync whenever the base cover changes (image
+  // dimensions loaded) or when the user zooms via slider.
+  useEffect(() => {
+    const v = baseCover * zoom.current;
+    setScale(v);
+    displayScale.current = v;
+  }, [baseCover]);
+
   // Current display size / clamp bounds are derived helpers.
   const clamp = useCallback((v: number, max: number) => Math.max(-max, Math.min(max, v)), []);
   const currentDisp = useCallback(() => {
-    const S = baseCover * zoom.current;
+    const S = displayScale.current;
     return { S, dispW: imgW * S, dispH: imgH * S };
-  }, [baseCover, imgW, imgH]);
+  }, [imgW, imgH]);
   const currentBounds = useCallback(() => {
     const { dispW, dispH } = currentDisp();
     return {
@@ -186,15 +197,17 @@ export default function PhotoCropper({
   const applyZoomFromProgress = useCallback(
     (progress: number) => {
       const p = Math.max(0, Math.min(1, progress));
-      const z = MIN_ZOOM + p * (MAX_ZOOM - MIN_ZOOM);
-      zoom.current = z;
-      zoomAnim.setValue(z);
+      const userZoom = MIN_ZOOM + p * (MAX_ZOOM - MIN_ZOOM);
+      zoom.current = userZoom;
+      const nextScale = baseCover * userZoom;
+      setScale(nextScale);
+      displayScale.current = nextScale;
       sliderProgress.current = p;
       sliderProgressAnim.setValue(p);
       // Prevent empty margins after a zoom out.
       reclampTranslation();
     },
-    [zoomAnim, sliderProgressAnim, reclampTranslation],
+    [sliderProgressAnim, reclampTranslation, baseCover],
   );
 
   const sliderResponder = useMemo(
@@ -235,10 +248,12 @@ export default function PhotoCropper({
     if (!uri || !imgW || !imgH || busy) return;
     setBusy(true);
     try {
-      const S = baseCover * zoom.current;
+      // Use the SAME scale that the transform is currently rendering with.
+      // Reading `displayScale.current` (populated by the scaleAnim listener)
+      // guarantees the visual and the crop math stay in sync.
+      const S = displayScale.current;
       const dispW = imgW * S;
       const dispH = imgH * S;
-      // Image top-left in container coords: centered plus current translation.
       const cx = WINDOW / 2 + tx.current;
       const cy = WINDOW / 2 + ty.current;
       const imgOriginX = cx - dispW / 2;
@@ -247,7 +262,6 @@ export default function PhotoCropper({
       let originY = (0 - imgOriginY) / S;
       let width = WINDOW / S;
       let height = WINDOW / S;
-      // Safety clamp.
       originX = Math.max(0, Math.min(imgW - 1, originX));
       originY = Math.max(0, Math.min(imgH - 1, originY));
       width = Math.max(1, Math.min(imgW - originX, width));
@@ -262,9 +276,6 @@ export default function PhotoCropper({
           },
         },
       ];
-      // Cap the output at 720px which is more than enough for a circular
-      // avatar and keeps the base64 payload light — helps RN's Image loader
-      // handle multiple profile photos without memory pressure.
       if (width > 720) actions.push({ resize: { width: 720 } });
       const out = await ImageManipulator.manipulateAsync(uri, actions, {
         compress: 0.78,
@@ -278,13 +289,9 @@ export default function PhotoCropper({
     } finally {
       setBusy(false);
     }
-  }, [uri, imgW, imgH, WINDOW, baseCover, busy, onConfirm]);
+  }, [uri, imgW, imgH, WINDOW, busy, onConfirm]);
 
   const ready = !!uri && imgW > 0 && imgH > 0;
-
-  // Live-computed scale factor to feed into transform (product of baseCover
-  // and user zoom). We express this as a derived Animated value.
-  const scaleAnim = Animated.multiply(zoomAnim, baseCover);
 
   return (
     <Modal visible={visible} animationType="fade" onRequestClose={onCancel} transparent>
@@ -322,7 +329,7 @@ export default function PhotoCropper({
                   transform: [
                     { translateX: txAnim },
                     { translateY: tyAnim },
-                    { scale: scaleAnim },
+                    { scale },
                   ],
                 }}
                 resizeMode="cover"
