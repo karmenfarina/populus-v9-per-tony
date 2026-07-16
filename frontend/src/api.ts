@@ -179,6 +179,29 @@ export const api = {
   feudStats: (id: string) => request(`/feuds/${id}/stats`),
   verifyEmail: (token: string) => request('/auth/verify-email', { method: 'POST', body: JSON.stringify({ token }) }),
   resendVerification: (email: string) => request('/auth/resend-verification', { method: 'POST', body: JSON.stringify({ email }) }),
+
+  // --- Messaging ---
+  messagesUnreadCount: () => request('/messages/unread-count'),
+  conversations: () => request('/messages/conversations'),
+  messagesWith: (userId: string, before?: string, limit = 50) => {
+    const p = new URLSearchParams();
+    if (before) p.set('before', before);
+    p.set('limit', String(limit));
+    return request(`/messages/with/${userId}?${p.toString()}`);
+  },
+  sendMessage: (recipient_id: string, text?: string, image_data?: string) =>
+    request('/messages/send', { method: 'POST', body: JSON.stringify({ recipient_id, text, image_data }) }),
+  markConversationRead: (userId: string) =>
+    request(`/messages/with/${userId}/read`, { method: 'POST' }),
+  reactMessage: (messageId: string, emoji: string) =>
+    request(`/messages/${messageId}/react`, { method: 'POST', body: JSON.stringify({ emoji }) }),
+  deleteMessage: (messageId: string) =>
+    request(`/messages/${messageId}`, { method: 'DELETE' }),
+  blockUser: (userId: string) => request(`/users/${userId}/block`, { method: 'POST' }),
+  unblockUser: (userId: string) => request(`/users/${userId}/block`, { method: 'DELETE' }),
+  myBlocks: () => request('/users/me/blocks'),
+  reportUser: (userId: string, reason: string, message_id?: string) =>
+    request(`/users/${userId}/report`, { method: 'POST', body: JSON.stringify({ reason, message_id }) }),
 };
 
 export type User = {
@@ -315,3 +338,35 @@ export type FeudStats = {
   total_votes: number;
   sides: { A: FeudStatsSide; B: FeudStatsSide };
 };
+
+// --- Messaging types ---
+export type MiniUser = {
+  user_id: string;
+  nickname: string;
+  primary_photo_id?: string | null;
+  photo_data?: string | null;
+};
+
+export type ChatMessage = {
+  message_id: string;
+  conversation_id: string;
+  sender_id: string;
+  recipient_id: string;
+  text: string | null;
+  image_data: string | null;
+  kind: 'text' | 'image' | 'mixed';
+  reactions: Record<string, string>;
+  created_at: string;
+  read_at: string | null;
+  deleted?: boolean;
+};
+
+export type Conversation = {
+  conversation_id: string;
+  other_user: MiniUser;
+  last_message_at: string | null;
+  last_message_preview: string;
+  last_sender_id: string | null;
+  unread: number;
+};
+

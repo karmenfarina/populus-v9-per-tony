@@ -101,3 +101,188 @@
 #====================================================================================================
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
+
+user_problem_statement: |
+  Add a full messaging feature to Populus:
+  - New chat icon in the bottom tab bar with red unread-count badge.
+  - Direct 1-to-1 chat between registered users only (anonymous users blocked from send AND receive).
+  - Chat with text + images + emojis + reactions.
+  - Read receipts (single check delivered, double check read).
+  - Real-time delivery via WebSocket.
+  - External push notification when a new message arrives (respect user's push_notifications flag).
+  - Block and report user features.
+  - Access chat from a user's public profile via "Invia messaggio" button and top-right menu (block/report).
+
+backend:
+  - task: "Messaging endpoints (send, list convos, fetch, mark read, react, delete)"
+    implemented: true
+    working: "NA"
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            Added conversations + messages + user_blocks + user_reports collections and full REST surface:
+            /api/messages/unread-count, /api/messages/conversations, /api/messages/with/{other},
+            /api/messages/send, /api/messages/with/{other}/read, /api/messages/{id}/react,
+            /api/messages/{id} DELETE. Anonymous users return 403 on all send/receive endpoints;
+            unread-count returns {count:0} for them gracefully. Blocked pairs are enforced bidirectionally.
+            Smoke tested manually via curl: send/receive/read/react/block/unblock/report all pass.
+  - task: "WebSocket real-time delivery /api/ws/messages"
+    implemented: true
+    working: "NA"
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            Registered WS endpoint at app level (not APIRouter) with JWT / session-token auth via
+            query param. Publishes typed events: message.new, message.sent, message.read,
+            message.reaction, message.deleted. Anonymous users rejected with close code 4403.
+  - task: "Push notification on new message (offline recipient only)"
+    implemented: true
+    working: "NA"
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            When sender POSTs /messages/send, backend checks if recipient has an active WS connection.
+            If NOT online AND push_notifications flag is on (default), fires an Emergent push with
+            title 'Nuovo messaggio da @<nick>', body preview, action_url /messages/<sender_id>.
+            Never blocks main send; wrapped in try/except.
+  - task: "Block & Report user endpoints"
+    implemented: true
+    working: "NA"
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            /api/users/{uid}/block (POST/DELETE), /api/users/me/blocks (GET), /api/users/{uid}/report (POST).
+            Blocked pairs filter out from conversation list and reject sends with 403.
+
+frontend:
+  - task: "New Messaggi tab in bottom bar with unread badge"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/app/(tabs)/_layout.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            Added between the TOP and NOTIFICHE tabs. Uses chatbubbles icon and a red circular badge
+            with unread count (99+ cap) sourced from MessagingContext.
+  - task: "Conversations list screen"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/app/(tabs)/messages/index.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            Rows show avatar, nickname, last-message preview (with 'Tu:' prefix if sender is me),
+            relative timestamp, unread bubble. LIVE indicator in the header shows WS connection state.
+            Anonymous users see a locked screen.
+  - task: "1-to-1 chat screen with text, images, reactions, read receipts"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/app/(tabs)/messages/[userId].tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            WhatsApp-style bubbles (right red / left surface). Long-press bubble → reactions modal (8 emojis)
+            + delete for own messages. Image picker via expo-image-picker (base64, quality 0.6).
+            Emoji picker modal. Send button. Read receipts (single vs double check with color when read).
+            Composer disabled when either side has blocked. Real-time updates via MessagingContext.subscribe().
+            Marks all incoming as read on open.
+  - task: "MessagingContext (WebSocket + unread counter + pub/sub)"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/messaging/MessagingContext.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            Connects a WebSocket to /api/ws/messages on login, exposes unread + connected + subscribe().
+            Reconnects with exponential backoff (max 30s). Pings every 25s. Falls back to 30s polling
+            of /messages/unread-count if WS drops. Skipped entirely for anonymous users.
+  - task: "Invia messaggio button + menu (block/report) in user profile"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/app/(tabs)/user/[id].tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            Added a red 'INVIA MESSAGGIO' CTA under the stats, hidden for self/anonymous. Top-right
+            3-dot menu opens options: Invia messaggio / Blocca-Sblocca / Segnala. Report modal takes
+            free-text reason (2..500 chars).
+
+metadata:
+  created_by: "main_agent"
+  version: "1.0"
+  test_sequence: 0
+  run_ui: false
+
+test_plan:
+  current_focus:
+    - "Messaging endpoints (send, list convos, fetch, mark read, react, delete)"
+    - "WebSocket real-time delivery /api/ws/messages"
+    - "Block & Report user endpoints"
+    - "Conversations list screen"
+    - "1-to-1 chat screen with text, images, reactions, read receipts"
+    - "Invia messaggio button + menu (block/report) in user profile"
+    - "New Messaggi tab in bottom bar with unread badge"
+  stuck_tasks: []
+  test_all: false
+  test_priority: "high_first"
+
+agent_communication:
+  - agent: "main"
+    message: |
+      Implemented full messaging system with WebSocket real-time, image/emoji/reactions, read
+      receipts, block & report. Anonymous users are blocked from sending or receiving.
+      Two pre-verified accounts exist for testing:
+        - chat_a@test.it / test123  (user_6e65e19525d5, nickname chatUserA)
+        - chat_b@test.it / test123  (user_16f709708760, nickname chatUserB)
+      Both have onboarding_completed=true. Please verify:
+        1. Backend: send from A to B, unread count increments for B, conversations lists correctly,
+           mark-read decrements, reactions round-trip, delete soft-deletes, blocks return 403 on send,
+           report returns 200. Anonymous users must get 403 on all send/receive endpoints
+           (except unread-count which returns 0).
+        2. Frontend: Login as chat_a on one session, navigate to /messages tab, ensure LIVE indicator
+           lights up (green). Open the chat with chatUserB (deep link /messages/user_16f709708760).
+           Verify: text send, image attach button opens picker, emoji picker adds an emoji, long-press
+           on your own bubble shows reactions + delete, block from the ⋮ menu shows the blocked bar.
+           On another browser/incognito login as chat_b and confirm real-time receipt of a new message.
+        3. Verify user profile page (/user/user_16f709708760 from chatUserA session) shows the
+           red 'INVIA MESSAGGIO' CTA and the top-right ⋮ menu with block/report options.

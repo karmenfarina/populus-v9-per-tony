@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, Header, HTTPException, Depends, Request
+from fastapi import FastAPI, APIRouter, Header, HTTPException, Depends, Request, WebSocket, WebSocketDisconnect, Query
 from fastapi.responses import HTMLResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -3378,6 +3378,453 @@ async def _daily_generation_loop():
 @api_router.get('/')
 async def root():
     return {'message': 'Populus API', 'ok': True}
+
+
+# =============================================================================
+# MESSAGING SYSTEM (Direct Messages between registered users)
+# =============================================================================
+# - 1-to-1 conversations only. Anonymous users cannot send or receive.
+# - Blocks are bi-directional filters (either side blocking hides the other).
+# - Real-time delivery via WebSocket; polling fallback via REST.
+# - Push notifications fire when recipient is not currently connected via WS.
+# =============================================================================
+
+MAX_MSG_TEXT = 2000
+MAX_MSG_IMAGE_BYTES = 3_000_000  # ~3MB base64 payload
+COMMON_REACTIONS = {'❤️', '😂', '😮', '😢', '😡', '👍', '👎', '🔥'}
+
+
+class SendMessageBody(BaseModel):
+    recipient_id: str = Field(min_length=1)
+    text: Optional[str] = Field(default=None, max_length=MAX_MSG_TEXT)
+    image_data: Optional[str] = Field(default=None, max_length=MAX_MSG_IMAGE_BYTES)
+
+
+class ReactMessageBody(BaseModel):
+    emoji: str = Field(min_length=1, max_length=8)
+
+
+class ReportUserBody(BaseModel):
+    reason: str = Field(min_length=2, max_length=500)
+    message_id: Optional[str] = None
+
+
+def _conv_key(a: str, b: str) -> str:
+    """Deterministic conversation id from two user ids (sorted)."""
+    lo, hi = sorted([a, b])
+    return f"conv_{lo}_{hi}"
+
+
+async def _both_registered(uid_a: str, uid_b: str) -> tuple[dict, dict]:
+    a = await db.users.find_one({'user_id': uid_a}, {'_id': 0})
+    b = await db.users.find_one({'user_id': uid_b}, {'_id': 0})
+    if not a or not b:
+        raise HTTPException(status_code=404, detail='Utente non trovato')
+    if a.get('auth_provider') == 'anonymous' or a.get('is_anonymous'):
+        raise HTTPException(status_code=403, detail="Gli utenti anonimi non possono usare la chat")
+    if b.get('auth_provider') == 'anonymous' or b.get('is_anonymous'):
+        raise HTTPException(status_code=403, detail="L'utente destinatario è anonimo e non può ricevere messaggi")
+    return a, b
+
+
+async def _is_blocked_pair(a: str, b: str) -> bool:
+    """True if either user has blocked the other."""
+    n = await db.user_blocks.count_documents({
+        '$or': [
+            {'blocker_id': a, 'blocked_id': b},
+            {'blocker_id': b, 'blocked_id': a},
+        ],
+    })
+    return n > 0
+
+
+async def _ensure_conversation(uid_a: str, uid_b: str) -> dict:
+    cid = _conv_key(uid_a, uid_b)
+    existing = await db.conversations.find_one({'conversation_id': cid}, {'_id': 0})
+    if existing:
+        return existing
+    doc = {
+        'conversation_id': cid,
+        'participants': sorted([uid_a, uid_b]),
+        'last_message_at': None,
+        'last_message_preview': '',
+        'last_sender_id': None,
+        'created_at': now_utc(),
+    }
+    await db.conversations.insert_one(doc)
+    return doc
+
+
+# --- WebSocket registry -------------------------------------------------------
+WS_CLIENTS: dict[str, set[WebSocket]] = {}
+
+
+async def _ws_send(user_id: str, event: dict) -> None:
+    sockets = WS_CLIENTS.get(user_id, set())
+    if not sockets:
+        return
+    dead: list[WebSocket] = []
+    for ws in list(sockets):
+        try:
+            await ws.send_json(event)
+        except Exception:
+            dead.append(ws)
+    for ws in dead:
+        sockets.discard(ws)
+
+
+def _user_is_online(user_id: str) -> bool:
+    return bool(WS_CLIENTS.get(user_id))
+
+
+def _serialize_message(m: dict) -> dict:
+    out = dict(m)
+    if isinstance(out.get('created_at'), datetime):
+        out['created_at'] = _iso_utc(out['created_at'])
+    if isinstance(out.get('read_at'), datetime):
+        out['read_at'] = _iso_utc(out['read_at'])
+    out.pop('_id', None)
+    return out
+
+
+def _preview_text(text: Optional[str], has_image: bool) -> str:
+    if text and text.strip():
+        return text.strip()[:120]
+    if has_image:
+        return '📷 Foto'
+    return ''
+
+
+async def _mini_user(uid: str) -> dict:
+    """Compact user info for conversation list / chat header."""
+    u = await db.users.find_one({'user_id': uid}, {'_id': 0, 'user_id': 1, 'nickname': 1, 'primary_photo_id': 1, 'auth_provider': 1})
+    if not u:
+        return {'user_id': uid, 'nickname': 'Utente', 'primary_photo_id': None, 'photo_data': None}
+    photo_data = None
+    if u.get('primary_photo_id'):
+        p = await db.user_photos.find_one({'user_id': uid, 'photo_id': u['primary_photo_id']}, {'_id': 0, 'data': 1})
+        if p:
+            photo_data = p.get('data')
+    return {
+        'user_id': uid,
+        'nickname': u.get('nickname') or 'Utente',
+        'primary_photo_id': u.get('primary_photo_id'),
+        'photo_data': photo_data,
+    }
+
+
+# --- REST endpoints -----------------------------------------------------------
+@api_router.get('/messages/unread-count')
+async def messages_unread_count(user: dict = Depends(get_current_user)):
+    if user.get('is_anonymous') or user.get('auth_provider') == 'anonymous':
+        return {'count': 0}
+    n = await db.messages.count_documents({
+        'recipient_id': user['user_id'],
+        'read_at': None,
+        'deleted': {'$ne': True},
+    })
+    return {'count': n}
+
+
+@api_router.get('/messages/conversations')
+async def list_conversations(user: dict = Depends(get_current_user)):
+    if user.get('is_anonymous') or user.get('auth_provider') == 'anonymous':
+        raise HTTPException(status_code=403, detail="Gli utenti anonimi non possono usare la chat")
+    uid = user['user_id']
+    convs = await db.conversations.find(
+        {'participants': uid},
+        {'_id': 0},
+    ).sort('last_message_at', -1).to_list(200)
+    # Filter out conversations where the other side has been blocked by/is-blocking us.
+    blocked_ids = set()
+    async for b in db.user_blocks.find({'$or': [{'blocker_id': uid}, {'blocked_id': uid}]}, {'_id': 0}):
+        blocked_ids.add(b.get('blocker_id') if b.get('blocked_id') == uid else b.get('blocked_id'))
+    out = []
+    for c in convs:
+        parts = c.get('participants', [])
+        other_id = parts[0] if parts[1] == uid else parts[1]
+        if other_id in blocked_ids:
+            continue
+        if not c.get('last_message_at'):
+            # Skip empty ghost conversations.
+            continue
+        unread = await db.messages.count_documents({
+            'conversation_id': c['conversation_id'],
+            'recipient_id': uid,
+            'read_at': None,
+            'deleted': {'$ne': True},
+        })
+        mini = await _mini_user(other_id)
+        out.append({
+            'conversation_id': c['conversation_id'],
+            'other_user': mini,
+            'last_message_at': _iso_utc(c['last_message_at']) if c.get('last_message_at') else None,
+            'last_message_preview': c.get('last_message_preview', ''),
+            'last_sender_id': c.get('last_sender_id'),
+            'unread': unread,
+        })
+    return {'conversations': out}
+
+
+@api_router.get('/messages/with/{other_user_id}')
+async def messages_with(other_user_id: str, before: Optional[str] = None,
+                        limit: int = 50,
+                        user: dict = Depends(get_current_user)):
+    if other_user_id == user['user_id']:
+        raise HTTPException(status_code=400, detail='Non puoi chattare con te stesso')
+    _, other = await _both_registered(user['user_id'], other_user_id)
+    conv = await _ensure_conversation(user['user_id'], other_user_id)
+    q: dict = {'conversation_id': conv['conversation_id'], 'deleted': {'$ne': True}}
+    if before:
+        try:
+            before_dt = datetime.fromisoformat(before.replace('Z', '+00:00'))
+            q['created_at'] = {'$lt': before_dt}
+        except Exception:
+            pass
+    limit = max(1, min(limit, 100))
+    msgs = await db.messages.find(q, {'_id': 0}).sort('created_at', -1).to_list(limit)
+    msgs.reverse()
+    # Determine block status for UI.
+    i_blocked = await db.user_blocks.count_documents({'blocker_id': user['user_id'], 'blocked_id': other_user_id}) > 0
+    they_blocked = await db.user_blocks.count_documents({'blocker_id': other_user_id, 'blocked_id': user['user_id']}) > 0
+    return {
+        'conversation_id': conv['conversation_id'],
+        'other_user': await _mini_user(other_user_id),
+        'messages': [_serialize_message(m) for m in msgs],
+        'i_blocked': i_blocked,
+        'they_blocked': they_blocked,
+    }
+
+
+@api_router.post('/messages/send')
+async def send_message(body: SendMessageBody, user: dict = Depends(get_current_user)):
+    if user.get('is_anonymous') or user.get('auth_provider') == 'anonymous':
+        raise HTTPException(status_code=403, detail="Gli utenti anonimi non possono inviare messaggi")
+    if body.recipient_id == user['user_id']:
+        raise HTTPException(status_code=400, detail='Non puoi inviare messaggi a te stesso')
+    _, other = await _both_registered(user['user_id'], body.recipient_id)
+    if await _is_blocked_pair(user['user_id'], body.recipient_id):
+        raise HTTPException(status_code=403, detail="Non puoi contattare questo utente")
+    text = (body.text or '').strip() or None
+    img = body.image_data
+    if img:
+        # strip prefix if present
+        if img.startswith('data:'):
+            img = img.split(',', 1)[-1]
+    if not text and not img:
+        raise HTTPException(status_code=400, detail='Messaggio vuoto')
+    conv = await _ensure_conversation(user['user_id'], body.recipient_id)
+    now = now_utc()
+    kind = 'image' if img and not text else ('text' if text and not img else 'mixed')
+    doc = {
+        'message_id': new_id('msg'),
+        'conversation_id': conv['conversation_id'],
+        'sender_id': user['user_id'],
+        'recipient_id': body.recipient_id,
+        'text': text,
+        'image_data': img,
+        'kind': kind,
+        'reactions': {},
+        'created_at': now,
+        'read_at': None,
+        'deleted': False,
+    }
+    await db.messages.insert_one(doc)
+    preview = _preview_text(text, bool(img))
+    await db.conversations.update_one(
+        {'conversation_id': conv['conversation_id']},
+        {'$set': {
+            'last_message_at': now,
+            'last_message_preview': preview,
+            'last_sender_id': user['user_id'],
+        }},
+    )
+    payload = _serialize_message(doc)
+    # Real-time delivery
+    await _ws_send(body.recipient_id, {'type': 'message.new', 'message': payload})
+    await _ws_send(user['user_id'], {'type': 'message.sent', 'message': payload})
+    # Push notification if recipient is offline and has push enabled.
+    try:
+        if not _user_is_online(body.recipient_id):
+            recip = await db.users.find_one(
+                {'user_id': body.recipient_id, '$or': [{'push_notifications': True}, {'push_notifications': {'$exists': False}}]},
+                {'_id': 0, 'user_id': 1, 'nickname': 1},
+            )
+            if recip:
+                sender_nick = user.get('nickname') or 'Utente'
+                await send_push(
+                    recipients=[body.recipient_id],
+                    data={
+                        'title': f'Nuovo messaggio da @{sender_nick}',
+                        'message': preview or 'Ti ha inviato un messaggio',
+                        'action_url': f"/messages/{user['user_id']}",
+                    },
+                )
+    except Exception as e:
+        logger.warning(f"push (message) failed: {e}")
+    return {'message': payload}
+
+
+@api_router.post('/messages/with/{other_user_id}/read')
+async def mark_conversation_read(other_user_id: str, user: dict = Depends(get_current_user)):
+    if user.get('is_anonymous') or user.get('auth_provider') == 'anonymous':
+        return {'updated': 0}
+    conv_id = _conv_key(user['user_id'], other_user_id)
+    now = now_utc()
+    # Collect ids we're about to mark so we can notify sender.
+    to_mark = await db.messages.find(
+        {'conversation_id': conv_id, 'recipient_id': user['user_id'], 'read_at': None, 'deleted': {'$ne': True}},
+        {'_id': 0, 'message_id': 1},
+    ).to_list(1000)
+    if not to_mark:
+        return {'updated': 0}
+    ids = [m['message_id'] for m in to_mark]
+    r = await db.messages.update_many(
+        {'message_id': {'$in': ids}},
+        {'$set': {'read_at': now}},
+    )
+    # Notify sender in real-time that these were read.
+    await _ws_send(other_user_id, {
+        'type': 'message.read',
+        'conversation_id': conv_id,
+        'message_ids': ids,
+        'read_at': _iso_utc(now),
+    })
+    return {'updated': r.modified_count}
+
+
+@api_router.post('/messages/{message_id}/react')
+async def react_message(message_id: str, body: ReactMessageBody, user: dict = Depends(get_current_user)):
+    if user.get('is_anonymous') or user.get('auth_provider') == 'anonymous':
+        raise HTTPException(status_code=403, detail="Non disponibile per utenti anonimi")
+    m = await db.messages.find_one({'message_id': message_id}, {'_id': 0})
+    if not m:
+        raise HTTPException(status_code=404, detail='Messaggio non trovato')
+    if user['user_id'] not in (m.get('sender_id'), m.get('recipient_id')):
+        raise HTTPException(status_code=403, detail='Non autorizzato')
+    reactions = dict(m.get('reactions') or {})
+    if reactions.get(user['user_id']) == body.emoji:
+        reactions.pop(user['user_id'], None)  # Toggle off if same emoji.
+    else:
+        reactions[user['user_id']] = body.emoji
+    await db.messages.update_one({'message_id': message_id}, {'$set': {'reactions': reactions}})
+    m['reactions'] = reactions
+    payload = _serialize_message(m)
+    # Notify both sides
+    await _ws_send(m['sender_id'], {'type': 'message.reaction', 'message': payload})
+    if m['recipient_id'] != m['sender_id']:
+        await _ws_send(m['recipient_id'], {'type': 'message.reaction', 'message': payload})
+    return {'message': payload}
+
+
+@api_router.delete('/messages/{message_id}')
+async def delete_message(message_id: str, user: dict = Depends(get_current_user)):
+    m = await db.messages.find_one({'message_id': message_id}, {'_id': 0})
+    if not m:
+        raise HTTPException(status_code=404, detail='Messaggio non trovato')
+    if m.get('sender_id') != user['user_id']:
+        raise HTTPException(status_code=403, detail='Puoi cancellare solo i tuoi messaggi')
+    await db.messages.update_one(
+        {'message_id': message_id},
+        {'$set': {'deleted': True, 'text': None, 'image_data': None, 'reactions': {}}},
+    )
+    m['deleted'] = True
+    m['text'] = None
+    m['image_data'] = None
+    m['reactions'] = {}
+    payload = _serialize_message(m)
+    await _ws_send(m['sender_id'], {'type': 'message.deleted', 'message': payload})
+    if m['recipient_id'] != m['sender_id']:
+        await _ws_send(m['recipient_id'], {'type': 'message.deleted', 'message': payload})
+    return {'ok': True}
+
+
+# --- Block / Report -----------------------------------------------------------
+@api_router.post('/users/{user_id}/block')
+async def block_user(user_id: str, user: dict = Depends(get_current_user)):
+    if user_id == user['user_id']:
+        raise HTTPException(status_code=400, detail='Non puoi bloccare te stesso')
+    target = await db.users.find_one({'user_id': user_id}, {'_id': 0, 'user_id': 1})
+    if not target:
+        raise HTTPException(status_code=404, detail='Utente non trovato')
+    await db.user_blocks.update_one(
+        {'blocker_id': user['user_id'], 'blocked_id': user_id},
+        {'$setOnInsert': {'blocker_id': user['user_id'], 'blocked_id': user_id, 'created_at': now_utc()}},
+        upsert=True,
+    )
+    return {'ok': True, 'blocked': True}
+
+
+@api_router.delete('/users/{user_id}/block')
+async def unblock_user(user_id: str, user: dict = Depends(get_current_user)):
+    await db.user_blocks.delete_one({'blocker_id': user['user_id'], 'blocked_id': user_id})
+    return {'ok': True, 'blocked': False}
+
+
+@api_router.get('/users/me/blocks')
+async def my_blocks(user: dict = Depends(get_current_user)):
+    docs = await db.user_blocks.find({'blocker_id': user['user_id']}, {'_id': 0}).to_list(500)
+    users = []
+    for d in docs:
+        mini = await _mini_user(d['blocked_id'])
+        users.append({**mini, 'blocked_at': _iso_utc(d['created_at']) if d.get('created_at') else None})
+    return {'blocked_users': users}
+
+
+@api_router.post('/users/{user_id}/report')
+async def report_user(user_id: str, body: ReportUserBody, user: dict = Depends(get_current_user)):
+    if user_id == user['user_id']:
+        raise HTTPException(status_code=400, detail='Non puoi segnalare te stesso')
+    target = await db.users.find_one({'user_id': user_id}, {'_id': 0, 'user_id': 1})
+    if not target:
+        raise HTTPException(status_code=404, detail='Utente non trovato')
+    await db.user_reports.insert_one({
+        'report_id': new_id('rep'),
+        'reporter_id': user['user_id'],
+        'reported_id': user_id,
+        'reason': body.reason[:500],
+        'message_id': body.message_id,
+        'created_at': now_utc(),
+    })
+    return {'ok': True}
+
+
+# --- WebSocket endpoint -------------------------------------------------------
+@app.websocket("/api/ws/messages")
+async def ws_messages(ws: WebSocket, token: str = Query(default="")):
+    await ws.accept()
+    # Authenticate: first try JWT, then session token.
+    uid = decode_jwt(token) if token else None
+    if not uid:
+        if token:
+            sess = await db.user_sessions.find_one({'session_token': token}, {'_id': 0})
+            if sess:
+                uid = sess.get('user_id')
+    if not uid:
+        await ws.close(code=4401)
+        return
+    user = await db.users.find_one({'user_id': uid}, {'_id': 0, 'user_id': 1, 'auth_provider': 1, 'is_anonymous': 1})
+    if not user or user.get('auth_provider') == 'anonymous' or user.get('is_anonymous'):
+        await ws.close(code=4403)
+        return
+    WS_CLIENTS.setdefault(uid, set()).add(ws)
+    try:
+        await ws.send_json({'type': 'hello', 'user_id': uid})
+        while True:
+            # We use the socket unidirectionally (server → client), but read
+            # to detect close/keepalive pings from the client.
+            msg = await ws.receive_text()
+            if msg == 'ping':
+                try:
+                    await ws.send_text('pong')
+                except Exception:
+                    break
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        logger.warning(f"ws disconnect ({uid}): {e}")
+    finally:
+        WS_CLIENTS.get(uid, set()).discard(ws)
 
 
 app.include_router(api_router)

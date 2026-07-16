@@ -11,6 +11,7 @@ import { useIconFonts } from "@/src/hooks/use-icon-fonts";
 import { AuthProvider } from "@/src/auth/AuthContext";
 import { UIPrefsProvider } from "@/src/ui/UIPrefs";
 import { NotificationsProvider } from "@/src/notifications/NotificationsContext";
+import { MessagingProvider } from "@/src/messaging/MessagingContext";
 
 LogBox.ignoreAllLogs(true);
 SplashScreen.preventAutoHideAsync();
@@ -79,7 +80,9 @@ export default function RootLayout() {
         <AuthProvider>
           <UIPrefsProvider>
             <NotificationsProvider>
-              <Stack screenOptions={{ headerShown: false, animation: "fade" }} />
+              <MessagingProvider>
+                <Stack screenOptions={{ headerShown: false, animation: "fade" }} />
+              </MessagingProvider>
             </NotificationsProvider>
           </UIPrefsProvider>
         </AuthProvider>

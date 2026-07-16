@@ -1,11 +1,12 @@
 import { useEffect, useState, useCallback } from "react";
 import {
-  View, Text, StyleSheet, Pressable, ActivityIndicator, ScrollView, Image, Linking,
+  View, Text, StyleSheet, Pressable, ActivityIndicator, ScrollView, Image, Linking, Modal, TextInput, Alert,
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { api, PublicUser, HistoryItem } from "@/src/api";
+import { useAuth } from "@/src/auth/AuthContext";
 import { colors, spacing, font, sideColor } from "@/src/theme";
 
 const SOCIAL_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
@@ -28,6 +29,7 @@ type HFilter = "all" | "majority" | "minority";
 export default function UserPublicScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const { user: me } = useAuth();
   const [profile, setProfile] = useState<PublicUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -36,6 +38,10 @@ export default function UserPublicScreen() {
   const [loadingH, setLoadingH] = useState(false);
   const [filter, setFilter] = useState<HFilter>("all");
   const [historyExpanded, setHistoryExpanded] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportText, setReportText] = useState("");
+  const [isBlocked, setIsBlocked] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -50,6 +56,71 @@ export default function UserPublicScreen() {
       finally { setLoading(false); }
     })();
   }, [id]);
+
+  // Load block state for the current logged-in registered user.
+  useEffect(() => {
+    if (!id || !me || me.is_anonymous || me.user_id === id) return;
+    (async () => {
+      try {
+        const r = await api.myBlocks();
+        const blocked = (r?.blocked_users || []).some((u: any) => u.user_id === id);
+        setIsBlocked(blocked);
+      } catch { /* silent */ }
+    })();
+  }, [id, me]);
+
+  const canMessage = !!me && !me.is_anonymous && me.user_id !== id && !profile?.is_anonymous;
+
+  const openChat = () => {
+    if (!id) return;
+    router.push({ pathname: "/messages/[userId]", params: { userId: id } });
+  };
+
+  const toggleBlock = async () => {
+    setMenuOpen(false);
+    if (!id) return;
+    if (isBlocked) {
+      try {
+        await api.unblockUser(id);
+        setIsBlocked(false);
+      } catch (e: any) {
+        Alert.alert("Errore", e?.detail || "Impossibile sbloccare");
+      }
+      return;
+    }
+    Alert.alert("Blocca utente", `Vuoi bloccare @${profile?.nickname}? Non riceverai più messaggi.`, [
+      { text: "Annulla", style: "cancel" },
+      {
+        text: "Blocca",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            await api.blockUser(id);
+            setIsBlocked(true);
+          } catch (e: any) {
+            Alert.alert("Errore", e?.detail || "Impossibile bloccare");
+          }
+        },
+      },
+    ]);
+  };
+
+  const submitReport = async () => {
+    if (!id) return;
+    const reason = reportText.trim();
+    if (reason.length < 2) {
+      Alert.alert("Segnalazione", "Descrivi brevemente il motivo (min 2 caratteri).");
+      return;
+    }
+    try {
+      await api.reportUser(id, reason);
+      setReportOpen(false);
+      setReportText("");
+      Alert.alert("Grazie", "La segnalazione è stata inviata al team di moderazione.");
+    } catch (e: any) {
+      Alert.alert("Errore", e?.detail || "Impossibile inviare la segnalazione");
+    }
+  };
 
   const loadHistory = useCallback(async (uid: string, f: HFilter) => {
     setLoadingH(true);
@@ -139,6 +210,13 @@ export default function UserPublicScreen() {
           <Text style={styles.backTxt}>INDIETRO</Text>
         </Pressable>
         <Text style={styles.topNick}>@{profile.nickname}</Text>
+        {canMessage ? (
+          <Pressable onPress={() => setMenuOpen(true)} testID="user-menu" style={styles.menuBtn}>
+            <Ionicons name="ellipsis-vertical" size={20} color={colors.onSurfaceInverse} />
+          </Pressable>
+        ) : (
+          <View style={styles.menuBtn} />
+        )}
       </View>
 
       <ScrollView contentContainerStyle={{ paddingBottom: spacing.xxxl }}>
@@ -181,6 +259,21 @@ export default function UserPublicScreen() {
           <Text style={styles.stat}>
             {profile.total_votes} voti · {profile.majority_votes} maggioranza · {profile.minority_votes} minoranza
           </Text>
+
+          {canMessage && !isBlocked && (
+            <Pressable onPress={openChat} style={styles.msgCta} testID="user-send-message">
+              <Ionicons name="chatbubble-ellipses" size={18} color={colors.onBrandPrimary} />
+              <Text style={styles.msgCtaTxt}>INVIA MESSAGGIO</Text>
+            </Pressable>
+          )}
+          {canMessage && isBlocked && (
+            <View style={styles.blockedNotice}>
+              <Ionicons name="ban" size={16} color={colors.error} />
+              <Text style={styles.blockedNoticeTxt}>
+                Hai bloccato questo utente. Sbloccalo dal menu per riprendere la chat.
+              </Text>
+            </View>
+          )}
 
           {badgeUnlocked && badgeType && (
             <View
@@ -336,6 +429,69 @@ export default function UserPublicScreen() {
           </View>
         </View>
       </ScrollView>
+
+      {/* Menu (block / report) */}
+      <Modal visible={menuOpen} transparent animationType="fade" onRequestClose={() => setMenuOpen(false)}>
+        <Pressable style={styles.modalBg} onPress={() => setMenuOpen(false)}>
+          <View style={styles.menuSheet}>
+            <Pressable
+              onPress={() => {
+                setMenuOpen(false);
+                openChat();
+              }}
+              style={styles.menuItem}
+            >
+              <Ionicons name="chatbubble-ellipses-outline" size={20} color={colors.onSurface} />
+              <Text style={styles.menuTxt}>Invia messaggio</Text>
+            </Pressable>
+            <Pressable onPress={toggleBlock} style={styles.menuItem}>
+              <Ionicons name={isBlocked ? "checkmark-circle-outline" : "ban-outline"} size={20} color={colors.error} />
+              <Text style={[styles.menuTxt, { color: colors.error }]}>
+                {isBlocked ? "Sblocca utente" : "Blocca utente"}
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={() => { setMenuOpen(false); setReportOpen(true); }}
+              style={[styles.menuItem, { borderBottomWidth: 0 }]}
+            >
+              <Ionicons name="flag-outline" size={20} color={colors.error} />
+              <Text style={[styles.menuTxt, { color: colors.error }]}>Segnala utente</Text>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Modal>
+
+      {/* Report */}
+      <Modal visible={reportOpen} transparent animationType="fade" onRequestClose={() => setReportOpen(false)}>
+        <Pressable style={styles.modalBg} onPress={() => setReportOpen(false)}>
+          <Pressable style={styles.reportSheet} onPress={() => {}}>
+            <Text style={styles.sheetTitle}>SEGNALA @{profile.nickname}</Text>
+            <TextInput
+              style={styles.reportInput}
+              value={reportText}
+              onChangeText={setReportText}
+              placeholder="Motivo della segnalazione…"
+              placeholderTextColor={colors.muted}
+              multiline
+              maxLength={500}
+            />
+            <View style={{ flexDirection: "row", gap: spacing.sm }}>
+              <Pressable
+                onPress={() => setReportOpen(false)}
+                style={[styles.reportBtn, { backgroundColor: colors.surfaceTertiary }]}
+              >
+                <Text style={{ color: colors.onSurface, letterSpacing: 1 }}>ANNULLA</Text>
+              </Pressable>
+              <Pressable
+                onPress={submitReport}
+                style={[styles.reportBtn, { backgroundColor: colors.brandPrimary }]}
+              >
+                <Text style={{ color: colors.onBrandPrimary, letterSpacing: 1, fontWeight: "500" }}>INVIA</Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -348,6 +504,68 @@ const styles = StyleSheet.create({
   backBtn: { flexDirection: "row", alignItems: "center", gap: 4 },
   backTxt: { color: colors.onSurfaceInverse, fontSize: font.sizes.sm, letterSpacing: 1 },
   topNick: { color: colors.brandSecondary, fontSize: font.sizes.sm, letterSpacing: 2 },
+  menuBtn: { padding: spacing.xs, minWidth: 32, alignItems: "center" },
+  msgCta: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+    backgroundColor: colors.brandPrimary,
+    paddingVertical: spacing.md,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: colors.border,
+  },
+  msgCtaTxt: { color: colors.onBrandPrimary, fontSize: font.sizes.base, letterSpacing: 2, fontWeight: "500" },
+  blockedNotice: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+    padding: spacing.md,
+    borderWidth: 2,
+    borderColor: colors.error,
+    backgroundColor: "rgba(255,59,48,0.08)",
+  },
+  blockedNoticeTxt: { color: colors.error, fontSize: font.sizes.sm, flex: 1 },
+  modalBg: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "center", padding: spacing.lg },
+  menuSheet: {
+    backgroundColor: colors.surfaceSecondary,
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: colors.border,
+    overflow: "hidden",
+  },
+  menuItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: spacing.md,
+    gap: spacing.sm,
+    borderBottomWidth: 1,
+    borderColor: colors.surfaceTertiary,
+  },
+  menuTxt: { fontSize: font.sizes.base, color: colors.onSurface, letterSpacing: 0.5 },
+  sheetTitle: { fontSize: font.sizes.sm, letterSpacing: 2, textAlign: "center", color: colors.onSurface, fontWeight: "500" },
+  reportSheet: {
+    backgroundColor: colors.surfaceSecondary,
+    padding: spacing.lg,
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: colors.border,
+    gap: spacing.md,
+  },
+  reportInput: {
+    minHeight: 100,
+    maxHeight: 200,
+    borderWidth: 1,
+    borderColor: colors.surfaceTertiary,
+    borderRadius: 8,
+    padding: spacing.md,
+    color: colors.onSurface,
+    textAlignVertical: "top",
+  },
+  reportBtn: { flex: 1, padding: spacing.md, alignItems: "center", borderRadius: 8 },
   galleryWrap: { alignItems: "center", justifyContent: "center", backgroundColor: colors.surface, paddingTop: spacing.xl, paddingBottom: spacing.lg, borderBottomWidth: 2, borderColor: colors.border },
   avatarRing: { width: 160, height: 160, borderRadius: 80, backgroundColor: colors.surfaceInverse, alignItems: "center", justifyContent: "center", overflow: "visible", position: "relative" },
   avatarImg: { width: 160, height: 160, borderRadius: 80, backgroundColor: colors.surfaceInverse, overflow: "hidden" },
