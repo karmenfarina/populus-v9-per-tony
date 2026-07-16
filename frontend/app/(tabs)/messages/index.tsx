@@ -131,13 +131,13 @@ export default function MessagesListScreen() {
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.brandPrimary} />
           }
           ListEmptyComponent={
-            <>
+            <View style={{ alignItems: "center", gap: spacing.md }}>
               <Ionicons name="chatbubble-ellipses-outline" size={64} color={colors.muted} />
               <Text style={styles.emptyTitle}>NESSUNA CONVERSAZIONE</Text>
               <Text style={styles.emptyBody}>
                 Vai sul profilo di un utente e tocca &quot;Invia messaggio&quot; per iniziare una conversazione.
               </Text>
-            </>
+            </View>
           }
           renderItem={({ item }) => (
             <Pressable

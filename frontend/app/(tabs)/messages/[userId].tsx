@@ -186,7 +186,15 @@ export default function ChatScreen() {
     try {
       const r = await api.sendMessage(userId!, t || undefined, img || undefined);
       const real: ChatMessage = r.message;
-      setMessages((prev) => prev.map((x) => (x.message_id === tmp.message_id ? real : x)));
+      // The WS `message.sent` event may already have inserted the real message
+      // by the time the HTTP response resolves. Merge without duplicating.
+      setMessages((prev) => {
+        const withoutTmp = prev.filter((x) => x.message_id !== tmp.message_id);
+        if (withoutTmp.some((x) => x.message_id === real.message_id)) {
+          return withoutTmp;
+        }
+        return [...withoutTmp, real];
+      });
     } catch (e: any) {
       setMessages((prev) => prev.filter((x) => x.message_id !== tmp.message_id));
       Alert.alert("Errore", e?.detail || "Impossibile inviare il messaggio");

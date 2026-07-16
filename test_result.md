@@ -274,15 +274,20 @@ agent_communication:
       Two pre-verified accounts exist for testing:
         - chat_a@test.it / test123  (user_6e65e19525d5, nickname chatUserA)
         - chat_b@test.it / test123  (user_16f709708760, nickname chatUserB)
-      Both have onboarding_completed=true. Please verify:
-        1. Backend: send from A to B, unread count increments for B, conversations lists correctly,
-           mark-read decrements, reactions round-trip, delete soft-deletes, blocks return 403 on send,
-           report returns 200. Anonymous users must get 403 on all send/receive endpoints
-           (except unread-count which returns 0).
-        2. Frontend: Login as chat_a on one session, navigate to /messages tab, ensure LIVE indicator
-           lights up (green). Open the chat with chatUserB (deep link /messages/user_16f709708760).
-           Verify: text send, image attach button opens picker, emoji picker adds an emoji, long-press
-           on your own bubble shows reactions + delete, block from the ⋮ menu shows the blocked bar.
-           On another browser/incognito login as chat_b and confirm real-time receipt of a new message.
-        3. Verify user profile page (/user/user_16f709708760 from chatUserA session) shows the
-           red 'INVIA MESSAGGIO' CTA and the top-right ⋮ menu with block/report options.
+      Both have onboarding_completed=true.
+  - agent: "testing"
+    message: |
+      Iteration 28: 19/19 backend pytest + 5/6 frontend flows passing. Reported 2 bugs:
+      (H) anonymous lockout screen never shown because is_anonymous field missing in auth response;
+      (M) duplicate FlatList key after send due to WS message.sent racing HTTP response.
+  - agent: "main"
+    message: |
+      Applied fixes for iteration 28:
+      1) Backend `_public_user` now always includes `is_anonymous` boolean derived from `auth_provider`.
+         Also added a frontend `normalizeUser` helper in AuthContext that back-fills the flag even
+         if a legacy response lacks it. This keeps the chat/notifications/user-profile guards working.
+      2) Chat sender optimistic append now de-duplicates by `message_id` on the HTTP response: if the
+         WS `message.sent` echo already inserted the real message, the temp is dropped without adding
+         a second bubble. Same for incoming updates via `subscribe`.
+      3) Wrapped ListEmptyComponent Fragment in a View to silence the React `onLayout` warning.
+      Please re-run just the two fixes to confirm.

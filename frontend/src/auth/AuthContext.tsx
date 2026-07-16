@@ -17,6 +17,18 @@ type AuthState = {
 
 const AuthContext = createContext<AuthState | undefined>(undefined);
 
+/**
+ * Ensure the user object always carries a boolean `is_anonymous` flag derived
+ * from `auth_provider`. Backend responses don't always include the flag but
+ * the whole app (chat lockout, notifications, profile guards, etc.) treats
+ * `user.is_anonymous` as the source of truth.
+ */
+function normalizeUser(u: User | null | undefined): User | null {
+  if (!u) return null;
+  const isAnon = u.is_anonymous === true || u.auth_provider === 'anonymous';
+  return { ...u, is_anonymous: isAnon };
+}
+
 export function useAuth() {
   const ctx = useContext(AuthContext);
   if (!ctx) throw new Error('useAuth must be used inside AuthProvider');
@@ -32,7 +44,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const t = await getToken();
       if (!t) { setUser(null); return; }
       const res = await api.me();
-      setUser(res.user);
+      setUser(normalizeUser(res.user));
     } catch {
       await setToken(null);
       setUser(null);
@@ -49,7 +61,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const sid = decodeURIComponent(m[1]);
       const res = await api.googleSession(sid);
       await setToken(res.token);
-      setUser(res.user);
+      setUser(normalizeUser(res.user));
       return true;
     } catch {
       return false;
@@ -104,7 +116,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const applyAuthResult = async (res: { token: string; user: User }) => {
     await setToken(res.token);
-    setUser(res.user);
+    setUser(normalizeUser(res.user));
   };
 
   const signup = async (email: string, password: string, nickname: string) => {

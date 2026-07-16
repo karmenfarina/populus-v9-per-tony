@@ -304,6 +304,7 @@ def _public_user(u: dict) -> dict:
         'email': u.get('email'),
         'nickname': u.get('nickname'),
         'auth_provider': u.get('auth_provider'),
+        'is_anonymous': bool(u.get('is_anonymous')) or (u.get('auth_provider') == 'anonymous'),
         'picture': u.get('picture'),
         'majority_votes': u.get('majority_votes', 0),
         'minority_votes': u.get('minority_votes', 0),

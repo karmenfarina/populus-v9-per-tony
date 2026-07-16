@@ -1,0 +1,37 @@
+{
+  "summary": "Iteration 29 targeted re-verification of iteration 28's two reported bugs — both PASS. (A) Anonymous lockout UX: /api/auth/anonymous, /api/auth/me and /api/auth/login now all return the user with an explicit is_anonymous boolean derived server-side by _public_user() in server.py:307. Frontend AuthContext.normalizeUser also defensively enforces it. Navigating to /messages as an anonymous user now correctly shows the 'ACCESSO BLOCCATO' lock screen with the Italian body 'La chat è disponibile solo per gli utenti registrati…'; /messages/user_16f709708760 shows 'Accesso non consentito' with no composer and no crash; bottom tab bar still shows the Messaggi icon. (B) No duplicate bubble after send: logged in as chat_a@test.it, opened chat with chat_b, sent two distinct messages ('TEST_dedupe1_…' and 'TEST_dedupe2_…') 3.5s apart — each appears exactly once in the DOM, no 'tmp_' ids linger, ZERO 'two children with the same key' warnings, ZERO console errors. (C) Regression sanity: POST /api/messages/send, GET /api/messages/conversations, POST /api/users/{chat_b_id}/report all return 200; /user/user_16f709708760 renders the red INVIA MESSAGGIO CTA and ⋮ menu (testIDs user-send-message and user-menu). Fragment onLayout warning previously reported is no longer observed (ListEmptyComponent now wrapped in <View>). Pytest: 5/5 targeted checks pass in /app/backend/tests/test_iteration29_verify.py.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration29_verify.py",
+    "/app/test_reports/pytest/iter29_verify.xml",
+    "/tmp/anon_messages.png",
+    "/tmp/anon_chat.png",
+    "/tmp/chat_dedupe_after_send.png",
+    "/tmp/user_profile_regression.png"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py _public_user (line 301) — good: single point of truth normalizing is_anonymous for ALL auth-shaped responses.",
+    "AuthContext.normalizeUser is a nice belt-and-suspenders guard on the client; keeps guards throughout the app (messages/index.tsx, MessagingContext, NotificationsContext, user/[id].tsx) correct even if a future endpoint forgets the field.",
+    "messages/[userId].tsx send handler (lines 190-199): de-dupes by message_id when the WS 'message.new/sent' echo arrives before the HTTP response, and cleans the temp bubble if the API call fails. Solid.",
+    "server.py is now 3842 lines — still worth extracting the messaging block into a dedicated router in a future refactor (previously noted, non-blocking)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration29_verify.py (new — 5 pytest checks: anon signup returns is_anonymous, anon /auth/me returns is_anonymous, anon unread-count=0, chat_a login returns is_anonymous:false, regression send+conversations+report)"
+  ],
+  "success_rate": {"backend": "100% (5/5 targeted pytest, all iteration-29 checks)", "frontend": "100% (3/3 flows: anonymous lockout, dedupe on send, user profile CTA)"},
+  "seed_data_creation": "3 throwaway anonymous accounts created (tAnon_*, tAnMe_*, tAnUn_*) — ephemeral by design. 2 real test messages appended in chat_a→chat_b conversation, prefixed TEST_dedupe1_… / TEST_dedupe2_…. No fixtures modified.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 28's two reported bugs are FULLY FIXED and verified end-to-end (backend + web preview). Anonymous lockout works via server-side is_anonymous + client normalizeUser guard. Chat message dedupe uses message_id filtering in the send success handler. Regression on iter-28 messaging suite unchanged (per instructions the 19-test backend suite was NOT re-run). If additional flows are added, keep using testIDs auth-*, chat-*, user-*, messages-screen, tab-messages-badge — they are stable.",
+  "rca_of_issue": "N/A — both bugs from iteration 28 are resolved. Verified fixes: (1) server.py:307 `_public_user()` derives is_anonymous = bool(u.get('is_anonymous')) or (auth_provider == 'anonymous') so every auth response carries the flag; (2) messages/[userId].tsx:192-199 send handler filters out the temp bubble AND drops the real bubble if it was already inserted by WS echo before the HTTP response resolved; (3) messages/index.tsx:133 ListEmptyComponent now wrapped in <View> silencing Fragment onLayout warning."
+}
