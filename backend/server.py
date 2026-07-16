@@ -190,6 +190,88 @@ def compute_badge(u: dict) -> Optional[dict]:
     return {'unlocked': True, 'type': 'bastian_contrario', 'label': 'Utente Bastian Contrario', 'majority': maj, 'minority': minr}
 
 
+# Central badge registry: metadata + notification copy. Add new badge types
+# here + a rule in `compute_badge` (or a dedicated evaluator) — the earn-flow
+# below will pick them up automatically (push on first-ever, in-app on switch).
+BADGE_META: dict = {
+    'buon_senso': {
+        'label': 'Utente di Buon Senso',
+        'emoji': '⚖️',
+        'first_earn_body': (
+            "Hai sbloccato la spilla ⚖️ Utente di Buon Senso: voti in linea "
+            "con la maggioranza. Complimenti!"
+        ),
+    },
+    'bastian_contrario': {
+        'label': 'Utente Bastian Contrario',
+        'emoji': '🎭',
+        'first_earn_body': (
+            "Hai sbloccato la spilla 🎭 Utente Bastian Contrario: voti spesso "
+            "controcorrente. Solide opinioni personali!"
+        ),
+    },
+    # Future badges go here — same shape.
+}
+
+
+async def _evaluate_and_notify_badge_change(user_id: str) -> None:
+    """After counters are recomputed, detect whether the user's badge changed.
+    - First-ever unlock (badge never in `badges_ever_awarded`) → PUSH + in-app.
+    - Switch to a badge already earned before (e.g. buon_senso → bastian_contrario
+      → buon_senso) → in-app only, framed as a transition.
+    - No change → silent.
+    Idempotent: uses `current_badge` and `badges_ever_awarded` on the user doc.
+    """
+    u = await db.users.find_one({'user_id': user_id}, {'_id': 0})
+    if not u:
+        return
+    badge = compute_badge(u)
+    # Only unlocked badges trigger notifications
+    if not badge or not badge.get('unlocked'):
+        # If user previously had a badge and now doesn't (e.g. counters reset),
+        # clear the current badge but keep history.
+        if u.get('current_badge'):
+            await db.users.update_one({'user_id': user_id}, {'$set': {'current_badge': None}})
+        return
+    new_type = badge['type']
+    prev_type = u.get('current_badge')
+    if prev_type == new_type:
+        return  # no change
+    history = list(u.get('badges_ever_awarded') or [])
+    is_first_time_ever = new_type not in history
+    meta_new = BADGE_META.get(new_type, {'label': new_type, 'emoji': '🏅', 'first_earn_body': f'Hai sbloccato la spilla {new_type}.'})
+    if is_first_time_ever:
+        title = f"{meta_new['emoji']} NUOVA SPILLA"
+        body = meta_new['first_earn_body']
+        send_push = True
+    else:
+        meta_prev = BADGE_META.get(prev_type or '', {'label': prev_type or '—', 'emoji': ''})
+        title = f"{meta_new['emoji']} CAMBIO SPILLA"
+        body = (
+            f"Sei passato dalla spilla {meta_prev.get('emoji','')} "
+            f"{meta_prev['label']} alla spilla {meta_new['emoji']} {meta_new['label']}."
+        ).strip()
+        send_push = False  # transition = in-app only, per product decision
+
+    # Persist BEFORE notifying so a retry of the same recompute doesn't
+    # double-fire the same event.
+    updates: dict = {'current_badge': new_type}
+    if is_first_time_ever:
+        history.append(new_type)
+        updates['badges_ever_awarded'] = history
+    await db.users.update_one({'user_id': user_id}, {'$set': updates})
+    try:
+        await _emit_notification(
+            user_id=user_id,
+            ntype='badge',
+            title=title,
+            body=body,
+            send_push_too=send_push,
+        )
+    except Exception as e:
+        logger.warning(f"badge notification emit failed for {user_id}: {e}")
+
+
 def _public_user(u: dict) -> dict:
     return {
         'user_id': u['user_id'],
@@ -297,6 +379,28 @@ async def google_session(body: GoogleSessionBody):
 
 @api_router.get('/auth/me')
 async def me(user: dict = Depends(get_current_user)):
+    # Throttled live recompute: if it's been more than 60s since we last checked
+    # this user's alignment, recompute counters (majority/minority) from CURRENT
+    # feud states and detect badge changes induced by other users' voting.
+    # This guarantees the profile badge stays consistent even when the user
+    # isn't the one triggering vote flips. Anonymous accounts never earn
+    # badges so we can skip them entirely.
+    try:
+        if user.get('auth_provider') != 'anonymous':
+            last = user.get('last_alignment_check')
+            stale = True
+            if isinstance(last, datetime):
+                if last.tzinfo is None:
+                    last = last.replace(tzinfo=timezone.utc)
+                stale = (now_utc() - last) > timedelta(seconds=60)
+            if stale:
+                await _recompute_user_alignment(user['user_id'])
+                # Reload after recompute so `_public_user` sees fresh counters.
+                fresh = await db.users.find_one({'user_id': user['user_id']}, {'_id': 0})
+                if fresh:
+                    user = fresh
+    except Exception as e:
+        logger.warning(f"me() alignment recompute failed: {e}")
     return {'user': _public_user(user)}
 
 
@@ -1031,8 +1135,15 @@ async def _recompute_user_alignment(user_id: str):
             minr += 1
     await db.users.update_one(
         {'user_id': user_id},
-        {'$set': {'majority_votes': maj, 'minority_votes': minr, 'total_votes': maj + minr}},
+        {'$set': {'majority_votes': maj, 'minority_votes': minr, 'total_votes': maj + minr,
+                  'last_alignment_check': now_utc()}},
     )
+    # Detect badge acquisition / transition and notify (push on first-ever,
+    # in-app only on subsequent transitions).
+    try:
+        await _evaluate_and_notify_badge_change(user_id)
+    except Exception as e:
+        logger.warning(f"badge evaluate failed for {user_id}: {e}")
 
 
 # ----------------------- Moderation -----------------------
