@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -17,12 +17,64 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
+import * as FileSystem from "expo-file-system/legacy";
 import { api, ChatMessage, MiniUser } from "@/src/api";
 import { useAuth } from "@/src/auth/AuthContext";
 import { useMessaging } from "@/src/messaging/MessagingContext";
 import { colors, spacing, font } from "@/src/theme";
 
 const REACTIONS = ["❤️", "😂", "😮", "😢", "😡", "👍", "👎", "🔥"];
+
+/**
+ * Cache of message_id → local file URI for chat images.
+ *
+ * The full-screen image viewer used to render `data:image/jpeg;base64,<huge>`
+ * URIs directly, but RN Native's image loader caches decoded bitmaps by URI
+ * digest — with multi-MB data URIs the cache would sometimes return a
+ * previously-decoded bitmap for a *different* message, showing the wrong
+ * image. Writing the payload to a temp file with the message_id as the file
+ * name gives every image a globally unique `file://` URI that the loader can
+ * cache safely.
+ *
+ * We keep the resolved paths in-module so they persist across route mounts
+ * within a session. Files are stored under expo cacheDirectory (auto-cleaned
+ * by the OS).
+ */
+const imageFileCache: Map<string, string> = new Map();
+
+async function resolveImageFile(messageId: string, base64: string): Promise<string> {
+  const cached = imageFileCache.get(messageId);
+  if (cached) return cached;
+  if (Platform.OS === "web") {
+    // On web we cannot use FileSystem, but the bug doesn't reproduce on web
+    // in the same way — fall back to a data URI which the browser handles as
+    // a distinct resource per content string.
+    const uri = `data:image/jpeg;base64,${base64}`;
+    imageFileCache.set(messageId, uri);
+    return uri;
+  }
+  const dir = (FileSystem as any).cacheDirectory || (FileSystem as any).documentDirectory;
+  const safe = messageId.replace(/[^a-zA-Z0-9_]/g, "_");
+  const uri = `${dir}chat_${safe}.jpg`;
+  try {
+    // Only write if the file does not already exist (this session).
+    const info = await FileSystem.getInfoAsync(uri);
+    if (!info.exists) {
+      await FileSystem.writeAsStringAsync(uri, base64, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+    }
+    imageFileCache.set(messageId, uri);
+    return uri;
+  } catch (e) {
+    // Fall back to data URI if the FS write fails — never crash the viewer.
+    // eslint-disable-next-line no-console
+    console.warn("[chat] resolveImageFile failed, falling back to data URI", e);
+    const uri = `data:image/jpeg;base64,${base64}`;
+    imageFileCache.set(messageId, uri);
+    return uri;
+  }
+}
 
 function formatTime(ts: string): string {
   try {
@@ -79,35 +131,43 @@ export default function ChatScreen() {
   const [reportText, setReportText] = useState("");
   const [pendingImage, setPendingImage] = useState<string | null>(null);
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
-  // We store only the target message id (short string) instead of the raw
-  // base64 payload. This avoids RN's shallow-equality bailout / heavy string
-  // reconciliation glitches when swapping between multi-MB data URIs.
-  const [viewerMessageId, setViewerMessageId] = useState<string | null>(null);
-  // Special sentinel for the composer pending image, which is not persisted
-  // yet and therefore has no message id.
-  const [viewerPending, setViewerPending] = useState<string | null>(null);
+  // Viewer state. We store the resolved local URI (file:// on native, data:
+  // on web) plus the source message id so the render never has to hold multi-
+  // MB base64 strings in state.
+  const [viewerUri, setViewerUri] = useState<string | null>(null);
+  const [viewerKey, setViewerKey] = useState<string>("empty");
+  // Custom confirm modal (replaces Alert.alert for reliable behaviour on both
+  // native and web).
+  const [confirmState, setConfirmState] = useState<{
+    title: string;
+    body: string;
+    onConfirm: () => void;
+  } | null>(null);
   const listRef = useRef<FlatList>(null);
 
-  // Resolve the image to show in the viewer at render time.
-  const viewerSrc: string | null = useMemo(() => {
-    if (viewerPending) return viewerPending;
-    if (!viewerMessageId) return null;
-    const m = messages.find((x) => x.message_id === viewerMessageId);
-    return m?.image_data || null;
-  }, [messages, viewerMessageId, viewerPending]);
-
-  const openViewerForMessage = useCallback((messageId: string) => {
-    setViewerPending(null);
-    setViewerMessageId(messageId);
+  const openViewerForMessage = useCallback(async (msg: ChatMessage) => {
+    if (!msg.image_data) return;
+    // Resolve immediately so the modal never displays a stale image.
+    const uri = await resolveImageFile(msg.message_id, msg.image_data);
+    setViewerUri(uri);
+    setViewerKey(`msg-${msg.message_id}`);
   }, []);
   const openViewerForPending = useCallback((base64: string) => {
-    setViewerMessageId(null);
-    setViewerPending(base64);
+    // Pending images have no message id; use a rolling key to force remount.
+    setViewerUri(`data:image/jpeg;base64,${base64}`);
+    setViewerKey(`pending-${Date.now()}`);
   }, []);
   const closeViewer = useCallback(() => {
-    setViewerMessageId(null);
-    setViewerPending(null);
+    setViewerUri(null);
+    setViewerKey("empty");
   }, []);
+
+  const confirmDialog = useCallback(
+    (title: string, body: string, onConfirm: () => void) => {
+      setConfirmState({ title, body, onConfirm });
+    },
+    [],
+  );
 
   const loadInitial = useCallback(async () => {
     if (!userId) return;
@@ -271,28 +331,32 @@ export default function ChatScreen() {
 
   const deleteMessage = useCallback((m: ChatMessage) => {
     setReactTarget(null);
-    Alert.alert("Elimina messaggio", "Vuoi eliminare questo messaggio per tutti?", [
-      { text: "Annulla", style: "cancel" },
-      {
-        text: "Elimina",
-        style: "destructive",
-        onPress: async () => {
-          try {
-            await api.deleteMessage(m.message_id);
-            setMessages((prev) =>
-              prev.map((x) =>
-                x.message_id === m.message_id
-                  ? { ...x, deleted: true, text: null, image_data: null, reactions: {} }
-                  : x,
-              ),
-            );
-          } catch (e: any) {
-            Alert.alert("Errore", e?.detail || "Impossibile eliminare");
-          }
-        },
+    // Alert.alert with a destructive button is unreliable on RN-Web (some
+    // versions collapse it into window.confirm which loses the button
+    // labels). Use our own themed modal for a deterministic flow.
+    confirmDialog(
+      "Elimina messaggio",
+      "Vuoi eliminare questo messaggio per tutti?",
+      async () => {
+        try {
+          await api.deleteMessage(m.message_id);
+          setMessages((prev) =>
+            prev.map((x) =>
+              x.message_id === m.message_id
+                ? { ...x, deleted: true, text: null, image_data: null, reactions: {} }
+                : x,
+            ),
+          );
+          // If the currently open viewer was showing this image, close it.
+          setViewerUri((cur) => (cur && viewerKey === `msg-${m.message_id}` ? null : cur));
+          // Invalidate any cached file so it can't be reopened stale.
+          imageFileCache.delete(m.message_id);
+        } catch (e: any) {
+          Alert.alert("Errore", e?.detail || "Impossibile eliminare");
+        }
       },
-    ]);
-  }, []);
+    );
+  }, [confirmDialog, viewerKey]);
 
   const toggleBlock = useCallback(async () => {
     setMenuOpen(false);
@@ -306,22 +370,19 @@ export default function ChatScreen() {
       }
       return;
     }
-    Alert.alert("Blocca utente", `Vuoi bloccare @${otherUser.nickname}? Non riceverai più messaggi da questo utente.`, [
-      { text: "Annulla", style: "cancel" },
-      {
-        text: "Blocca",
-        style: "destructive",
-        onPress: async () => {
-          try {
-            await api.blockUser(otherUser.user_id);
-            setIBlocked(true);
-          } catch (e: any) {
-            Alert.alert("Errore", e?.detail || "Impossibile bloccare");
-          }
-        },
+    confirmDialog(
+      "Blocca utente",
+      `Vuoi bloccare @${otherUser.nickname}? Non riceverai più messaggi da questo utente.`,
+      async () => {
+        try {
+          await api.blockUser(otherUser.user_id);
+          setIBlocked(true);
+        } catch (e: any) {
+          Alert.alert("Errore", e?.detail || "Impossibile bloccare");
+        }
       },
-    ]);
-  }, [iBlocked, otherUser]);
+    );
+  }, [iBlocked, otherUser, confirmDialog]);
 
   const submitReport = useCallback(async () => {
     if (!otherUser) return;
@@ -346,14 +407,15 @@ export default function ChatScreen() {
       const prev = index > 0 ? messages[index - 1] : null;
       const showDay = !prev || !isSameDay(prev.created_at, item.created_at);
       const reactions = Object.values(item.reactions || {});
-      // Snapshot the image data for THIS item so the tap handler cannot be
-      // reassigned to a different message's data by FlatList row recycling.
+      // Snapshot the item locally so tap handlers can never reference a
+      // different message due to FlatList row recycling.
+      const bubbleItem = item;
       const bubbleImage = item.image_data;
       const bubbleId = item.message_id;
       const bubbleDeleted = !!item.deleted;
       const handleTap = () => {
         if (bubbleDeleted) return;
-        if (bubbleImage) openViewerForMessage(bubbleId);
+        if (bubbleImage) openViewerForMessage(bubbleItem);
       };
       const handleLongPress = () => {
         if (bubbleDeleted) return;
@@ -673,7 +735,7 @@ export default function ChatScreen() {
 
       {/* Fullscreen image viewer */}
       <Modal
-        visible={!!viewerSrc}
+        visible={!!viewerUri}
         transparent
         animationType="fade"
         onRequestClose={closeViewer}
@@ -682,16 +744,51 @@ export default function ChatScreen() {
           <Pressable onPress={closeViewer} style={styles.viewerCloseBtn} testID="viewer-close">
             <Ionicons name="close" size={28} color="#fff" />
           </Pressable>
-          {viewerSrc && (
+          {viewerUri && (
             <Image
-              // Force a fresh <Image> mount whenever the underlying message
-              // changes so RN/RN-Web never shows a stale cached bitmap.
-              key={`viewer-${viewerMessageId || 'pending'}`}
-              source={{ uri: `data:image/jpeg;base64,${viewerSrc}` }}
+              key={viewerKey}
+              source={{ uri: viewerUri }}
               style={styles.viewerImg}
               resizeMode="contain"
             />
           )}
+        </Pressable>
+      </Modal>
+
+      {/* Custom confirm modal (replaces Alert.alert for destructive actions). */}
+      <Modal
+        visible={!!confirmState}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setConfirmState(null)}
+      >
+        <Pressable style={styles.modalBg} onPress={() => setConfirmState(null)}>
+          <Pressable style={styles.reportSheet} onPress={() => {}}>
+            <Text style={styles.sheetTitle}>{confirmState?.title?.toUpperCase()}</Text>
+            <Text style={{ color: colors.onSurface, fontSize: font.sizes.base, textAlign: "center" }}>
+              {confirmState?.body}
+            </Text>
+            <View style={{ flexDirection: "row", gap: spacing.sm }}>
+              <Pressable
+                onPress={() => setConfirmState(null)}
+                style={[styles.reportBtn, { backgroundColor: colors.surfaceTertiary }]}
+                testID="confirm-cancel"
+              >
+                <Text style={{ color: colors.onSurface, letterSpacing: 1 }}>ANNULLA</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => {
+                  const cb = confirmState?.onConfirm;
+                  setConfirmState(null);
+                  if (cb) cb();
+                }}
+                style={[styles.reportBtn, { backgroundColor: colors.error }]}
+                testID="confirm-ok"
+              >
+                <Text style={{ color: "#fff", letterSpacing: 1, fontWeight: "500" }}>CONFERMA</Text>
+              </Pressable>
+            </View>
+          </Pressable>
         </Pressable>
       </Modal>
     </SafeAreaView>
