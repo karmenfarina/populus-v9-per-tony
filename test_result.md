@@ -246,6 +246,25 @@ frontend:
             Added a red 'INVIA MESSAGGIO' CTA under the stats, hidden for self/anonymous. Top-right
             3-dot menu opens options: Invia messaggio / Blocca-Sblocca / Segnala. Report modal takes
             free-text reason (2..500 chars).
+  - task: "Photo cropper with pan+zoom for profile picture uploads"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/components/PhotoCropper.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            Custom Instagram-style square cropper. Native ImagePicker editing is now disabled
+            (allowsEditing:false) so the user always sees our cropper after picking. Users can
+            drag the image to pan and use +/− zoom controls (1x–4x). A circular guide overlays
+            the crop area to preview the final avatar shape and rule-of-thirds grid helps
+            composition. On confirm, expo-image-manipulator crops the actual pixels to the
+            selected 1:1 region and downscales to max 1080px @ 0.85 quality JPEG base64.
+            Constraints keep the image edges outside the crop window so no empty space is ever
+            exposed.
 
 metadata:
   created_by: "main_agent"
@@ -255,13 +274,7 @@ metadata:
 
 test_plan:
   current_focus:
-    - "Messaging endpoints (send, list convos, fetch, mark read, react, delete)"
-    - "WebSocket real-time delivery /api/ws/messages"
-    - "Block & Report user endpoints"
-    - "Conversations list screen"
-    - "1-to-1 chat screen with text, images, reactions, read receipts"
-    - "Invia messaggio button + menu (block/report) in user profile"
-    - "New Messaggi tab in bottom bar with unread badge"
+    - "Photo cropper with pan+zoom for profile picture uploads"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"

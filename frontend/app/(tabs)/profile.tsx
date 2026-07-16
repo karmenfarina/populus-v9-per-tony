@@ -8,6 +8,7 @@ import { useRouter, useFocusEffect } from "expo-router";
 import { useAuth } from "@/src/auth/AuthContext";
 import { api, HistoryItem, UserPhoto } from "@/src/api";
 import { colors, spacing, font, sideColor } from "@/src/theme";
+import PhotoCropper from "@/src/components/PhotoCropper";
 
 type Filter = "all" | "majority" | "minority";
 type Socials = { instagram: string; tiktok: string; twitter: string; youtube: string; website: string };
@@ -40,6 +41,10 @@ export default function Profile() {
   const [primaryPhotoData, setPrimaryPhotoData] = useState<string | null>(null);
   const [prefsExpanded, setPrefsExpanded] = useState(false);
   const [historyExpanded, setHistoryExpanded] = useState(false);
+  // Cropper state
+  const [cropperOpen, setCropperOpen] = useState(false);
+  const [cropperUri, setCropperUri] = useState<string | null>(null);
+  const [cropperSize, setCropperSize] = useState<{ w: number; h: number } | null>(null);
   const isAnonymous = user?.auth_provider === "anonymous";
 
   const loadHistory = useCallback(async (f: Filter) => {
@@ -141,12 +146,14 @@ export default function Profile() {
       }
       return;
     }
+    // Native editing is disabled — we use our custom PhotoCropper instead so
+    // the user can always choose which portion of the picture is kept, even on
+    // the web preview where the native crop UI is inconsistent.
     const opts: ImagePicker.ImagePickerOptions = {
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.7,
-      base64: true,
-      allowsEditing: true,
-      aspect: [1, 1],
+      quality: 1,
+      base64: false,
+      allowsEditing: false,
     };
     const res =
       source === "camera"
@@ -154,28 +161,40 @@ export default function Profile() {
         : await ImagePicker.launchImageLibraryAsync(opts);
     if (res.canceled || !res.assets[0]) return;
     const asset = res.assets[0];
-    let base64 = asset.base64 || "";
-    // Client-side compression if too large: shrink long-edge to 1080, quality 0.6
-    // Threshold ~700_000 base64 chars ≈ ~500KB decoded.
-    if (base64.length > 700_000 && asset.uri) {
+    if (!asset.uri) { setDetailsError("Impossibile leggere l'immagine"); return; }
+    setCropperUri(asset.uri);
+    setCropperSize(
+      asset.width && asset.height ? { w: asset.width, h: asset.height } : null,
+    );
+    setCropperOpen(true);
+  };
+
+  const uploadCroppedPhoto = useCallback(async (base64: string) => {
+    // Optional: additional downscale if still too large (safety net; the cropper
+    // already caps to 1080px width). ~700KB threshold on base64 chars.
+    let payload = base64;
+    if (payload.length > 900_000) {
       try {
         const manipulated = await ImageManipulator.manipulateAsync(
-          asset.uri,
-          [{ resize: { width: 1080 } }],
-          { compress: 0.6, format: ImageManipulator.SaveFormat.JPEG, base64: true }
+          `data:image/jpeg;base64,${payload}`,
+          [{ resize: { width: 900 } }],
+          { compress: 0.75, format: ImageManipulator.SaveFormat.JPEG, base64: true },
         );
-        if (manipulated.base64) base64 = manipulated.base64;
-      } catch {
-        // fall through with original base64
-      }
+        if (manipulated.base64) payload = manipulated.base64;
+      } catch { /* keep original */ }
     }
-    if (!base64) { setDetailsError("Impossibile leggere l'immagine"); return; }
     try {
-      await api.uploadPhoto(base64);
+      await api.uploadPhoto(payload);
+      setCropperOpen(false);
+      setCropperUri(null);
+      setCropperSize(null);
       await loadPhotos();
       await refreshMe();
-    } catch (e: any) { setDetailsError(e?.message || "Errore upload"); }
-  };
+    } catch (e: any) {
+      setDetailsError(e?.message || "Errore upload");
+      setCropperOpen(false);
+    }
+  }, [loadPhotos, refreshMe]);
 
   const setPrimary = async (photoId: string) => {
     try {
@@ -731,6 +750,15 @@ export default function Profile() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      <PhotoCropper
+        visible={cropperOpen}
+        uri={cropperUri}
+        originalWidth={cropperSize?.w}
+        originalHeight={cropperSize?.h}
+        onCancel={() => { setCropperOpen(false); setCropperUri(null); setCropperSize(null); }}
+        onConfirm={uploadCroppedPhoto}
+      />
     </SafeAreaView>
   );
 }
