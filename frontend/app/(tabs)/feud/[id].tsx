@@ -47,6 +47,16 @@ export default function FeudDetail() {
   const [activeSide, setActiveSide] = useState<"A" | "B" | null>(null);
   const [statsOpen, setStatsOpen] = useState(false);
   const { sourcesExpanded, setSourcesExpanded } = useUIPrefs();
+  const scrollRef = useRef<ScrollView>(null);
+
+  // When the route param `id` changes OR the feud finishes loading, reset the
+  // ScrollView to the top. Without this, expo-router reuses the same mounted
+  // screen when navigating between /feud/A → /feud/B, so any previous scroll
+  // offset would carry over and the user would land in the middle of the new
+  // feud's body instead of on its title.
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ y: 0, animated: false });
+  }, [id, feud?.feud_id]);
 
   const loadAll = useCallback(async () => {
     const f = await api.feud(id!);
@@ -238,7 +248,7 @@ export default function FeudDetail() {
       </View>
 
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={80}>
-        <ScrollView contentContainerStyle={{ paddingBottom: spacing.xxxl }}>
+        <ScrollView ref={scrollRef} contentContainerStyle={{ paddingBottom: spacing.xxxl }}>
           <ImageBackground source={{ uri: feud.image_url }} style={styles.hero}>
             <LinearGradient colors={["rgba(0,0,0,0)", "rgba(0,0,0,0.9)"]} style={StyleSheet.absoluteFill} />
             {!isAnonymous && (
