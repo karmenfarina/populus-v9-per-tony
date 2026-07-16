@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   View, Text, StyleSheet, ScrollView, Pressable, TextInput, ActivityIndicator,
-  KeyboardAvoidingView, Platform, ImageBackground, Linking, Share, Alert,
+  KeyboardAvoidingView, Platform, ImageBackground, Linking, Alert,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -13,6 +13,7 @@ import { api, ApiError, Comment, Feud, Reply, Sponsor } from "@/src/api";
 import { colors, spacing, font, sideColor, onSideColor } from "@/src/theme";
 import FeudMediaBlock from "@/src/components/FeudMediaBlock";
 import FeudStatsModal from "@/src/components/FeudStatsModal";
+import ShareSheet from "@/src/components/ShareSheet";
 import { useUIPrefs } from "@/src/ui/UIPrefs";
 import { useAuth } from "@/src/auth/AuthContext";
 
@@ -47,6 +48,7 @@ export default function FeudDetail() {
   const [replyText, setReplyText] = useState("");
   const [activeSide, setActiveSide] = useState<"A" | "B" | null>(null);
   const [statsOpen, setStatsOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   const { sourcesExpanded, setSourcesExpanded } = useUIPrefs();
   const scrollRef = useRef<ScrollView>(null);
 
@@ -187,74 +189,43 @@ export default function FeudDetail() {
     } catch (e: any) { setError(e?.message || "Errore"); }
   };
 
-  const onShare = async () => {
-    if (!feud) return;
-    // Build an ABSOLUTE URL. `navigator.share` in browsers only accepts
-    // absolute URLs; a relative "/api/share/..." makes it silently reject
-    // and bypass the whole share flow (this is the anonymous-preview bug).
+  // Build the absolute URL used by all share targets. Falls back to
+  // window.location.origin so the URL is always valid, even on embedded web
+  // previews where EXPO_PUBLIC_BACKEND_URL might be empty.
+  const buildShareUrl = () => {
     let base = process.env.EXPO_PUBLIC_BACKEND_URL || "";
-    if (!base && Platform.OS === "web" && typeof window !== "undefined") {
+    if ((!base || !/^https?:\/\//i.test(base)) && Platform.OS === "web" && typeof window !== "undefined") {
       base = window.location.origin;
     }
-    if (!/^https?:\/\//i.test(base)) {
-      // Extra safety: if base is still relative or bogus, use current origin.
-      if (Platform.OS === "web" && typeof window !== "undefined") {
-        base = window.location.origin;
-      }
-    }
-    const url = `${base}/api/share/${feud.feud_id}/html`;
-    const message = `${feud.title}\n\nCon chi ti schieri? ${feud.party_a} vs ${feud.party_b}\n${url}`;
+    return `${base}/api/share/${feud?.feud_id}/html`;
+  };
 
-    // Helper: last-resort fallbacks that always give the user *something*
-    // (copy link, or prompt to copy manually). Used whenever the primary
-    // share API is unavailable or errors out.
-    const copyLinkFallback = async () => {
-      if (Platform.OS === "web" && typeof window !== "undefined") {
-        try {
-          if (navigator?.clipboard?.writeText) {
-            await navigator.clipboard.writeText(url);
-            try { window.alert("Link copiato negli appunti"); } catch { /* ignore */ }
-            return true;
-          }
-          window.prompt("Copia il link della faida:", url);
-          return true;
-        } catch { /* ignore */ }
-      }
+  const copyShareLink = async () => {
+    if (!feud) return;
+    const url = buildShareUrl();
+    if (Platform.OS === "web" && typeof navigator !== "undefined") {
       try {
-        if (Clipboard && typeof Clipboard.setStringAsync === "function") {
-          await Clipboard.setStringAsync(url);
-          Alert.alert("Link copiato", "Il link della faida è stato copiato negli appunti.");
-          return true;
-        }
-      } catch { /* ignore */ }
-      return false;
-    };
-
-    if (Platform.OS === "web") {
-      // Try Web Share API first, then clipboard, then window.prompt.
-      const nav: any = typeof navigator !== "undefined" ? navigator : null;
-      if (nav?.share) {
-        try {
-          await nav.share({ title: feud.title, text: message, url });
-          return;
-        } catch (e: any) {
-          // User cancelled → do nothing. Any other error → clipboard fallback.
-          if (e?.name === "AbortError") return;
-        }
-      }
-      await copyLinkFallback();
+        await navigator.clipboard.writeText(url);
+        try { window.alert("Link copiato negli appunti"); } catch { /* ignore */ }
+        return;
+      } catch { /* try next */ }
+      try { window.prompt("Copia il link:", url); } catch { /* ignore */ }
       return;
     }
-
-    // Native (iOS / Android / Expo Go on phone): prefer the OS share sheet,
-    // fall back to clipboard if it errors (e.g. some Android Expo Go builds
-    // report `Share.share` as a no-op due to intent restrictions).
     try {
-      const res = await Share.share({ title: feud.title, message, url });
-      if (res.action === Share.dismissedAction) return; // user closed the sheet
-      return;
-    } catch { /* fall through to clipboard */ }
-    await copyLinkFallback();
+      await Clipboard.setStringAsync(url);
+      Alert.alert("Link copiato", "Il link della faida è stato copiato negli appunti.");
+    } catch { /* ignore */ }
+  };
+
+  const onShare = () => {
+    if (!feud) return;
+    // ALWAYS open our custom bottom-sheet so the user gets the same rich
+    // set of options (WhatsApp / Telegram / X / Facebook / Email / Copy)
+    // regardless of platform. The native system sheet was inconsistent
+    // (web preview iframes lacked `web-share` permission, anonymous
+    // browser sessions failed silently, etc.).
+    setShareOpen(true);
   };
 
   if (loading) {
@@ -563,6 +534,14 @@ export default function FeudDetail() {
         partyA={feud.party_a}
         partyB={feud.party_b}
         onClose={() => setStatsOpen(false)}
+      />
+      <ShareSheet
+        visible={shareOpen}
+        onClose={() => setShareOpen(false)}
+        url={buildShareUrl()}
+        title={feud.title}
+        message={`${feud.title}\n\nCon chi ti schieri? ${feud.party_a} vs ${feud.party_b}`}
+        onCopy={copyShareLink}
       />
     </SafeAreaView>
   );
