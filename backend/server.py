@@ -365,7 +365,7 @@ async def _send_verification_email(user_id: str, email: str) -> None:
                 'https://api.resend.com/emails',
                 headers={'Authorization': f'Bearer {RESEND_API_KEY}', 'Content-Type': 'application/json'},
                 json={
-                    'from': 'Populus <[email protected]>',
+                    'from': 'Populus <onboarding@resend.dev>',
                     'to': [email],
                     'subject': 'Verifica la tua email — Populus',
                     'html': html,
@@ -442,8 +442,31 @@ async def resend_verification(body: ResendVerificationBody, request: Request):
 @api_router.post('/auth/signup')
 async def signup(body: SignupBody):
     existing = await db.users.find_one({'email': body.email.lower()})
-    if existing:
+    # Unverified accounts can be retried: overwrite password_hash / nickname
+    # so a user who mistyped or forgot doesn't get permanently locked out of
+    # their own email until manual intervention. Verified accounts remain
+    # protected against being taken over by re-signup.
+    if existing and existing.get('email_verified'):
         raise HTTPException(status_code=400, detail='Email già registrata')
+    if existing and not existing.get('email_verified'):
+        user_id = existing['user_id']
+        await db.users.update_one(
+            {'user_id': user_id},
+            {'$set': {
+                'password_hash': hash_password(body.password),
+                'nickname': body.nickname,
+                'auth_provider': 'email',
+            }},
+        )
+        try:
+            await _send_verification_email(user_id, body.email.lower())
+        except Exception as e:
+            logger.warning(f"re-signup verification email failed for {user_id}: {e}")
+        return {
+            'requires_verification': True,
+            'email': body.email.lower(),
+            'message': 'Abbiamo reinviato l\'email di conferma. Controlla la tua casella.',
+        }
     user_id = new_id('user')
     user = {
         'user_id': user_id,
