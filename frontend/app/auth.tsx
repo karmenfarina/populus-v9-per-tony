@@ -19,6 +19,7 @@ export default function AuthScreen() {
   const [isSignup, setIsSignup] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [nickname, setNickname] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -39,6 +40,7 @@ export default function AuthScreen() {
         if (!n) { setError("Scegli un nickname."); return; }
         if (n.length < 2) { setError("Il nickname deve avere almeno 2 caratteri."); return; }
         if (n.length > 24) { setError("Il nickname è troppo lungo (max 24 caratteri)."); return; }
+        if (password !== confirmPassword) { setError("Le password non coincidono."); return; }
       }
     } else if (mode === "anon") {
       const n = nickname.trim();
@@ -169,10 +171,10 @@ export default function AuthScreen() {
           ) : mode === "email" && (
             <View style={styles.form}>
               <View style={styles.switchRow}>
-                <Pressable testID="auth-mode-login" onPress={() => setIsSignup(false)} style={[styles.switchBtn, !isSignup && styles.switchActive]}>
+                <Pressable testID="auth-mode-login" onPress={() => { setIsSignup(false); setConfirmPassword(""); setError(null); }} style={[styles.switchBtn, !isSignup && styles.switchActive]}>
                   <Text style={[styles.switchTxt, !isSignup && styles.switchTxtActive]}>Accedi</Text>
                 </Pressable>
-                <Pressable testID="auth-mode-signup" onPress={() => setIsSignup(true)} style={[styles.switchBtn, isSignup && styles.switchActive]}>
+                <Pressable testID="auth-mode-signup" onPress={() => { setIsSignup(true); setError(null); }} style={[styles.switchBtn, isSignup && styles.switchActive]}>
                   <Text style={[styles.switchTxt, isSignup && styles.switchTxtActive]}>Registrati</Text>
                 </Pressable>
               </View>
@@ -207,6 +209,24 @@ export default function AuthScreen() {
                 onChangeText={setPassword}
                 secureTextEntry
               />
+              {isSignup && (
+                <TextInput
+                  testID="auth-password-confirm-input"
+                  style={[
+                    styles.input,
+                    // Live mismatch cue: red border once the user starts typing
+                    // the confirmation AND it differs from the primary field.
+                    confirmPassword.length > 0 && confirmPassword !== password
+                      ? { borderColor: colors.error }
+                      : null,
+                  ]}
+                  placeholder="Conferma password"
+                  placeholderTextColor={colors.muted}
+                  value={confirmPassword}
+                  onChangeText={setConfirmPassword}
+                  secureTextEntry
+                />
+              )}
             </View>
           )}
 
