@@ -319,6 +319,19 @@ export default function ChatScreen() {
       const prev = index > 0 ? messages[index - 1] : null;
       const showDay = !prev || !isSameDay(prev.created_at, item.created_at);
       const reactions = Object.values(item.reactions || {});
+      // Snapshot the image data for THIS item so the tap handler cannot be
+      // reassigned to a different message's data by FlatList row recycling.
+      const bubbleImage = item.image_data;
+      const bubbleId = item.message_id;
+      const bubbleDeleted = !!item.deleted;
+      const handleTap = () => {
+        if (bubbleDeleted) return;
+        if (bubbleImage) setViewerImage(bubbleImage);
+      };
+      const handleLongPress = () => {
+        if (bubbleDeleted) return;
+        setReactTarget(item);
+      };
       return (
         <View>
           {showDay && (
@@ -327,8 +340,10 @@ export default function ChatScreen() {
             </View>
           )}
           <Pressable
-            onLongPress={() => !item.deleted && setReactTarget(item)}
+            onPress={handleTap}
+            onLongPress={handleLongPress}
             style={[styles.bubbleRow, mine ? styles.rowMine : styles.rowTheirs]}
+            testID={`msg-bubble-${bubbleId}`}
           >
             <View
               style={[
@@ -343,17 +358,12 @@ export default function ChatScreen() {
                 </Text>
               ) : (
                 <>
-                  {item.image_data ? (
-                    <Pressable
-                      onPress={() => setViewerImage(item.image_data!)}
-                      onLongPress={() => !item.deleted && setReactTarget(item)}
-                      testID={`msg-image-${item.message_id}`}
-                    >
-                      <Image
-                        source={{ uri: `data:image/jpeg;base64,${item.image_data}` }}
-                        style={styles.msgImg}
-                      />
-                    </Pressable>
+                  {bubbleImage ? (
+                    <Image
+                      source={{ uri: `data:image/jpeg;base64,${bubbleImage}` }}
+                      style={styles.msgImg}
+                      testID={`msg-image-${bubbleId}`}
+                    />
                   ) : null}
                   {item.text ? (
                     <Text style={[styles.txt, mine ? styles.txtMine : styles.txtTheirs]}>{item.text}</Text>
@@ -378,7 +388,7 @@ export default function ChatScreen() {
           {reactions.length > 0 && !item.deleted && (
             <View style={[styles.reactionsBar, mine ? styles.reactMine : styles.reactTheirs]}>
               {reactions.map((emoji, i) => (
-                <Text key={`${item.message_id}-r-${i}`} style={styles.reactEmoji}>
+                <Text key={`${bubbleId}-r-${i}`} style={styles.reactEmoji}>
                   {emoji}
                 </Text>
               ))}
@@ -647,6 +657,9 @@ export default function ChatScreen() {
           </Pressable>
           {viewerImage && (
             <Image
+              // Force a fresh <Image> mount whenever the data changes so that RN /
+              // RN-Web never shows a stale cached bitmap for a previous message.
+              key={`viewer-${viewerImage.slice(0, 24)}${viewerImage.length}`}
               source={{ uri: `data:image/jpeg;base64,${viewerImage}` }}
               style={styles.viewerImg}
               resizeMode="contain"
