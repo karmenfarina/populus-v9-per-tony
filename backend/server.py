@@ -14,6 +14,7 @@ import re
 import time
 import html as html_lib
 import feedparser
+import asyncio
 from pathlib import Path
 from pydantic import BaseModel, Field, EmailStr
 from typing import List, Optional, Literal
@@ -192,11 +193,18 @@ def compute_badge(u: dict) -> Optional[dict]:
 
 # Central badge registry: metadata + notification copy. Add new badge types
 # here + a rule in `compute_badge` (or a dedicated evaluator) — the earn-flow
-# below will pick them up automatically (push on first-ever, in-app on switch).
+# below will pick them up automatically (push on first-ever from a group,
+# in-app only on switches within the same group).
+#
+# `group`: badges belonging to the same group are mutually exclusive by design.
+# Any transition WITHIN a group is framed as a swap ("Sei passato da X a Y")
+# even if the target badge was never held before. Transitioning ACROSS groups
+# (or earning your very first badge) triggers a full "NUOVA SPILLA" push.
 BADGE_META: dict = {
     'buon_senso': {
         'label': 'Utente di Buon Senso',
         'emoji': '⚖️',
+        'group': 'alignment',
         'first_earn_body': (
             "Hai sbloccato la spilla ⚖️ Utente di Buon Senso: voti in linea "
             "con la maggioranza. Complimenti!"
@@ -205,20 +213,34 @@ BADGE_META: dict = {
     'bastian_contrario': {
         'label': 'Utente Bastian Contrario',
         'emoji': '🎭',
+        'group': 'alignment',
         'first_earn_body': (
             "Hai sbloccato la spilla 🎭 Utente Bastian Contrario: voti spesso "
             "controcorrente. Solide opinioni personali!"
         ),
     },
-    # Future badges go here — same shape.
+    # Future badges go here — same shape, different `group` (or same group if
+    # they form another mutually-exclusive family).
 }
+
+
+def _badge_group(badge_type: Optional[str]) -> Optional[str]:
+    if not badge_type:
+        return None
+    return (BADGE_META.get(badge_type) or {}).get('group')
 
 
 async def _evaluate_and_notify_badge_change(user_id: str) -> None:
     """After counters are recomputed, detect whether the user's badge changed.
-    - First-ever unlock (badge never in `badges_ever_awarded`) → PUSH + in-app.
-    - Switch to a badge already earned before (e.g. buon_senso → bastian_contrario
-      → buon_senso) → in-app only, framed as a transition.
+
+    Notification rule:
+    - First-ever badge from a NEW group (no previous badge in that group) →
+      PUSH + in-app "NUOVA SPILLA".
+    - Switch WITHIN the same group (e.g. buon_senso ↔ bastian_contrario) →
+      in-app ONLY "CAMBIO SPILLA — Sei passato dalla spilla X alla spilla Y".
+      This applies even if the target badge was never held before, because
+      the two are mutually exclusive by design and swapping between them is
+      conceptually a transition, not a discovery.
     - No change → silent.
     Idempotent: uses `current_badge` and `badges_ever_awarded` on the user doc.
     """
@@ -238,25 +260,29 @@ async def _evaluate_and_notify_badge_change(user_id: str) -> None:
     if prev_type == new_type:
         return  # no change
     history = list(u.get('badges_ever_awarded') or [])
-    is_first_time_ever = new_type not in history
-    meta_new = BADGE_META.get(new_type, {'label': new_type, 'emoji': '🏅', 'first_earn_body': f'Hai sbloccato la spilla {new_type}.'})
-    if is_first_time_ever:
-        title = f"{meta_new['emoji']} NUOVA SPILLA"
-        body = meta_new['first_earn_body']
-        send_push = True
-    else:
+    meta_new = BADGE_META.get(new_type, {'label': new_type, 'emoji': '🏅', 'first_earn_body': f'Hai sbloccato la spilla {new_type}.', 'group': None})
+    new_group = meta_new.get('group')
+    prev_group = _badge_group(prev_type)
+    same_group_swap = bool(prev_type and new_group and prev_group == new_group)
+
+    if same_group_swap:
         meta_prev = BADGE_META.get(prev_type or '', {'label': prev_type or '—', 'emoji': ''})
         title = f"{meta_new['emoji']} CAMBIO SPILLA"
         body = (
             f"Sei passato dalla spilla {meta_prev.get('emoji','')} "
             f"{meta_prev['label']} alla spilla {meta_new['emoji']} {meta_new['label']}."
         ).strip()
-        send_push = False  # transition = in-app only, per product decision
+        send_push = False
+    else:
+        # First time from this group (or a genuinely new badge with no group)
+        title = f"{meta_new['emoji']} NUOVA SPILLA"
+        body = meta_new['first_earn_body']
+        send_push = True
 
     # Persist BEFORE notifying so a retry of the same recompute doesn't
     # double-fire the same event.
     updates: dict = {'current_badge': new_type}
-    if is_first_time_ever:
+    if new_type not in history:
         history.append(new_type)
         updates['badges_ever_awarded'] = history
     await db.users.update_one({'user_id': user_id}, {'$set': updates})
@@ -1246,6 +1272,9 @@ async def vote_feud(feud_id: str, body: VoteBody, user: dict = Depends(get_curre
         updated['my_vote_changes'] = change_count + 1
         updated['my_vote_changes_left'] = MAX_VOTE_CHANGES - (change_count + 1)
         await _notify_vote_flip(updated, pre_leader, user['user_id'])
+        # Fire-and-forget alignment fanout: recomputes majority/minority (and
+        # badges) for every other voter of this feud whenever the leader flips.
+        asyncio.create_task(_fanout_alignment_recompute(feud_id, pre_leader, user['user_id']))
         return {'feud': updated, 'changed': True}
     await db.votes.insert_one({
         'vote_id': new_id('vote'), 'feud_id': feud_id, 'user_id': user['user_id'],
@@ -1274,7 +1303,53 @@ async def vote_feud(feud_id: str, body: VoteBody, user: dict = Depends(get_curre
     updated['my_vote_changes'] = 0
     updated['my_vote_changes_left'] = MAX_VOTE_CHANGES
     await _notify_vote_flip(updated, pre_leader, user['user_id'])
+    # Fire-and-forget alignment fanout for other voters (badges + counters).
+    asyncio.create_task(_fanout_alignment_recompute(feud_id, pre_leader, user['user_id']))
     return {'feud': updated, 'changed': False}
+
+
+
+async def _fanout_alignment_recompute(feud_id: str, pre_leader: Optional[str], acting_user_id: str) -> None:
+    """When a vote flips the winning side of a feud, every user who voted on
+    that feud may now have a different majority/minority classification for
+    this vote — which in turn may change their badge. Recompute alignment (and
+    fire badge notifications) for all voters ASYNCHRONOUSLY so the vote
+    request itself stays fast.
+
+    The `pre_leader` param is the winning side BEFORE the acting vote; we only
+    trigger fanout when the vote actually changed the leader.
+    """
+    try:
+        f = await db.feuds.find_one({'feud_id': feud_id}, {'_id': 0, 'votes_a': 1, 'votes_b': 1})
+        if not f:
+            return
+        a = f.get('votes_a', 0)
+        b = f.get('votes_b', 0)
+        if a == b:
+            return  # tie doesn't count as a flip
+        post_leader = 'A' if a > b else 'B'
+        if post_leader == pre_leader:
+            return
+        cursor = db.votes.find(
+            {'feud_id': feud_id, 'user_id': {'$ne': acting_user_id}},
+            {'_id': 0, 'user_id': 1},
+        )
+        voters = await cursor.to_list(10000)
+        seen: set = set()
+        for v in voters:
+            uid = v.get('user_id')
+            if not uid or uid in seen:
+                continue
+            seen.add(uid)
+            try:
+                await _recompute_user_alignment(uid)
+            except Exception as e:
+                logger.warning(f"alignment recompute failed for {uid} in fanout: {e}")
+        if seen:
+            logger.info(f"vote flip fanout: recomputed alignment for {len(seen)} voters of {feud_id}")
+    except Exception as e:
+        logger.warning(f"fanout failed for {feud_id}: {e}")
+
 
 
 async def _notify_vote_flip(feud: dict, pre_leader: Optional[str], acting_user_id: str) -> None:
