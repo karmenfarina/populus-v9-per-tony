@@ -161,6 +161,7 @@ export const api = {
     request('/auth/me/details', { method: 'PATCH', body: JSON.stringify(body) }),
   myPhotos: () => request('/auth/me/photos'),
   uploadPhoto: (data: string) => request('/auth/me/photos', { method: 'POST', body: JSON.stringify({ data }) }),
+  replacePhoto: (id: string, data: string) => request(`/auth/me/photos/${id}`, { method: 'PATCH', body: JSON.stringify({ data }) }),
   setPrimaryPhoto: (id: string) => request(`/auth/me/photos/${id}/primary`, { method: 'PATCH' }),
   deletePhoto: (id: string) => request(`/auth/me/photos/${id}`, { method: 'DELETE' }),
   publicUser: (id: string) => request(`/users/${id}`),

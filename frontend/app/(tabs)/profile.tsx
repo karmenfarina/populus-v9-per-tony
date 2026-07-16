@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Modal, TextInput, Image, KeyboardAvoidingView, Platform, Switch } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import * as ImageManipulator from "expo-image-manipulator";
+import * as FileSystem from "expo-file-system/legacy";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter, useFocusEffect } from "expo-router";
@@ -9,6 +10,53 @@ import { useAuth } from "@/src/auth/AuthContext";
 import { api, HistoryItem, UserPhoto } from "@/src/api";
 import { colors, spacing, font, sideColor } from "@/src/theme";
 import PhotoCropper from "@/src/components/PhotoCropper";
+
+/**
+ * Module-level cache mapping (photo_id + short data hash) → local file URI.
+ *
+ * Rendering multiple `data:image/jpeg;base64,<huge>` sources back-to-back in
+ * the same view can push RN's Image loader into an out-of-memory state on
+ * older devices — the error the user sees as a red-screen after saving many
+ * photos. Writing each photo to disk once and referencing it by a file:// URI
+ * lets the OS stream & cache the bitmap without holding the full base64 in
+ * memory.
+ */
+const photoUriCache: Map<string, string> = new Map();
+function _photoHash(data: string): string {
+  // Cheap fingerprint over the payload so a re-crop with different content
+  // busts the cache automatically.
+  let h = 0;
+  const step = Math.max(1, Math.floor(data.length / 128));
+  for (let i = 0; i < data.length; i += step) {
+    h = (h * 31 + data.charCodeAt(i)) | 0;
+  }
+  return `${data.length}_${(h >>> 0).toString(36)}`;
+}
+async function resolvePhotoUri(photo: UserPhoto): Promise<string> {
+  const key = `${photo.photo_id}_${_photoHash(photo.data)}`;
+  const hit = photoUriCache.get(key);
+  if (hit) return hit;
+  if (Platform.OS === "web") {
+    const uri = `data:image/jpeg;base64,${photo.data}`;
+    photoUriCache.set(key, uri);
+    return uri;
+  }
+  try {
+    const dir = (FileSystem as any).cacheDirectory || (FileSystem as any).documentDirectory;
+    const safe = photo.photo_id.replace(/[^a-zA-Z0-9_]/g, "_");
+    const uri = `${dir}profphoto_${safe}.jpg`;
+    await FileSystem.writeAsStringAsync(uri, photo.data, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+    photoUriCache.set(key, uri);
+    return uri;
+  } catch {
+    // Fallback to data URI if FS write fails — still shows the picture.
+    const uri = `data:image/jpeg;base64,${photo.data}`;
+    photoUriCache.set(key, uri);
+    return uri;
+  }
+}
 
 type Filter = "all" | "majority" | "minority";
 type Socials = { instagram: string; tiktok: string; twitter: string; youtube: string; website: string };
@@ -39,12 +87,17 @@ export default function Profile() {
   const [savingDetails, setSavingDetails] = useState(false);
   const [detailsError, setDetailsError] = useState<string | null>(null);
   const [primaryPhotoData, setPrimaryPhotoData] = useState<string | null>(null);
+  const [primaryPhotoUri, setPrimaryPhotoUri] = useState<string | null>(null);
+  const [photoUris, setPhotoUris] = useState<Record<string, string>>({});
   const [prefsExpanded, setPrefsExpanded] = useState(false);
   const [historyExpanded, setHistoryExpanded] = useState(false);
   // Cropper state
   const [cropperOpen, setCropperOpen] = useState(false);
   const [cropperUri, setCropperUri] = useState<string | null>(null);
   const [cropperSize, setCropperSize] = useState<{ w: number; h: number } | null>(null);
+  // If set, we are RE-cropping an existing photo; on confirm we PATCH that
+  // photo instead of adding a new one.
+  const [cropperReplaceId, setCropperReplaceId] = useState<string | null>(null);
   const isAnonymous = user?.auth_provider === "anonymous";
 
   const loadHistory = useCallback(async (f: Filter) => {
@@ -102,6 +155,17 @@ export default function Profile() {
       setPhotos(list);
       const primary = list.find((p) => p.photo_id === r.primary_photo_id) || list[0];
       setPrimaryPhotoData(primary?.data || null);
+      // Resolve every photo to a file URI (or data URI fallback on web).
+      const entries: Record<string, string> = {};
+      for (const p of list) {
+        try {
+          entries[p.photo_id] = await resolvePhotoUri(p);
+        } catch {
+          entries[p.photo_id] = `data:image/jpeg;base64,${p.data}`;
+        }
+      }
+      setPhotoUris(entries);
+      setPrimaryPhotoUri(primary ? entries[primary.photo_id] || null : null);
     } finally { setLoadingPhotos(false); }
   }, []);
 
@@ -166,12 +230,13 @@ export default function Profile() {
     setCropperSize(
       asset.width && asset.height ? { w: asset.width, h: asset.height } : null,
     );
+    setCropperReplaceId(null);
     setCropperOpen(true);
   };
 
   const uploadCroppedPhoto = useCallback(async (base64: string) => {
-    // Optional: additional downscale if still too large (safety net; the cropper
-    // already caps to 1080px width). ~700KB threshold on base64 chars.
+    // Optional safety net: if payload is still very large after the cropper
+    // capped to 1080px, downscale again. Threshold ~900 KB base64 chars.
     let payload = base64;
     if (payload.length > 900_000) {
       try {
@@ -184,17 +249,49 @@ export default function Profile() {
       } catch { /* keep original */ }
     }
     try {
-      await api.uploadPhoto(payload);
+      if (cropperReplaceId) {
+        await api.replacePhoto(cropperReplaceId, payload);
+      } else {
+        await api.uploadPhoto(payload);
+      }
       setCropperOpen(false);
       setCropperUri(null);
       setCropperSize(null);
+      setCropperReplaceId(null);
       await loadPhotos();
       await refreshMe();
     } catch (e: any) {
       setDetailsError(e?.message || "Errore upload");
       setCropperOpen(false);
+      setCropperReplaceId(null);
     }
-  }, [loadPhotos, refreshMe]);
+  }, [loadPhotos, refreshMe, cropperReplaceId]);
+
+  const recropPhoto = useCallback(async (p: UserPhoto) => {
+    // Write the current base64 to a temp file so the cropper (which needs a
+    // real URI to feed expo-image-manipulator) can operate on it.
+    try {
+      let sourceUri: string;
+      if (Platform.OS === "web") {
+        sourceUri = `data:image/jpeg;base64,${p.data}`;
+      } else {
+        const dir = (FileSystem as any).cacheDirectory || (FileSystem as any).documentDirectory;
+        const safe = p.photo_id.replace(/[^a-zA-Z0-9_]/g, "_");
+        sourceUri = `${dir}recrop_${safe}_${Date.now()}.jpg`;
+        await FileSystem.writeAsStringAsync(sourceUri, p.data, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+      }
+      // We don't know the intrinsic size without loading. Let the cropper
+      // resolve it via Image.getSize.
+      setCropperUri(sourceUri);
+      setCropperSize(null);
+      setCropperReplaceId(p.photo_id);
+      setCropperOpen(true);
+    } catch (e: any) {
+      setDetailsError(e?.message || "Impossibile aprire l'editor foto");
+    }
+  }, []);
 
   const setPrimary = async (photoId: string) => {
     try {
@@ -322,7 +419,9 @@ export default function Profile() {
           <View style={styles.headerRow}>
             {isAnonymous ? (
               <View style={styles.avatarWrap}>
-                {primaryPhotoData ? (
+                {primaryPhotoUri ? (
+                  <Image source={{ uri: primaryPhotoUri }} style={styles.avatarImg} />
+                ) : primaryPhotoData ? (
                   <Image source={{ uri: `data:image/jpeg;base64,${primaryPhotoData}` }} style={styles.avatarImg} />
                 ) : (
                   <View style={[styles.avatarImg, styles.avatarPlaceholder]}>
@@ -332,7 +431,9 @@ export default function Profile() {
               </View>
             ) : (
               <Pressable onPress={openProfileEdit} testID="profile-avatar" style={styles.avatarWrap}>
-                {primaryPhotoData ? (
+                {primaryPhotoUri ? (
+                  <Image source={{ uri: primaryPhotoUri }} style={styles.avatarImg} />
+                ) : primaryPhotoData ? (
                   <Image source={{ uri: `data:image/jpeg;base64,${primaryPhotoData}` }} style={styles.avatarImg} />
                 ) : (
                   <View style={[styles.avatarImg, styles.avatarPlaceholder]}>
@@ -678,7 +779,10 @@ export default function Profile() {
                         const isPrimary = p.photo_id === user.primary_photo_id;
                         return (
                           <View key={p.photo_id} style={styles.photoBox} testID={`photo-${p.photo_id}`}>
-                            <Image source={{ uri: `data:image/jpeg;base64,${p.data}` }} style={styles.photoImg} />
+                            <Image
+                              source={{ uri: photoUris[p.photo_id] || `data:image/jpeg;base64,${p.data}` }}
+                              style={styles.photoImg}
+                            />
                             {isPrimary && (
                               <View style={styles.primaryBadge}>
                                 <Ionicons name="star" size={12} color={colors.onBrandSecondary} />
@@ -690,6 +794,9 @@ export default function Profile() {
                                   <Ionicons name="star-outline" size={14} color={colors.onSurface} />
                                 </Pressable>
                               )}
+                              <Pressable onPress={() => recropPhoto(p)} testID={`photo-recrop-${p.photo_id}`} style={styles.photoAct}>
+                                <Ionicons name="crop-outline" size={14} color={colors.onSurface} />
+                              </Pressable>
                               <Pressable onPress={() => deletePhoto(p.photo_id)} testID={`photo-delete-${p.photo_id}`} style={[styles.photoAct, { backgroundColor: colors.brandPrimary }]}>
                                 <Ionicons name="trash" size={14} color={colors.onBrandPrimary} />
                               </Pressable>
@@ -756,7 +863,7 @@ export default function Profile() {
         uri={cropperUri}
         originalWidth={cropperSize?.w}
         originalHeight={cropperSize?.h}
-        onCancel={() => { setCropperOpen(false); setCropperUri(null); setCropperSize(null); }}
+        onCancel={() => { setCropperOpen(false); setCropperUri(null); setCropperSize(null); setCropperReplaceId(null); }}
         onConfirm={uploadCroppedPhoto}
       />
     </SafeAreaView>

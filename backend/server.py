@@ -760,6 +760,28 @@ async def delete_photo(photo_id: str, user: dict = Depends(get_current_user)):
     return {'ok': True, 'primary_photo_id': updates.get('primary_photo_id', user.get('primary_photo_id'))}
 
 
+@api_router.patch('/auth/me/photos/{photo_id}')
+async def replace_photo(photo_id: str, body: PhotoUploadBody, user: dict = Depends(get_current_user)):
+    """Replace the raw base64 of an existing photo (keeps position & photo_id).
+
+    Used by the client when the user re-crops a photo already saved to their
+    profile. We keep the photo id so `primary_photo_id` remains valid without
+    an additional update.
+    """
+    _reject_if_anonymous(user)
+    photo = await db.user_photos.find_one({'photo_id': photo_id, 'user_id': user['user_id']}, {'_id': 0})
+    if not photo:
+        raise HTTPException(status_code=404, detail='Foto non trovata')
+    data = _strip_data_url(body.data.strip())
+    if len(data) > 3_500_000:
+        raise HTTPException(status_code=400, detail='Foto troppo grande (max ~2.5MB)')
+    await db.user_photos.update_one(
+        {'photo_id': photo_id, 'user_id': user['user_id']},
+        {'$set': {'data': data, 'updated_at': now_utc()}},
+    )
+    return {'photo_id': photo_id, 'ok': True}
+
+
 @api_router.get('/users/{user_id}')
 async def public_user(user_id: str):
     u = await db.users.find_one({'user_id': user_id}, {'_id': 0})

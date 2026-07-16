@@ -59,10 +59,11 @@ export default function PhotoCropper({
   const [imgH, setImgH] = useState<number>(originalHeight || 0);
   const [busy, setBusy] = useState(false);
 
-  // Live animated values (drive the image transform every frame).
+  // Live animated values (drive the image transform + slider every frame).
   const txAnim = useRef(new Animated.Value(0)).current;
   const tyAnim = useRef(new Animated.Value(0)).current;
   const zoomAnim = useRef(new Animated.Value(MIN_ZOOM)).current;
+  const sliderProgressAnim = useRef(new Animated.Value(0)).current;
 
   // Refs mirroring the animated values (source of truth for gesture math &
   // crop calculation). Kept in sync via Animated.Value listeners so we can
@@ -70,11 +71,8 @@ export default function PhotoCropper({
   const tx = useRef(0);
   const ty = useRef(0);
   const zoom = useRef(MIN_ZOOM);
+  const sliderProgress = useRef(0);
   const gestureStart = useRef({ tx: 0, ty: 0 });
-
-  // Slider visual state (0..1 progress) — also expressed via a shared ref so
-  // the slider thumb tracks the finger even during the drag.
-  const [sliderProgress, setSliderProgress] = useState(0);
   const [sliderWidth, setSliderWidth] = useState(0);
   const sliderStart = useRef(0);
 
@@ -83,12 +81,14 @@ export default function PhotoCropper({
     const sx = txAnim.addListener(({ value }) => { tx.current = value; });
     const sy = tyAnim.addListener(({ value }) => { ty.current = value; });
     const sz = zoomAnim.addListener(({ value }) => { zoom.current = value; });
+    const sp = sliderProgressAnim.addListener(({ value }) => { sliderProgress.current = value; });
     return () => {
       txAnim.removeListener(sx);
       tyAnim.removeListener(sy);
       zoomAnim.removeListener(sz);
+      sliderProgressAnim.removeListener(sp);
     };
-  }, [txAnim, tyAnim, zoomAnim]);
+  }, [txAnim, tyAnim, zoomAnim, sliderProgressAnim]);
 
   // Read intrinsic image size when needed.
   useEffect(() => {
@@ -108,11 +108,12 @@ export default function PhotoCropper({
     txAnim.setValue(0);
     tyAnim.setValue(0);
     zoomAnim.setValue(MIN_ZOOM);
+    sliderProgressAnim.setValue(0);
     tx.current = 0;
     ty.current = 0;
     zoom.current = MIN_ZOOM;
-    setSliderProgress(0);
-  }, [visible, uri, txAnim, tyAnim, zoomAnim]);
+    sliderProgress.current = 0;
+  }, [visible, uri, txAnim, tyAnim, zoomAnim, sliderProgressAnim]);
 
   // Cover-scale so the image always fills the crop window before user zoom.
   const baseCover = useMemo(() => {
@@ -177,11 +178,12 @@ export default function PhotoCropper({
       const z = MIN_ZOOM + p * (MAX_ZOOM - MIN_ZOOM);
       zoom.current = z;
       zoomAnim.setValue(z);
-      setSliderProgress(p);
+      sliderProgress.current = p;
+      sliderProgressAnim.setValue(p);
       // Prevent empty margins after a zoom out.
       reclampTranslation();
     },
-    [zoomAnim, reclampTranslation],
+    [zoomAnim, sliderProgressAnim, reclampTranslation],
   );
 
   const sliderResponder = useMemo(
@@ -193,9 +195,8 @@ export default function PhotoCropper({
         onPanResponderTerminationRequest: () => false,
         onShouldBlockNativeResponder: () => true,
         onPanResponderGrant: (evt) => {
-          sliderStart.current = sliderProgress;
+          sliderStart.current = sliderProgress.current;
           if (sliderWidth > 0) {
-            // Jump-to-tap: set the thumb to wherever the user pressed.
             const x = evt.nativeEvent.locationX;
             applyZoomFromProgress(x / sliderWidth);
           }
@@ -206,7 +207,7 @@ export default function PhotoCropper({
           applyZoomFromProgress(nextProgress);
         },
       }),
-    [sliderProgress, sliderWidth, applyZoomFromProgress],
+    [sliderWidth, applyZoomFromProgress],
   );
 
   const onSliderLayout = useCallback((e: LayoutChangeEvent) => {
@@ -244,9 +245,12 @@ export default function PhotoCropper({
           },
         },
       ];
-      if (width > 1080) actions.push({ resize: { width: 1080 } });
+      // Cap the output at 720px which is more than enough for a circular
+      // avatar and keeps the base64 payload light — helps RN's Image loader
+      // handle multiple profile photos without memory pressure.
+      if (width > 720) actions.push({ resize: { width: 720 } });
       const out = await ImageManipulator.manipulateAsync(uri, actions, {
-        compress: 0.85,
+        compress: 0.78,
         format: ImageManipulator.SaveFormat.JPEG,
         base64: true,
       });
@@ -328,15 +332,35 @@ export default function PhotoCropper({
               testID="cropper-slider"
             >
               <View style={styles.sliderTrack}>
-                <View style={[styles.sliderFill, { width: `${sliderProgress * 100}%` }]} />
+                <Animated.View
+                  style={[
+                    styles.sliderFill,
+                    {
+                      width: sliderProgressAnim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [0, Math.max(sliderWidth, 1)],
+                        extrapolate: "clamp",
+                      }),
+                    },
+                  ]}
+                />
               </View>
-              <View
+              <Animated.View
                 style={[
                   styles.sliderThumb,
                   {
-                    left: Math.max(0, Math.min(sliderWidth - 24, sliderProgress * sliderWidth - 12)),
+                    transform: [
+                      {
+                        translateX: sliderProgressAnim.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: [0, Math.max(sliderWidth - 24, 1)],
+                          extrapolate: "clamp",
+                        }),
+                      },
+                    ],
                   },
                 ]}
+                testID="cropper-slider-thumb"
               />
             </View>
             <Ionicons name="expand-outline" size={20} color="rgba(255,255,255,0.85)" />
@@ -402,6 +426,7 @@ const styles = StyleSheet.create({
   sliderThumb: {
     position: "absolute",
     top: 10,
+    left: 0,
     width: 24,
     height: 24,
     borderRadius: 12,
