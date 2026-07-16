@@ -143,33 +143,36 @@ export default function UserPublicScreen() {
 
       <ScrollView contentContainerStyle={{ paddingBottom: spacing.xxxl }}>
         <View style={styles.galleryWrap}>
-          {hasPhotos ? (
-            <Image
-              source={{ uri: `data:image/jpeg;base64,${current!.data}` }}
-              style={styles.galleryImg}
-              resizeMode="cover"
-              testID={`gallery-image-${idx}`}
-            />
-          ) : (
-            <View style={[styles.galleryImg, styles.noPhotoBox]}>
-              <Ionicons name="person-outline" size={96} color={colors.muted} />
-              <Text style={styles.noPhotoTxt}>Nessuna foto</Text>
-            </View>
-          )}
-          {photos.length > 1 && (
-            <>
-              <Pressable onPress={prev} testID="gallery-prev" style={[styles.arrow, { left: spacing.md }]}>
-                <Ionicons name="chevron-back" size={26} color={colors.onSurfaceInverse} />
-              </Pressable>
-              <Pressable onPress={next} testID="gallery-next" style={[styles.arrow, { right: spacing.md }]}>
-                <Ionicons name="chevron-forward" size={26} color={colors.onSurfaceInverse} />
-              </Pressable>
-              <View style={styles.dots}>
-                {photos.map((_, i) => (
-                  <View key={i} style={[styles.dot, i === idx && styles.dotOn]} />
-                ))}
+          <View style={styles.avatarRing}>
+            {hasPhotos ? (
+              <Image
+                source={{ uri: `data:image/jpeg;base64,${current!.data}` }}
+                style={styles.avatarImg}
+                resizeMode="cover"
+                testID={`gallery-image-${idx}`}
+              />
+            ) : (
+              <View style={[styles.avatarImg, styles.noPhotoBox]}>
+                <Ionicons name="person-outline" size={72} color={colors.muted} />
               </View>
-            </>
+            )}
+            {photos.length > 1 && (
+              <>
+                <Pressable onPress={prev} testID="gallery-prev" style={[styles.arrowSmall, { left: -spacing.xl }]}>
+                  <Ionicons name="chevron-back" size={22} color={colors.onSurface} />
+                </Pressable>
+                <Pressable onPress={next} testID="gallery-next" style={[styles.arrowSmall, { right: -spacing.xl }]}>
+                  <Ionicons name="chevron-forward" size={22} color={colors.onSurface} />
+                </Pressable>
+              </>
+            )}
+          </View>
+          {photos.length > 1 && (
+            <View style={styles.dotsRow}>
+              {photos.map((_, i) => (
+                <View key={i} style={[styles.dot, i === idx && styles.dotOn]} />
+              ))}
+            </View>
           )}
         </View>
 
@@ -345,14 +348,17 @@ const styles = StyleSheet.create({
   backBtn: { flexDirection: "row", alignItems: "center", gap: 4 },
   backTxt: { color: colors.onSurfaceInverse, fontSize: font.sizes.sm, letterSpacing: 1 },
   topNick: { color: colors.brandSecondary, fontSize: font.sizes.sm, letterSpacing: 2 },
-  galleryWrap: { position: "relative", backgroundColor: colors.surfaceInverse, borderBottomWidth: 2, borderColor: colors.border },
-  galleryImg: { width: "100%", aspectRatio: 1, backgroundColor: colors.surfaceInverse },
+  galleryWrap: { alignItems: "center", justifyContent: "center", backgroundColor: colors.surface, paddingTop: spacing.xl, paddingBottom: spacing.lg, borderBottomWidth: 2, borderColor: colors.border },
+  avatarRing: { width: 160, height: 160, borderRadius: 80, backgroundColor: colors.surfaceInverse, alignItems: "center", justifyContent: "center", overflow: "visible", position: "relative" },
+  avatarImg: { width: 160, height: 160, borderRadius: 80, backgroundColor: colors.surfaceInverse, overflow: "hidden" },
+  arrowSmall: { position: "absolute", top: "50%", marginTop: -20, width: 40, height: 40, borderRadius: 20, backgroundColor: colors.surfaceSecondary, borderWidth: 2, borderColor: colors.border, alignItems: "center", justifyContent: "center" },
+  dotsRow: { flexDirection: "row", gap: 6, justifyContent: "center", marginTop: spacing.md },
   noPhotoBox: { alignItems: "center", justifyContent: "center", gap: spacing.sm },
   noPhotoTxt: { color: colors.muted, fontSize: font.sizes.base, letterSpacing: 1 },
   arrow: { position: "absolute", top: "50%", marginTop: -24, width: 48, height: 48, backgroundColor: "rgba(0,0,0,0.55)", borderWidth: 2, borderColor: colors.brandSecondary, alignItems: "center", justifyContent: "center" },
   dots: { position: "absolute", bottom: spacing.md, left: 0, right: 0, flexDirection: "row", gap: 6, justifyContent: "center" },
-  dot: { width: 8, height: 8, backgroundColor: "rgba(255,255,255,0.35)", borderWidth: 1, borderColor: "#000" },
-  dotOn: { backgroundColor: colors.brandSecondary },
+  dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: "rgba(0,0,0,0.2)" },
+  dotOn: { backgroundColor: colors.brandPrimary },
   body: { padding: spacing.lg, gap: spacing.md },
   nick: { fontSize: font.sizes.xxxl, fontWeight: "500", letterSpacing: 1, color: colors.onSurface },
   badge: { alignSelf: "flex-start", paddingHorizontal: spacing.sm, paddingVertical: 4, borderWidth: 2, borderColor: colors.border, fontSize: font.sizes.xs, letterSpacing: 2, fontWeight: "500" },
@@ -368,7 +374,7 @@ const styles = StyleSheet.create({
   badgeTitle: { fontSize: font.sizes.lg, fontWeight: "500", letterSpacing: 1.5, marginTop: 2 },
   badgeSubtitle: { fontSize: font.sizes.xs, letterSpacing: 1, opacity: 0.8, marginTop: 2 },
   anonBox: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.xxl, gap: spacing.sm },
-  anonAvatar: { width: 140, height: 140, borderRadius: 70, borderWidth: 4, borderColor: colors.border, alignItems: "center", justifyContent: "center", backgroundColor: colors.surfaceInverse, marginBottom: spacing.md },
+  anonAvatar: { width: 140, height: 140, borderRadius: 70, borderWidth: 0, alignItems: "center", justifyContent: "center", backgroundColor: colors.surfaceInverse, marginBottom: spacing.md, overflow: "hidden" },
   anonTitle: { fontSize: font.sizes.xxl, letterSpacing: 2.5, fontWeight: "500", color: colors.onSurface },
   anonSubtitle: { fontSize: font.sizes.base, color: colors.brandPrimary, letterSpacing: 1 },
   anonHint: { fontSize: font.sizes.sm, color: colors.muted, textAlign: "center", lineHeight: 20, marginTop: spacing.sm, paddingHorizontal: spacing.md },
