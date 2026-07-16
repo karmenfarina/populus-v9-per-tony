@@ -219,16 +219,23 @@ export default function PhotoCropper({
         onPanResponderTerminationRequest: () => false,
         onShouldBlockNativeResponder: () => true,
         onPanResponderGrant: (evt) => {
-          if (sliderWidth > 0) {
-            // Tap-to-jump: snap the thumb to where the finger landed.
-            const x = evt.nativeEvent.locationX;
+          if (sliderWidth <= 0) {
+            sliderStart.current = sliderProgress.current;
+            return;
+          }
+          // Tap-to-jump ONLY when the finger clearly lands away from the
+          // current thumb. Otherwise (dragging the thumb from where it
+          // already is), we don't move on grant — this preserves the very
+          // first pixel of the drag and eliminates the "initial snap" the
+          // user complained about.
+          const x = evt.nativeEvent.locationX;
+          const currentThumbX = sliderProgress.current * sliderWidth;
+          const THUMB_HITBOX = 22; // half of the visual thumb + a little slack
+          if (Math.abs(x - currentThumbX) > THUMB_HITBOX) {
             applyZoomFromProgress(x / sliderWidth);
           }
-          // IMPORTANT: capture the base AFTER the jump so the first `dx`
-          // during the subsequent drag is measured from the finger position,
-          // not from the previous zoom value. Without this, releasing the
-          // slider at 20 %, then tapping at 80 %, would still start dragging
-          // from 20 % — visible as a jarring initial "snap".
+          // Capture the base AFTER the (possibly skipped) jump so subsequent
+          // `dx` values are measured from the finger's current position.
           sliderStart.current = sliderProgress.current;
         },
         onPanResponderMove: (_, g) => {

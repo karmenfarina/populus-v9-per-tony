@@ -1,0 +1,42 @@
+{
+  "summary": "Backend regression tests for non-destructive photo re-cropping (original_data). Wrote 16 pytest cases in /app/backend/tests/test_photo_original_data.py covering upload with/without original_data, list omission, GET /original, PATCH preservation, PATCH back-fill on legacy rows, public user leak check, anonymous 403 rejections, and delete/set-primary regression. All 16/16 pass against http://localhost:8001. One minor spec deviation flagged (has_original semantics).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "GET /api/auth/me/photos/{photo_id}/original",
+        "issue": "Spec says `has_original` should be true only when the record has a DISTINCT uncropped source, but implementation returns `bool(doc.get('original_data'))`. Because upload without original_data now populates original_data = data (fallback), every new photo returns `has_original: true` even when there is no true zoom-out available. Suggest either (a) not populating original_data on fallback and treating missing field as `has_original=false`, or (b) computing `has_original = doc.get('original_data') is not None and doc.get('original_data') != doc.get('data')`. Current behavior is consistent for the cropper (it always gets a usable payload) so this is low priority — clients just cannot distinguish 'true zoom-out available' from 'reposition-only'."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_photo_original_data.py",
+    "/app/test_reports/pytest/photo_original_data.xml"
+  ],
+  "action_items": [
+    "Review the has_original semantics vs the spec (see minor issue). If the intent is for clients to skip fetching /original when there is nothing new to zoom-out to, adjust the return value or stop populating original_data on fallback."
+  ],
+  "critical_code_review_comments": [
+    "server.py `_reject_if_anonymous` is correctly invoked on POST /auth/me/photos, PATCH /auth/me/photos/{id}, PATCH /primary, DELETE, and GET /original.",
+    "List endpoint uses projection `{'original_data': 0}` — good.",
+    "Public /users/{id} uses projection `{'original_data': 0}` — good.",
+    "PATCH replace_photo correctly guards back-fill with `if body.original_data and not photo.get('original_data')` — writes original_data only when absent.",
+    "PhotoUploadBody enforces min_length=40 on both data and original_data — good sanity guard.",
+    "3.5MB base64 cap enforced separately on data and original_data — good."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_photo_original_data.py (new)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "not tested (backend-only request)"},
+  "seed_data_creation": "None persisted. Test uses chat_a@test.it and cleans up every uploaded photo in a fixture teardown; restores original primary photo. Post-run verified: chat_a photos_count=1 and primary_photo_id=ph_8f5825600849 (unchanged from before the run).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Photo endpoints now handle original_data. Reusable regression at /app/backend/tests/test_photo_original_data.py — safe to re-run (self-cleaning). Uses chat_a@test.it/test123. Reads MONGO_URL/DB_NAME from backend/.env for direct DB assertions on stored `data` vs `original_data`.",
+  "rca_of_issue": "N/A — no bug reproduced. Implementation matches all 8 acceptance criteria from the review request; the only nit is the has_original truthiness semantics documented above."
+}

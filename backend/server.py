@@ -165,7 +165,8 @@ class DetailsBody(BaseModel):
 
 
 class PhotoUploadBody(BaseModel):
-    data: str = Field(min_length=40)  # base64 data (with or without prefix)
+    data: str = Field(min_length=40)  # cropped base64 (with or without prefix)
+    original_data: Optional[str] = Field(default=None, min_length=40)  # uncropped source, used to allow re-cropping (zoom-out)
 
 
 class VoteBody(BaseModel):
@@ -704,11 +705,20 @@ async def upload_photo(body: PhotoUploadBody, user: dict = Depends(get_current_u
     data = _strip_data_url(body.data.strip())
     if len(data) > 3_500_000:  # ~2.5MB decoded upper bound
         raise HTTPException(status_code=400, detail='Foto troppo grande (max ~2.5MB)')
+    # Optional uncropped source — kept so the user can re-open the cropper
+    # later and choose a different portion (including zooming back out). If
+    # the client did not send one, we fall back to the cropped payload so
+    # the field is always populated (the re-crop UX just becomes a
+    # cosmetic reposition rather than a true zoom-out).
+    original = _strip_data_url((body.original_data or body.data).strip())
+    if len(original) > 3_500_000:
+        raise HTTPException(status_code=400, detail='Originale foto troppo grande (max ~2.5MB)')
     photo_id = new_id('ph')
     doc = {
         'photo_id': photo_id,
         'user_id': user['user_id'],
         'data': data,
+        'original_data': original,
         'position': current_count,
         'created_at': now_utc(),
     }
@@ -722,14 +732,39 @@ async def upload_photo(body: PhotoUploadBody, user: dict = Depends(get_current_u
 
 @api_router.get('/auth/me/photos')
 async def my_photos(user: dict = Depends(get_current_user)):
+    # NOTE: We intentionally EXCLUDE `original_data` from the list response so
+    # the payload does not double in size on every profile fetch. Clients that
+    # need the original (re-cropping flow) call
+    # `GET /auth/me/photos/{photo_id}/original` on demand.
     docs = await db.user_photos.find(
-        {'user_id': user['user_id']}, {'_id': 0}
+        {'user_id': user['user_id']}, {'_id': 0, 'original_data': 0}
     ).sort('position', 1).to_list(MAX_PHOTOS + 1)
     for d in docs:
         if isinstance(d.get('created_at'), datetime):
             d['created_at'] = _iso_utc(d['created_at'])
         d['is_primary'] = (d['photo_id'] == user.get('primary_photo_id'))
     return {'photos': docs, 'primary_photo_id': user.get('primary_photo_id')}
+
+
+@api_router.get('/auth/me/photos/{photo_id}/original')
+async def my_photo_original(photo_id: str, user: dict = Depends(get_current_user)):
+    """Returns the uncropped base64 for a photo — used by the client when
+    the user taps "Ricomponi" so the cropper can start from the FULL source
+    and let them zoom back out. For legacy photos saved before this field
+    existed, we transparently return the cropped `data` as the original.
+    """
+    _reject_if_anonymous(user)
+    doc = await db.user_photos.find_one(
+        {'photo_id': photo_id, 'user_id': user['user_id']},
+        {'_id': 0, 'data': 1, 'original_data': 1, 'photo_id': 1},
+    )
+    if not doc:
+        raise HTTPException(status_code=404, detail='Foto non trovata')
+    return {
+        'photo_id': doc['photo_id'],
+        'original_data': doc.get('original_data') or doc.get('data'),
+        'has_original': bool(doc.get('original_data')),
+    }
 
 
 @api_router.patch('/auth/me/photos/{photo_id}/primary')
@@ -762,11 +797,13 @@ async def delete_photo(photo_id: str, user: dict = Depends(get_current_user)):
 
 @api_router.patch('/auth/me/photos/{photo_id}')
 async def replace_photo(photo_id: str, body: PhotoUploadBody, user: dict = Depends(get_current_user)):
-    """Replace the raw base64 of an existing photo (keeps position & photo_id).
+    """Replace the cropped base64 of an existing photo (keeps position & photo_id).
 
     Used by the client when the user re-crops a photo already saved to their
     profile. We keep the photo id so `primary_photo_id` remains valid without
-    an additional update.
+    an additional update. **We intentionally do NOT touch `original_data`**
+    so the user can keep re-cropping (including zooming back out) from the
+    same pristine source indefinitely.
     """
     _reject_if_anonymous(user)
     photo = await db.user_photos.find_one({'photo_id': photo_id, 'user_id': user['user_id']}, {'_id': 0})
@@ -775,9 +812,17 @@ async def replace_photo(photo_id: str, body: PhotoUploadBody, user: dict = Depen
     data = _strip_data_url(body.data.strip())
     if len(data) > 3_500_000:
         raise HTTPException(status_code=400, detail='Foto troppo grande (max ~2.5MB)')
+    updates: dict = {'data': data, 'updated_at': now_utc()}
+    # Back-fill the original_data field on legacy photos so subsequent
+    # re-crops preserve the ability to zoom back out. Client may pass its
+    # cached source when it has one; otherwise we leave whatever the DB has.
+    if body.original_data and not photo.get('original_data'):
+        original = _strip_data_url(body.original_data.strip())
+        if len(original) <= 3_500_000:
+            updates['original_data'] = original
     await db.user_photos.update_one(
         {'photo_id': photo_id, 'user_id': user['user_id']},
-        {'$set': {'data': data, 'updated_at': now_utc()}},
+        {'$set': updates},
     )
     return {'photo_id': photo_id, 'ok': True}
 
@@ -798,7 +843,7 @@ async def public_user(user_id: str):
             'is_anonymous': True,
         }
     photos = await db.user_photos.find(
-        {'user_id': user_id}, {'_id': 0, 'user_id': 0}
+        {'user_id': user_id}, {'_id': 0, 'user_id': 0, 'original_data': 0}
     ).sort('position', 1).to_list(MAX_PHOTOS + 1)
     for p in photos:
         if isinstance(p.get('created_at'), datetime):

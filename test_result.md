@@ -322,3 +322,29 @@ agent_communication:
          messages/[userId].tsx.
       Cropper feature is code-complete. User must validate the interactive crop flow on Expo Go
       or a real device (web preview cannot deliver a file to expo-image-picker).
+
+  - agent: "main"
+    message: |
+      Non-destructive re-cropping + slider jump fix.
+      Backend (server.py):
+        - `PhotoUploadBody` now accepts optional `original_data`.
+        - `POST /api/auth/me/photos` stores both `data` (cropped) and `original_data` (uncropped).
+        - `PATCH /api/auth/me/photos/{id}` preserves `original_data`; can back-fill it for legacy.
+        - New endpoint `GET /api/auth/me/photos/{id}/original` returns the uncropped source
+          (falls back to `data` for legacy photos), used by the client when re-cropping so the
+          user can zoom back out. `original_data` is intentionally excluded from list responses
+          to keep the payload lean.
+      Frontend:
+        - `api.ts`: `uploadPhoto(data, original_data?)`, `replacePhoto(...)`, `getPhotoOriginal(id)`.
+        - `profile.tsx`: source URI is preserved, encoded to a bounded (1440px, q≈0.72) base64
+          on upload and shipped as `original_data`. Re-crop flow fetches the original from the
+          backend so zoom-out becomes truly non-destructive. Spinner shown on the recrop button
+          while the original is being fetched.
+        - `PhotoCropper.tsx`: slider tap-to-jump now only triggers when the tap is beyond a 22px
+          hitbox around the current thumb — dragging the thumb starts perfectly smoothly, no
+          initial snap. Grants outside the thumb still snap-to-tap for fast re-zoom.
+      Testing needed:
+        - Backend: verify photo upload accepts/stores original_data; replace preserves it; GET
+          /original returns it; legacy photos fall back to `data`.
+        - Frontend: verify recrop button opens cropper with original source, user can zoom back
+          out below previous save, and slider drag has no initial jump.

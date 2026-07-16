@@ -98,6 +98,12 @@ export default function Profile() {
   // If set, we are RE-cropping an existing photo; on confirm we PATCH that
   // photo instead of adding a new one.
   const [cropperReplaceId, setCropperReplaceId] = useState<string | null>(null);
+  // File URI pointing at the ORIGINAL (uncropped) source shown inside the
+  // cropper. We keep a reference so, on confirm, we can encode the source
+  // itself as `original_data` and send it to the backend — this is what
+  // makes re-cropping non-destructive (the user can zoom back out later).
+  const [cropperOriginalSourceUri, setCropperOriginalSourceUri] = useState<string | null>(null);
+  const [openingRecrop, setOpeningRecrop] = useState<string | null>(null);
   const isAnonymous = user?.auth_provider === "anonymous";
 
   const loadHistory = useCallback(async (f: Filter) => {
@@ -227,12 +233,45 @@ export default function Profile() {
     const asset = res.assets[0];
     if (!asset.uri) { setDetailsError("Impossibile leggere l'immagine"); return; }
     setCropperUri(asset.uri);
+    setCropperOriginalSourceUri(asset.uri);
     setCropperSize(
       asset.width && asset.height ? { w: asset.width, h: asset.height } : null,
     );
     setCropperReplaceId(null);
     setCropperOpen(true);
   };
+
+  /**
+   * Encode a source URI as a bounded-size base64 JPEG suitable for storing
+   * as `original_data` on the server. We downscale to max 1440px (long
+   * side) and compress moderately so a full-quality gallery photo doesn't
+   * blow past the 3.5MB payload cap while still preserving enough
+   * resolution for meaningful re-crops later.
+   */
+  const encodeOriginalForUpload = useCallback(async (uri: string): Promise<string | null> => {
+    try {
+      const out = await ImageManipulator.manipulateAsync(
+        uri,
+        [{ resize: { width: 1440 } }],
+        { compress: 0.72, format: ImageManipulator.SaveFormat.JPEG, base64: true },
+      );
+      if (!out.base64) return null;
+      // Safety net: if resize+compress still produced an oversized payload
+      // (very tall images downscale less aggressively), re-shrink harder.
+      if (out.base64.length > 3_200_000) {
+        const smaller = await ImageManipulator.manipulateAsync(
+          uri,
+          [{ resize: { width: 1080 } }],
+          { compress: 0.65, format: ImageManipulator.SaveFormat.JPEG, base64: true },
+        );
+        return smaller.base64 || out.base64;
+      }
+      return out.base64;
+    } catch (e) {
+      console.warn("encodeOriginal failed", e);
+      return null;
+    }
+  }, []);
 
   const uploadCroppedPhoto = useCallback(async (base64: string) => {
     // Optional safety net: if payload is still very large after the cropper
@@ -250,14 +289,26 @@ export default function Profile() {
     }
     try {
       if (cropperReplaceId) {
+        // On re-crop, keep `original_data` intact on the backend — send only
+        // the new cropped payload. If the DB happens to still be missing an
+        // original (legacy photo), the backend will back-fill from what we
+        // pass here.
         await api.replacePhoto(cropperReplaceId, payload);
       } else {
-        await api.uploadPhoto(payload);
+        // Fresh upload: also send the full-resolution source so the user can
+        // re-crop later without losing information (true zoom-out).
+        let originalPayload: string | undefined;
+        if (cropperOriginalSourceUri) {
+          const encoded = await encodeOriginalForUpload(cropperOriginalSourceUri);
+          if (encoded) originalPayload = encoded;
+        }
+        await api.uploadPhoto(payload, originalPayload);
       }
       setCropperOpen(false);
       setCropperUri(null);
       setCropperSize(null);
       setCropperReplaceId(null);
+      setCropperOriginalSourceUri(null);
       await loadPhotos();
       await refreshMe();
     } catch (e: any) {
@@ -269,24 +320,39 @@ export default function Profile() {
       setDetailsError(msg);
       setCropperOpen(false);
       setCropperReplaceId(null);
+      setCropperOriginalSourceUri(null);
     }
-  }, [loadPhotos, refreshMe, cropperReplaceId]);
+  }, [loadPhotos, refreshMe, cropperReplaceId, cropperOriginalSourceUri, encodeOriginalForUpload]);
 
   const recropPhoto = useCallback(async (p: UserPhoto) => {
+    if (openingRecrop) return;
+    setOpeningRecrop(p.photo_id);
     try {
+      // Fetch the ORIGINAL uncropped source so the user can zoom out again.
+      // The list endpoint intentionally omits `original_data` to keep the
+      // payload lean, so we grab it lazily here. For legacy photos saved
+      // before the field existed, the backend transparently returns `data`.
+      let sourceB64: string;
+      try {
+        const res = await api.getPhotoOriginal(p.photo_id);
+        sourceB64 = (res as any)?.original_data || p.data;
+      } catch {
+        sourceB64 = p.data;
+      }
       let sourceUri: string;
       if (Platform.OS === "web") {
-        sourceUri = `data:image/jpeg;base64,${p.data}`;
+        sourceUri = `data:image/jpeg;base64,${sourceB64}`;
       } else {
         const dir = (FileSystem as any).cacheDirectory || (FileSystem as any).documentDirectory;
         if (!dir) throw new Error("Nessuna cache directory disponibile");
         const safe = p.photo_id.replace(/[^a-zA-Z0-9_]/g, "_");
         sourceUri = `${dir}recrop_${safe}_${Date.now()}.jpg`;
-        await FileSystem.writeAsStringAsync(sourceUri, p.data, {
+        await FileSystem.writeAsStringAsync(sourceUri, sourceB64, {
           encoding: FileSystem.EncodingType.Base64,
         });
       }
       setCropperUri(sourceUri);
+      setCropperOriginalSourceUri(sourceUri);
       setCropperSize(null);
       setCropperReplaceId(p.photo_id);
       setCropperOpen(true);
@@ -294,8 +360,10 @@ export default function Profile() {
       const msg = e?.message || "Impossibile aprire l'editor foto";
       Alert.alert("Errore", String(msg));
       setDetailsError(msg);
+    } finally {
+      setOpeningRecrop(null);
     }
-  }, []);
+  }, [openingRecrop]);
 
   const setPrimary = async (photoId: string) => {
     try {
@@ -798,8 +866,12 @@ export default function Profile() {
                                   <Ionicons name="star-outline" size={14} color={colors.onSurface} />
                                 </Pressable>
                               )}
-                              <Pressable onPress={() => recropPhoto(p)} testID={`photo-recrop-${p.photo_id}`} style={styles.photoAct}>
-                                <Ionicons name="crop-outline" size={14} color={colors.onSurface} />
+                              <Pressable onPress={() => recropPhoto(p)} disabled={openingRecrop === p.photo_id} testID={`photo-recrop-${p.photo_id}`} style={styles.photoAct}>
+                                {openingRecrop === p.photo_id ? (
+                                  <ActivityIndicator size="small" color={colors.onSurface} />
+                                ) : (
+                                  <Ionicons name="crop-outline" size={14} color={colors.onSurface} />
+                                )}
                               </Pressable>
                               <Pressable onPress={() => deletePhoto(p.photo_id)} testID={`photo-delete-${p.photo_id}`} style={[styles.photoAct, { backgroundColor: colors.brandPrimary }]}>
                                 <Ionicons name="trash" size={14} color={colors.onBrandPrimary} />
@@ -867,7 +939,7 @@ export default function Profile() {
         uri={cropperUri}
         originalWidth={cropperSize?.w}
         originalHeight={cropperSize?.h}
-        onCancel={() => { setCropperOpen(false); setCropperUri(null); setCropperSize(null); setCropperReplaceId(null); }}
+        onCancel={() => { setCropperOpen(false); setCropperUri(null); setCropperSize(null); setCropperReplaceId(null); setCropperOriginalSourceUri(null); }}
         onConfirm={uploadCroppedPhoto}
       />
     </SafeAreaView>
