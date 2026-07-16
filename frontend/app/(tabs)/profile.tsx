@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Modal, TextInput, Image, KeyboardAvoidingView, Platform, Switch } from "react-native";
+import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Modal, TextInput, Image, KeyboardAvoidingView, Platform, Switch, Alert } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import * as ImageManipulator from "expo-image-manipulator";
 import * as FileSystem from "expo-file-system/legacy";
@@ -261,35 +261,39 @@ export default function Profile() {
       await loadPhotos();
       await refreshMe();
     } catch (e: any) {
-      setDetailsError(e?.message || "Errore upload");
+      const msg = e?.detail || e?.message || "Errore durante il salvataggio della foto";
+      // Show a modal alert so the user always sees why the save failed, even
+      // if the profile edit sheet was closed. `setDetailsError` alone is
+      // easy to miss because it renders inside a sheet that may not be open.
+      Alert.alert("Impossibile salvare la foto", String(msg));
+      setDetailsError(msg);
       setCropperOpen(false);
       setCropperReplaceId(null);
     }
   }, [loadPhotos, refreshMe, cropperReplaceId]);
 
   const recropPhoto = useCallback(async (p: UserPhoto) => {
-    // Write the current base64 to a temp file so the cropper (which needs a
-    // real URI to feed expo-image-manipulator) can operate on it.
     try {
       let sourceUri: string;
       if (Platform.OS === "web") {
         sourceUri = `data:image/jpeg;base64,${p.data}`;
       } else {
         const dir = (FileSystem as any).cacheDirectory || (FileSystem as any).documentDirectory;
+        if (!dir) throw new Error("Nessuna cache directory disponibile");
         const safe = p.photo_id.replace(/[^a-zA-Z0-9_]/g, "_");
         sourceUri = `${dir}recrop_${safe}_${Date.now()}.jpg`;
         await FileSystem.writeAsStringAsync(sourceUri, p.data, {
           encoding: FileSystem.EncodingType.Base64,
         });
       }
-      // We don't know the intrinsic size without loading. Let the cropper
-      // resolve it via Image.getSize.
       setCropperUri(sourceUri);
       setCropperSize(null);
       setCropperReplaceId(p.photo_id);
       setCropperOpen(true);
     } catch (e: any) {
-      setDetailsError(e?.message || "Impossibile aprire l'editor foto");
+      const msg = e?.message || "Impossibile aprire l'editor foto";
+      Alert.alert("Errore", String(msg));
+      setDetailsError(msg);
     }
   }, []);
 

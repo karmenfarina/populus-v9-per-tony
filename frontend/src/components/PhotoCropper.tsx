@@ -55,8 +55,8 @@ export default function PhotoCropper({
   const screen = Dimensions.get("window");
   const WINDOW = Math.min(screen.width, screen.height) - 32;
 
-  const [imgW, setImgW] = useState<number>(originalWidth || 0);
-  const [imgH, setImgH] = useState<number>(originalHeight || 0);
+  const [imgW, setImgW] = useState<number>(0);
+  const [imgH, setImgH] = useState<number>(0);
   const [busy, setBusy] = useState(false);
 
   // Live animated values (drive the image transform + slider every frame).
@@ -90,17 +90,28 @@ export default function PhotoCropper({
     };
   }, [txAnim, tyAnim, zoomAnim, sliderProgressAnim]);
 
-  // Read intrinsic image size when needed.
+  // Read intrinsic image size when needed. Reset dims when the URI changes
+  // so a re-crop with a different photo doesn't inherit the previous one's
+  // dimensions (which would produce a wrong crop rectangle).
   useEffect(() => {
     if (!visible || !uri) return;
-    if (imgW > 0 && imgH > 0) return;
+    if (originalWidth && originalHeight) {
+      setImgW(originalWidth);
+      setImgH(originalHeight);
+      return;
+    }
+    // Force re-read for the new URI.
+    setImgW(0);
+    setImgH(0);
+    let cancelled = false;
     Image.getSize(
       uri,
-      (w, h) => { setImgW(w); setImgH(h); },
-      () => { setImgW(WINDOW); setImgH(WINDOW); },
+      (w, h) => { if (!cancelled) { setImgW(w); setImgH(h); } },
+      () => { if (!cancelled) { setImgW(WINDOW); setImgH(WINDOW); } },
     );
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [uri, visible]);
+  }, [uri, visible, originalWidth, originalHeight]);
 
   // Reset when a new picture loads or the modal opens.
   useEffect(() => {
@@ -195,11 +206,17 @@ export default function PhotoCropper({
         onPanResponderTerminationRequest: () => false,
         onShouldBlockNativeResponder: () => true,
         onPanResponderGrant: (evt) => {
-          sliderStart.current = sliderProgress.current;
           if (sliderWidth > 0) {
+            // Tap-to-jump: snap the thumb to where the finger landed.
             const x = evt.nativeEvent.locationX;
             applyZoomFromProgress(x / sliderWidth);
           }
+          // IMPORTANT: capture the base AFTER the jump so the first `dx`
+          // during the subsequent drag is measured from the finger position,
+          // not from the previous zoom value. Without this, releasing the
+          // slider at 20 %, then tapping at 80 %, would still start dragging
+          // from 20 % — visible as a jarring initial "snap".
+          sliderStart.current = sliderProgress.current;
         },
         onPanResponderMove: (_, g) => {
           if (sliderWidth <= 0) return;
