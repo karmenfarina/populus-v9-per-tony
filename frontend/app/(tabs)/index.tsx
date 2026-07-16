@@ -69,10 +69,12 @@ export default function HomeFeed() {
           if (!favIds.has(cat.id)) ordered.push(cat);
         }
         setCats(ordered);
-        // Preselect the first favorite category if any, else "all"
-        const initial = favs[0] && c.categories.some((x: any) => x.id === favs[0]) ? favs[0] : "all";
-        setSelected(initial);
-        await load(initial);
+        // Preselected category defaults to "Tutte" for every user, including
+        // those with favorites (they can jump to their preferred category via
+        // the chip row). This matches the user expectation that the home
+        // opens on the widest possible feed.
+        setSelected("all");
+        await load("all");
         lastLoadAtRef.current = Date.now();
       } finally { setLoading(false); }
     })();

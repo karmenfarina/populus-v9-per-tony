@@ -188,14 +188,34 @@ export default function FeudDetail() {
 
   const onShare = async () => {
     if (!feud) return;
+    const base = process.env.EXPO_PUBLIC_BACKEND_URL || "";
+    const url = `${base}/api/share/${feud.feud_id}/html`;
+    const message = `${feud.title}\n\nCon chi ti schieri? ${feud.party_a} vs ${feud.party_b}\n${url}`;
+    // React Native's `Share` API is a no-op on the web preview. Detect the
+    // web platform and route through the Web Share API when available, else
+    // fall back to clipboard + inline confirmation so the user always gets
+    // *some* feedback.
+    if (Platform.OS === "web") {
+      try {
+        const nav: any = typeof navigator !== "undefined" ? navigator : null;
+        if (nav?.share) {
+          await nav.share({ title: feud.title, text: message, url });
+          return;
+        }
+        if (nav?.clipboard?.writeText) {
+          await nav.clipboard.writeText(url);
+          try { window.alert("Link copiato negli appunti"); } catch { /* ignore */ }
+          return;
+        }
+        try { window.prompt("Copia il link della faida:", url); } catch { /* ignore */ }
+      } catch {
+        // AbortError etc. → user cancelled, do nothing
+      }
+      return;
+    }
     try {
-      const base = process.env.EXPO_PUBLIC_BACKEND_URL || "";
-      const url = `${base}/api/share/${feud.feud_id}/html`;
-      await Share.share({
-        title: feud.title,
-        message: `${feud.title}\n\nCon chi ti schieri? ${feud.party_a} vs ${feud.party_b}\n${url}`,
-      });
-    } catch {}
+      await Share.share({ title: feud.title, message });
+    } catch { /* silent */ }
   };
 
   if (loading) {

@@ -85,16 +85,41 @@ export default function ArchiveScreen() {
     })();
   }, [user?.favorite_categories]);
 
-  // Load available dates when category changes
+  // Load available dates when category changes. If we already had a date
+  // selected in the previous category, try to keep it (or snap to the
+  // nearest available one) so the user's temporal context is preserved
+  // while browsing categories.
+  const selectedDateRef = useRef<string | null>(null);
+  useEffect(() => { selectedDateRef.current = selectedDate; }, [selectedDate]);
+
   const loadDates = useCallback(async (cat: string) => {
     setLoadingDates(true);
-    setSelectedDate(null);
     setFeuds([]);
+    const prevSelected = selectedDateRef.current;
     try {
       const r = await api.archiveDates(cat);
       const list: DateEntry[] = r.dates || [];
       setDates(list);
-      if (list.length > 0) setSelectedDate(list[0].date);
+      if (list.length === 0) {
+        setSelectedDate(null);
+        return;
+      }
+      // Attempt: exact match first, then the temporally nearest date. Falls
+      // back to the newest date if there is no previous selection.
+      let target: string | null = null;
+      if (prevSelected && list.some((d) => d.date === prevSelected)) {
+        target = prevSelected;
+      } else if (prevSelected) {
+        // Snap to the closest date by absolute time diff.
+        const prevMs = new Date(prevSelected).getTime();
+        let bestDiff = Infinity;
+        for (const d of list) {
+          const diff = Math.abs(new Date(d.date).getTime() - prevMs);
+          if (diff < bestDiff) { bestDiff = diff; target = d.date; }
+        }
+      }
+      if (!target) target = list[0].date;
+      setSelectedDate(target);
     } catch { setDates([]); }
     finally { setLoadingDates(false); }
   }, []);
