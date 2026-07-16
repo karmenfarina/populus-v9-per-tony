@@ -79,6 +79,7 @@ export default function ChatScreen() {
   const [reportText, setReportText] = useState("");
   const [pendingImage, setPendingImage] = useState<string | null>(null);
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
+  const [viewerImage, setViewerImage] = useState<string | null>(null);
   const listRef = useRef<FlatList>(null);
 
   const loadInitial = useCallback(async () => {
@@ -343,10 +344,16 @@ export default function ChatScreen() {
               ) : (
                 <>
                   {item.image_data ? (
-                    <Image
-                      source={{ uri: `data:image/jpeg;base64,${item.image_data}` }}
-                      style={styles.msgImg}
-                    />
+                    <Pressable
+                      onPress={() => setViewerImage(item.image_data!)}
+                      onLongPress={() => !item.deleted && setReactTarget(item)}
+                      testID={`msg-image-${item.message_id}`}
+                    >
+                      <Image
+                        source={{ uri: `data:image/jpeg;base64,${item.image_data}` }}
+                        style={styles.msgImg}
+                      />
+                    </Pressable>
                   ) : null}
                   {item.text ? (
                     <Text style={[styles.txt, mine ? styles.txtMine : styles.txtTheirs]}>{item.text}</Text>
@@ -463,7 +470,9 @@ export default function ChatScreen() {
 
         {pendingImage && (
           <View style={styles.pendingRow}>
-            <Image source={{ uri: `data:image/jpeg;base64,${pendingImage}` }} style={styles.pendingImg} />
+            <Pressable onPress={() => setViewerImage(pendingImage)}>
+              <Image source={{ uri: `data:image/jpeg;base64,${pendingImage}` }} style={styles.pendingImg} />
+            </Pressable>
             <Pressable onPress={() => setPendingImage(null)} style={styles.pendingClose}>
               <Ionicons name="close" size={18} color={colors.onSurfaceInverse} />
             </Pressable>
@@ -622,6 +631,27 @@ export default function ChatScreen() {
               </Pressable>
             </View>
           </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Fullscreen image viewer */}
+      <Modal
+        visible={!!viewerImage}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setViewerImage(null)}
+      >
+        <Pressable style={styles.viewerBg} onPress={() => setViewerImage(null)}>
+          <Pressable onPress={() => setViewerImage(null)} style={styles.viewerCloseBtn} testID="viewer-close">
+            <Ionicons name="close" size={28} color="#fff" />
+          </Pressable>
+          {viewerImage && (
+            <Image
+              source={{ uri: `data:image/jpeg;base64,${viewerImage}` }}
+              style={styles.viewerImg}
+              resizeMode="contain"
+            />
+          )}
         </Pressable>
       </Modal>
     </SafeAreaView>
@@ -814,4 +844,23 @@ const styles = StyleSheet.create({
     alignItems: "center",
     borderRadius: 8,
   },
+  viewerBg: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.95)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  viewerCloseBtn: {
+    position: "absolute",
+    top: 44,
+    right: 16,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 10,
+  },
+  viewerImg: { width: "100%", height: "100%" },
 });
