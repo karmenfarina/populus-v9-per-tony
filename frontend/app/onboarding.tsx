@@ -30,8 +30,33 @@ export default function Onboarding() {
   const needsNickname = user?.auth_provider === "google";
   const totalSteps = needsNickname ? 5 : 4;
   type Step = 1 | 2 | 3 | 4 | 5;
-  const [step, setStep] = useState<Step>(needsNickname ? 1 : 2);
-  const [nickname, setNickname] = useState<string>(needsNickname ? "" : (user?.nickname || ""));
+  // Start on the categories step by default. If, once `user` hydrates from
+  // storage, we discover we're onboarding a Google account we bump the step
+  // back to 1 (nickname). Using an effect (rather than the useState init)
+  // handles the async auth-context hydration correctly — see bug found in
+  // iteration_34 where the initializer read `user` too early.
+  const [step, setStep] = useState<Step>(2);
+  const [didGateNickname, setDidGateNickname] = useState(false);
+  useEffect(() => {
+    // Only gate ONCE: after the user hydrates, if this is a Google account
+    // and the user is still on the default (categories) step, jump to the
+    // nickname step. We don't force this on later renders so the user can
+    // freely navigate forward past nickname once completed.
+    if (didGateNickname) return;
+    if (user == null) return; // wait for hydration
+    setDidGateNickname(true);
+    if (needsNickname && step === 2) setStep(1);
+  }, [user, needsNickname, step, didGateNickname]);
+  const [nickname, setNickname] = useState<string>("");
+  // Once `user` hydrates, seed the nickname input for non-Google users so
+  // the "BENVENUTO, @xxx" banner works from step 2 onwards. Google users
+  // keep an empty input — they must type their own choice.
+  useEffect(() => {
+    if (nickname) return;
+    if (!user) return;
+    if (needsNickname) return;
+    setNickname(user.nickname || "");
+  }, [user, needsNickname, nickname]);
   const [cats, setCats] = useState<{ id: string; label: string }[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [age, setAge] = useState<string>("");

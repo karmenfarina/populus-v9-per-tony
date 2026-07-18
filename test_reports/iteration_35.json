@@ -1,0 +1,26 @@
+{
+  "summary": "Re-test of iteration_34 fix PASSES. The useEffect-based step reconciliation on onboarding.tsx L38-49 correctly waits for AuthContext hydration and, for Google-provider users, snaps step from the default 2 back to 1 once `user` is populated. All five acceptance criteria verified via Playwright against the live preview at https://faide-poll.preview.emergentagent.com/onboarding: (1) `onboarding-step-nickname` visible on first render for a Google user, (2) five progress dots `progress-1..progress-5` present (no `progress-6`), (3) header reads 'Step 1 di 5' and brand 'SCEGLI IL NICKNAME', (4) `nickname-input` accepts input and tapping `onboarding-next` advances to categories showing 'Step 2 di 5' with brand 'BENVENUTO, @<typed nickname>'. Regression: for a fresh anonymous user with `onboarding_completed=false`, the screen starts on categories (`onboarding-step-1`), the header reads 'Step 1 di 4', four dots `progress-1..progress-4` are present, no `progress-5`, and no `onboarding-step-nickname` node exists. The prior state-from-async-prop bug (iteration_34) is resolved.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_nickname_onboarding.py",
+    "/app/test_reports/scripts/setup_test_users.py"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "onboarding.tsx L45-48: The one-shot `didGateNickname` guard is correct today, but it only checks `step === 2` when deciding whether to snap. If a future refactor changes the default seed to something else, the guard will silently no-op — consider asserting `!didGateNickname && needsNickname` and snapping unconditionally to 1 to keep the intent explicit.",
+    "onboarding.tsx L54-59: The nickname-seeding effect fires only while `nickname` is empty; if the user clears the input, the empty state persists, which is desired. Verified BENVENUTO banner falls back to `user.nickname` when local state is empty, so no regression on that path."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "not tested (frontend-only request)", "frontend": "100% (2/2 scenarios pass — Google onboarding + anonymous regression)"},
+  "seed_data_creation": "Created 2 temporary Mongo users via POST /api/auth/anonymous then patched: (a) anon_5f98028ad16e flipped to auth_provider=google, is_anonymous=false, onboarding_completed=false; (b) anon_147782890e94 kept anonymous with onboarding_completed=false. Both deleted from Mongo at end of run (verified: 2 documents removed). No production data touched; chat_a intentionally NOT used because its onboarding_completed=true already redirects to /(tabs).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "The Google-onboarding fix is confirmed working. Reproduction pattern for future onboarding-related tests: use /app/test_reports/scripts/setup_test_users.py to spin up a Google-flipped user + a fresh anonymous user with onboarding_completed=false; inject the token via `page.add_init_script` writing `JSON.stringify(<jwt>)` into `window.localStorage['faide_token']` before navigating to /onboarding; the AuthContext hydrates from that key via the storage web shim on RN AsyncStorage. Screenshots from this run: /tmp/google_step1.png (nickname step), /tmp/google_step2.png (categories after AVANTI), /tmp/anon_step1.png (regression start on categories).",
+  "rca_of_issue": "Not applicable — no bug found in this iteration. Prior bug (iteration_34) had root cause: `useState(needsNickname ? 1 : 2)` initialiser ran once at mount while `user` was still null (auth hydration is async), so the ternary always evaluated to 2. Current fix moves the reconciliation into a `useEffect([user, needsNickname, step, didGateNickname])` that fires after hydration and snaps `step` from 2 to 1 exactly once for Google users. Verified end-to-end via Playwright on mobile viewport (375x667)."
+}
