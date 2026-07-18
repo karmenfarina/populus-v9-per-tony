@@ -127,6 +127,111 @@ async def get_current_user_optional(authorization: Optional[str] = Header(None))
         return None
 
 
+async def _resolve_anon_user_from_authorization(authorization: Optional[str]) -> Optional[dict]:
+    """Best-effort: if the request carries a Bearer token belonging to an
+    anonymous user, return that user document. Used by signup/login/google
+    endpoints to migrate anonymous data on account upgrade."""
+    if not authorization or not authorization.startswith('Bearer '):
+        return None
+    token = authorization.split(' ', 1)[1].strip()
+    uid = decode_jwt(token)
+    if not uid:
+        # Fallback: check user_sessions in case token is a Google session token
+        try:
+            session = await db.user_sessions.find_one({'session_token': token}, {'_id': 0, 'user_id': 1})
+            if session:
+                uid = session.get('user_id')
+        except Exception:
+            uid = None
+    if not uid:
+        return None
+    u = await db.users.find_one({'user_id': uid}, {'_id': 0})
+    if not u:
+        return None
+    if u.get('auth_provider') != 'anonymous' and not u.get('is_anonymous'):
+        return None
+    return u
+
+
+async def _migrate_anon_data(from_uid: str, to_uid: str) -> dict:
+    """Reassign anonymous user's engagement (votes/comments/replies/messages)
+    to the target registered account, then delete the anonymous account.
+
+    Vote collection has a UNIQUE index on (feud_id, user_id) — if the target
+    account already voted on a feud the anon vote is dropped (registered vote
+    wins, its own tallies are already reflected on the feud counters).
+    """
+    stats = {'votes_moved': 0, 'votes_dropped': 0, 'comments_moved': 0, 'replies_moved': 0, 'messages_moved': 0}
+    if not from_uid or not to_uid or from_uid == to_uid:
+        return stats
+    # Votes — handle unique index (feud_id, user_id) collisions manually.
+    async for v in db.votes.find({'user_id': from_uid}, {'_id': 0, 'vote_id': 1, 'feud_id': 1, 'side': 1}):
+        clash = await db.votes.find_one(
+            {'feud_id': v['feud_id'], 'user_id': to_uid}, {'_id': 0, 'vote_id': 1}
+        )
+        if clash:
+            # Target already voted here — drop the anon vote AND decrement the
+            # feud counter (the anon vote was already counted).
+            dec_field = 'votes_a' if v.get('side') == 'A' else 'votes_b'
+            try:
+                await db.feuds.update_one(
+                    {'feud_id': v['feud_id'], dec_field: {'$gt': 0}},
+                    {'$inc': {dec_field: -1}},
+                )
+            except Exception:
+                pass
+            await db.votes.delete_one({'vote_id': v['vote_id']})
+            stats['votes_dropped'] += 1
+        else:
+            await db.votes.update_one(
+                {'vote_id': v['vote_id']}, {'$set': {'user_id': to_uid}}
+            )
+            stats['votes_moved'] += 1
+    # Comments — bulk reassign
+    r = await db.comments.update_many({'user_id': from_uid}, {'$set': {'user_id': to_uid}})
+    stats['comments_moved'] = int(getattr(r, 'modified_count', 0) or 0)
+    # Replies — bulk reassign
+    r = await db.replies.update_many({'user_id': from_uid}, {'$set': {'user_id': to_uid}})
+    stats['replies_moved'] = int(getattr(r, 'modified_count', 0) or 0)
+    # Messages — anonymous accounts can't chat but reassign defensively
+    r1 = await db.messages.update_many({'sender_id': from_uid}, {'$set': {'sender_id': to_uid}})
+    r2 = await db.messages.update_many({'recipient_id': from_uid}, {'$set': {'recipient_id': to_uid}})
+    stats['messages_moved'] = int(getattr(r1, 'modified_count', 0) or 0) + int(getattr(r2, 'modified_count', 0) or 0)
+    # Nuke anon account artifacts
+    try:
+        await db.user_photos.delete_many({'user_id': from_uid})
+        await db.user_sessions.delete_many({'user_id': from_uid})
+        await db.verification_tokens.delete_many({'user_id': from_uid})
+        await db.badge_notifications.delete_many({'user_id': from_uid})
+    except Exception:
+        pass
+    await db.users.delete_one({'user_id': from_uid})
+    # Refresh badges / alignment on the new owner
+    try:
+        await _recompute_user_alignment(to_uid)
+    except Exception as e:
+        logger.warning(f"post-migration alignment recompute failed for {to_uid}: {e}")
+    logger.info(f"migrated anon={from_uid} -> user={to_uid} stats={stats}")
+    return stats
+
+
+async def _upgrade_anon_in_place(anon_uid: str, updates: dict) -> None:
+    """Transform an anonymous account into a registered one WITHOUT changing
+    user_id — keeps all votes/comments/replies/messages linked seamlessly.
+    Callers must supply the new auth_provider / credentials in `updates`.
+    """
+    base = {
+        'is_anonymous': False,
+        'upgraded_from_anon_at': now_utc(),
+    }
+    base.update(updates)
+    await db.users.update_one({'user_id': anon_uid}, {'$set': base})
+    try:
+        await _recompute_user_alignment(anon_uid)
+    except Exception as e:
+        logger.warning(f"post-upgrade alignment recompute failed for {anon_uid}: {e}")
+
+
 async def require_admin(x_admin_key: Optional[str] = Header(None, alias='X-Admin-Key')) -> bool:
     if not ADMIN_TOKEN or not x_admin_key or x_admin_key != ADMIN_TOKEN:
         raise HTTPException(status_code=401, detail='Chiave admin non valida')
@@ -329,24 +434,32 @@ import hashlib as _hashlib
 
 FRONTEND_BASE_URL = os.environ.get('EXPO_PUBLIC_BACKEND_URL') or os.environ.get('FRONTEND_BASE_URL') or ''
 
-async def _send_verification_email(user_id: str, email: str) -> None:
+async def _send_verification_email(user_id: str, email: str, pending_migration_from: Optional[str] = None) -> None:
     """Generate a fresh verification token and email the link to `email`.
 
     Idempotent per user: deletes any previous token before inserting a new one,
     so only ONE active verification link exists at a time (prevents the classic
     'stale token wins the query' bug). The token is opaque + URL-safe + stored
     hashed; only the raw token appears in the email link.
+
+    If `pending_migration_from` is provided, the anon user_id is stored in the
+    token doc — on successful verify-email the backend reassigns anon data to
+    this account. Used when a user was anon and signed up with an email that
+    already exists (verified or in-flight signup): we can't upgrade in place.
     """
     raw = _secrets.token_urlsafe(32)
     token_hash = _hashlib.sha256(raw.encode('utf-8')).hexdigest()
     expires_at = now_utc() + timedelta(hours=24)
     await db.verification_tokens.delete_many({'user_id': user_id})
-    await db.verification_tokens.insert_one({
+    doc: dict = {
         'user_id': user_id,
         'token_hash': token_hash,
         'created_at': now_utc(),
         'expires_at': expires_at,
-    })
+    }
+    if pending_migration_from and pending_migration_from != user_id:
+        doc['pending_migration_from'] = pending_migration_from
+    await db.verification_tokens.insert_one(doc)
     base = FRONTEND_BASE_URL.rstrip('/')
     link = f"{base}/verify-email?token={raw}" if base else f"/verify-email?token={raw}"
     if not RESEND_API_KEY:
@@ -415,6 +528,15 @@ async def verify_email(body: VerifyEmailBody):
         raise HTTPException(status_code=404, detail='Utente non trovato')
     await db.users.update_one({'user_id': user_id}, {'$set': {'email_verified': True}})
     await db.verification_tokens.delete_many({'user_id': user_id})
+    # Pending anon migration: if this account was created from an anon upgrade
+    # path where the target email was already taken, we deferred the actual
+    # data reassignment until email verification.
+    pending_from = doc.get('pending_migration_from')
+    if pending_from and pending_from != user_id:
+        try:
+            await _migrate_anon_data(pending_from, user_id)
+        except Exception as e:
+            logger.warning(f"deferred anon migration failed {pending_from}->{user_id}: {e}")
     fresh = await db.users.find_one({'user_id': user_id}, {'_id': 0})
     return {'ok': True, 'token': make_jwt(user_id), 'user': _public_user(fresh)}
 
@@ -442,8 +564,11 @@ async def resend_verification(body: ResendVerificationBody, request: Request):
 
 
 @api_router.post('/auth/signup')
-async def signup(body: SignupBody):
-    existing = await db.users.find_one({'email': body.email.lower()})
+async def signup(body: SignupBody, authorization: Optional[str] = Header(None)):
+    email_lc = body.email.lower()
+    existing = await db.users.find_one({'email': email_lc})
+    anon_user = await _resolve_anon_user_from_authorization(authorization)
+    anon_uid = anon_user['user_id'] if anon_user else None
     # Unverified accounts can be retried: overwrite password_hash / nickname
     # so a user who mistyped or forgot doesn't get permanently locked out of
     # their own email until manual intervention. Verified accounts remain
@@ -461,18 +586,43 @@ async def signup(body: SignupBody):
             }},
         )
         try:
-            await _send_verification_email(user_id, body.email.lower())
+            # Defer anon migration to email verification: we don't want anon
+            # data to move to an account that never actually gets activated.
+            await _send_verification_email(
+                user_id, email_lc,
+                pending_migration_from=anon_uid if anon_uid and anon_uid != user_id else None,
+            )
         except Exception as e:
             logger.warning(f"re-signup verification email failed for {user_id}: {e}")
         return {
             'requires_verification': True,
-            'email': body.email.lower(),
+            'email': email_lc,
             'message': 'Abbiamo reinviato l\'email di conferma. Controlla la tua casella.',
+        }
+    # Anon in-place upgrade path: the current user is anonymous AND the email
+    # is fresh. Preserve the anon user_id so all votes/comments/replies remain
+    # linked seamlessly — the account merely graduates to an email account.
+    if anon_uid:
+        await _upgrade_anon_in_place(anon_uid, {
+            'email': email_lc,
+            'nickname': body.nickname,
+            'password_hash': hash_password(body.password),
+            'auth_provider': 'email',
+            'email_verified': False,
+        })
+        try:
+            await _send_verification_email(anon_uid, email_lc)
+        except Exception as e:
+            logger.warning(f"anon-upgrade verification email failed for {anon_uid}: {e}")
+        return {
+            'requires_verification': True,
+            'email': email_lc,
+            'message': 'Ti abbiamo inviato una email di conferma. I tuoi voti anonimi sono stati conservati.',
         }
     user_id = new_id('user')
     user = {
         'user_id': user_id,
-        'email': body.email.lower(),
+        'email': email_lc,
         'nickname': body.nickname,
         'password_hash': hash_password(body.password),
         'auth_provider': 'email',
@@ -497,7 +647,7 @@ async def signup(body: SignupBody):
 
 
 @api_router.post('/auth/login')
-async def login(body: LoginBody):
+async def login(body: LoginBody, authorization: Optional[str] = Header(None)):
     user = await db.users.find_one({'email': body.email.lower()}, {'_id': 0})
     if not user or user.get('auth_provider') != 'email':
         raise HTTPException(status_code=401, detail='Credenziali non valide')
@@ -514,6 +664,15 @@ async def login(body: LoginBody):
                 'email': user['email'],
             },
         )
+    # If the requester was anonymous, migrate their engagement into this
+    # existing registered account before returning the session.
+    try:
+        anon = await _resolve_anon_user_from_authorization(authorization)
+        if anon and anon['user_id'] != user['user_id']:
+            await _migrate_anon_data(anon['user_id'], user['user_id'])
+            user = await db.users.find_one({'user_id': user['user_id']}, {'_id': 0})
+    except Exception as e:
+        logger.warning(f"login-time anon migration failed: {e}")
     return {'token': make_jwt(user['user_id']), 'user': _public_user(user)}
 
 
@@ -533,7 +692,7 @@ async def anonymous(body: AnonymousBody):
 
 
 @api_router.post('/auth/google-session')
-async def google_session(body: GoogleSessionBody):
+async def google_session(body: GoogleSessionBody, authorization: Optional[str] = Header(None)):
     async with httpx.AsyncClient(timeout=15.0) as hx:
         r = await hx.get(
             'https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data',
@@ -548,10 +707,32 @@ async def google_session(body: GoogleSessionBody):
     if not email or not session_token:
         raise HTTPException(status_code=401, detail='Dati sessione mancanti')
 
+    anon = await _resolve_anon_user_from_authorization(authorization)
+    anon_uid = anon['user_id'] if anon else None
+
     existing = await db.users.find_one({'email': email}, {'_id': 0})
     if existing:
         user_id = existing['user_id']
         user = existing
+        # Migrate anon data into this existing Google account.
+        if anon_uid and anon_uid != user_id:
+            try:
+                await _migrate_anon_data(anon_uid, user_id)
+                user = await db.users.find_one({'user_id': user_id}, {'_id': 0})
+            except Exception as e:
+                logger.warning(f"google-login anon migration failed: {e}")
+    elif anon_uid:
+        # In-place upgrade of the anonymous account into a Google account:
+        # preserves user_id (and therefore every vote/comment/reply/message).
+        await _upgrade_anon_in_place(anon_uid, {
+            'email': email,
+            'nickname': name,
+            'auth_provider': 'google',
+            'picture': data.get('picture'),
+            'email_verified': True,
+        })
+        user_id = anon_uid
+        user = await db.users.find_one({'user_id': user_id}, {'_id': 0})
     else:
         user_id = new_id('user')
         user = {
