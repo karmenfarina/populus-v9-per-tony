@@ -155,7 +155,7 @@ export const api = {
     request(`/users/me/history?filter=${filter}`),
   search: (q: string) => request(`/search?q=${encodeURIComponent(q)}`),
   share: (id: string) => request(`/share/${id}`),
-  updateProfile: (body: { age: number; sex: 'F'|'M'|'other'|'na'; region: string; favorite_categories: string[]; profession?: string }) =>
+  updateProfile: (body: { age: number; sex: 'F'|'M'|'other'|'na'; region: string; favorite_categories: string[]; profession?: string; nickname?: string }) =>
     request('/auth/me/profile', { method: 'PATCH', body: JSON.stringify(body) }),
   professions: () => request('/professions'),
   updateDetails: (body: { bio?: string; social_links?: Record<string, string> }) =>

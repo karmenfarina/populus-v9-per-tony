@@ -1,0 +1,45 @@
+{
+  "summary": "Backend nickname feature FULLY PASSES (5/5 pytest cases). Frontend profile UI hiding email PASSES for chat_a. Frontend anonymous/email onboarding step-count PASSES (4 dots, no nickname step). CRITICAL FRONTEND BUG: Google-provider onboarding does NOT start on the nickname step — it renders step 2 (categories) even though the 5 progress dots are correct. Root cause: onboarding.tsx L33 initialises `step` from `useState(needsNickname ? 1 : 2)` while `user` is still null (auth context hydrates async from AsyncStorage/localStorage), so `needsNickname` evaluates to false on first render, `step` locks to 2, and the initializer never re-runs when the user later loads. `totalSteps` is a plain const on each render so it correctly flips to 5, exposing the mismatch. Same problem for `nickname` initial value (L34) — for the Google-name case it uses the fresh empty string branch but on the first-render/user-null path we never reach the nickname step, so the mandatory-nickname requirement is bypassed and the user can complete onboarding keeping the Google-provided display name.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "app/onboarding.tsx",
+        "issue": "Google users skip the mandatory nickname step. Component renders 'Step 2 di 5' (BENVENUTO, categories) instead of 'Step 1 di 5' (SCEGLI IL NICKNAME) on first mount because useState(needsNickname ? 1 : 2) is initialised with user=null (auth hydration is async). progress-1..5 dots are all correct so the mismatch is very visible. Fix: replace initial state with useState<Step>(1) then use useEffect to reconcile step and nickname when needsNickname / user become available, e.g. `useEffect(() => { if (needsNickname && step < 1) setStep(1); if (!needsNickname && step === 1) setStep(2); if (!needsNickname && !nickname) setNickname(user?.nickname || ''); }, [needsNickname, user?.nickname]);`. Alternatively derive `step` initial state inside a useMemo gated on user readiness (render null until user loads).",
+        "testID": "onboarding-step-nickname",
+        "priority": "CRITICAL"
+      }
+    ],
+    "integration_issues": [
+      {
+        "flow": "Google external-provider onboarding",
+        "issue": "Because nickname step never renders, api.updateProfile is submitted with NO nickname key, so the Google display name ('Google User Test' in my repro) is kept as the user's handle — the mandatory-nickname business requirement is silently bypassed.",
+        "affected_testIDs": ["onboarding-step-nickname", "nickname-input", "progress-1"]
+      }
+    ],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_nickname_onboarding.py",
+    "/app/test_reports/pytest/nickname_onboarding.xml"
+  ],
+  "action_items": [
+    "Fix onboarding.tsx L33-34 to reconcile step & nickname state once user hydrates from AuthContext. Simple option: render a loading spinner until `user !== null`, then initialise step conditionally; robust option: keep step as state and add a useEffect that snaps step to 1 when needsNickname flips true and step===2 with no user interaction yet.",
+    "After fix, re-run this playbook: 1) create anon user, mongo-flip to auth_provider=google + onboarding_completed=false, 2) inject token, open /onboarding, 3) assert testID='onboarding-step-nickname' visible, testID='nickname-input' editable, 4) type 2+ chars, click AVANTI, 5) complete remaining steps, 6) GET /api/auth/me and assert user.nickname matches typed value (not the seeded Google name)."
+  ],
+  "critical_code_review_comments": [
+    "onboarding.tsx L30-34: `needsNickname`, `totalSteps` are recomputed on every render but `step` and `nickname` initial state are captured only once. This is the classic 'derived state from prop that arrives late' pitfall — either gate the whole component on `user !== undefined` or use a reconciling useEffect.",
+    "onboarding.tsx L129: `...(needsNickname && nickname ? { nickname } : {})` means if the Google user somehow reaches the categories screen first (as happens today) the PATCH silently omits nickname — no error surfaces to the user. Consider forcing an explicit failure state when needsNickname is true but nickname is empty.",
+    "server.py L860-865: `.strip().lstrip('@')` allows '@@@ab' → 'ab' (post-strip 2 chars, still valid) — acceptable but consider also validating there's no whitespace or emoji in the middle; today 'ab cd' or 'a\\tb' would pass the length check."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_nickname_onboarding.py (new)"
+  ],
+  "success_rate": {"backend": "100% (5/5)", "frontend": "3/4 scenarios pass — Google onboarding start-step FAILS"},
+  "seed_data_creation": "Created + cleaned up: one anonymous user flipped to auth_provider=google (anon_1c111de452a6), one email signup user with email_verified=True (user_bb50a1ba72bb), one plain anonymous user (anon_1f51aca55eb4). All three deleted from Mongo at end of run. chat_a's nickname restored to 'chat_a' by fixture teardown.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Reuse /app/backend/tests/test_nickname_onboarding.py — it restores chat_a's original nickname on teardown so it's idempotent. For UI retest of Google flow, use the mongo-flip pattern in this report (POST /api/auth/anonymous → PATCH user doc to auth_provider=google, onboarding_completed=false, is_anonymous=false) and inject token via page.add_init_script setting localStorage 'faide_token' as a JSON-encoded string. Expected post-fix: at first paint of /onboarding for the flipped user, testID='onboarding-step-nickname' must be visible AND testID='nickname-input' must accept text; brand text should be 'SCEGLI IL NICKNAME'; step label 'Step 1 di 5'.",
+  "rca_of_issue": "React state-from-async-prop anti-pattern. AuthContext hydrates the token from localStorage (web) → calls /api/auth/me → populates `user`. Onboarding component mounts BEFORE that resolves. `useState(needsNickname ? 1 : 2)` runs its initializer exactly once on mount with user=undefined, so needsNickname=false and step=2 is baked in. When user later becomes the Google account, `totalSteps` re-derives to 5 (progress dots render 5) but `step` is stuck at 2. Reproduction: 1) create user with auth_provider=google + onboarding_completed=false, 2) load /onboarding with token pre-injected, 3) observe categories screen with 5 dots and label 'Step 2 di 5'. Mitigation: gate rendering on `user !== null` OR add a reconciling `useEffect(() => { if (needsNickname) setStep(s => s === 2 && !userInteracted ? 1 : s); }, [needsNickname]);`."
+}

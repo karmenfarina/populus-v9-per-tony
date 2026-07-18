@@ -264,6 +264,10 @@ class ProfileBody(BaseModel):
     favorite_categories: List[str] = Field(min_length=1)
     # New field (optional for back-compat with previously onboarded users).
     profession: Optional[str] = Field(default=None, max_length=60)
+    # Nickname override — used by external-provider signups (Google) so the
+    # user can choose their own handle instead of inheriting the Google name.
+    # Optional to keep backwards compatibility with existing onboarding calls.
+    nickname: Optional[str] = Field(default=None, min_length=2, max_length=24)
 
 
 class DetailsBody(BaseModel):
@@ -853,6 +857,12 @@ async def update_profile(body: ProfileBody, user: dict = Depends(get_current_use
     }
     if body.profession is not None:
         updates['profession'] = body.profession
+    if body.nickname is not None:
+        # Trim + strip a leading '@' if the user typed one manually.
+        nick = body.nickname.strip().lstrip('@')
+        if len(nick) < 2 or len(nick) > 24:
+            raise HTTPException(status_code=400, detail='Il nickname deve avere 2-24 caratteri')
+        updates['nickname'] = nick
     await db.users.update_one({'user_id': user['user_id']}, {'$set': updates})
     updated = await db.users.find_one({'user_id': user['user_id']}, {'_id': 0})
     return {'user': _public_user(updated)}

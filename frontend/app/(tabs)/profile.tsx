@@ -553,7 +553,6 @@ export default function Profile() {
               <Text style={styles.nickname} testID="profile-nickname">@{user.nickname}</Text>
               <Text style={styles.provider}>
                 {user.auth_provider === "email" ? "Email" : user.auth_provider === "google" ? "Google" : "Anonimo"}
-                {user.email ? ` · ${user.email}` : ""}
               </Text>
             </View>
           </View>
