@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   View, Text, StyleSheet, ScrollView, Pressable, TextInput, ActivityIndicator,
-  KeyboardAvoidingView, Platform, ImageBackground, Linking, Alert,
+  KeyboardAvoidingView, Platform, ImageBackground, Linking, Alert, BackHandler,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -18,8 +18,11 @@ import { useUIPrefs } from "@/src/ui/UIPrefs";
 import { useAuth } from "@/src/auth/AuthContext";
 
 export default function FeudDetail() {
-  const { id, comment: commentParam, side: sideParam, from } =
-    useLocalSearchParams<{ id: string; comment?: string; side?: string; from?: string }>();
+  const { id, comment: commentParam, side: sideParam, from, archiveCat, archiveDate } =
+    useLocalSearchParams<{
+      id: string; comment?: string; side?: string; from?: string;
+      archiveCat?: string; archiveDate?: string;
+    }>();
   const router = useRouter();
   const { user } = useAuth();
   const isAnonymous = !!user && user.auth_provider === "anonymous";
@@ -30,9 +33,34 @@ export default function FeudDetail() {
   const goBack = () => {
     if (from === "top") { router.replace("/top"); return; }
     if (from === "notifications") { router.replace("/notifications"); return; }
+    // When launched from the archive, return to the SAME archive day and
+    // category the user was viewing — not the default "all / newest" state.
+    if (from === "archive") {
+      const cat = (archiveCat as string) || "all";
+      const date = (archiveDate as string) || "";
+      const qs = date
+        ? `?category=${encodeURIComponent(cat)}&date=${encodeURIComponent(date)}`
+        : `?category=${encodeURIComponent(cat)}`;
+      router.replace(`/archive${qs}`);
+      return;
+    }
     if (router.canGoBack && router.canGoBack()) router.back();
     else router.replace("/");
   };
+
+  // Android hardware back button — must land on the same archive day/category
+  // we came from, not on the previous tab route or the feed. iOS swipe-back
+  // still uses the native stack, which our archive component already restores
+  // via the `category` + `date` params (see /archive?category=X&date=Y).
+  useEffect(() => {
+    if (Platform.OS !== "android") return;
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      goBack();
+      return true; // intercept
+    });
+    return () => { try { sub.remove(); } catch { /* noop */ } };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [from, archiveCat, archiveDate]);
   const [feud, setFeud] = useState<Feud | null>(null);
   const [sponsor, setSponsor] = useState<Sponsor | null>(null);
   const [sideA, setSideA] = useState<Comment[]>([]);

@@ -35,13 +35,14 @@ function labelForDate(iso: string): { top: string; bottom: string } {
 export default function ArchiveScreen() {
   const router = useRouter();
   const { user } = useAuth();
-  const params = useLocalSearchParams<{ category?: string }>();
+  const params = useLocalSearchParams<{ category?: string; date?: string }>();
   const initialCat = (params.category as string) || "all";
+  const initialDate = (params.date as string) || null;
   const [cats, setCats] = useState<{ id: string; label: string }[]>([ALL_CAT]);
   const [category, setCategory] = useState<string>(initialCat);
   const [dates, setDates] = useState<DateEntry[]>([]);
   const [loadingDates, setLoadingDates] = useState(true);
-  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [selectedDate, setSelectedDate] = useState<string | null>(initialDate);
   const [feuds, setFeuds] = useState<Feud[]>([]);
   const [loadingFeuds, setLoadingFeuds] = useState(false);
 
@@ -52,6 +53,15 @@ export default function ArchiveScreen() {
     const incoming = (params.category as string) || "all";
     setCategory((prev) => (prev === incoming ? prev : incoming));
   }, [params.category]);
+
+  // Same for `date` — when returning from a feud detail we get pushed back
+  // with the exact archive day the user was viewing.
+  useEffect(() => {
+    const incoming = (params.date as string) || null;
+    if (incoming) {
+      setSelectedDate((prev) => (prev === incoming ? prev : incoming));
+    }
+  }, [params.date]);
 
   // Auto-center the selected category chip in the horizontal strip.
   const chipScrollRef = useRef<ScrollView>(null);
@@ -254,7 +264,17 @@ export default function ArchiveScreen() {
               <FeudCard
                 feud={item}
                 showArchivedBadge
-                onPress={() => router.push(`/feud/${item.feud_id}`)}
+                onPress={() =>
+                  router.push({
+                    pathname: "/feud/[id]",
+                    params: {
+                      id: item.feud_id,
+                      from: "archive",
+                      archiveCat: category,
+                      archiveDate: selectedDate || "",
+                    },
+                  })
+                }
               />
             )}
           />
