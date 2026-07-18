@@ -1,0 +1,35 @@
+{
+  "summary": "Iteration 32 backend testing — validated 4 new feature areas end-to-end via public API + Mongo spot-checks: (A) anon-to-registered data migration on signup/login, (B) new 'cronaca' 9th category, (C) 3 cronaca achievement badges, (D) profession field on profile. Created 12 pytest cases in a single test file; all 12 PASSED. No backend defects found.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_cronaca_profession_migration.py",
+    "/app/test_reports/pytest/iter32_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py has grown to 4311 lines — consider splitting into modules (auth/, feuds/, admin/, badges/) for maintainability.",
+    "_evaluate_achievement_badges skips anonymous users correctly, but there is no test guarding this — if a future refactor removes the guard, anon users could accumulate badges that then leak on migration. Consider adding an explicit assertion in _migrate_anon_data.",
+    "verify-email consumes token_hash but the raw token is only recoverable if we intercept it before storage — tests must patch the token_hash in Mongo. Consider an admin/debug endpoint (behind ADMIN_TOKEN) to fetch pending verification tokens to make future integration tests easier."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_cronaca_profession_migration.py (new)"
+  ],
+  "success_rate": {
+    "backend": "100% (12/12)",
+    "frontend": "not tested (backend-only request)"
+  },
+  "seed_data_creation": "Created 6 TEST cronaca feuds directly in MongoDB (auto-cleaned by fixture teardown) to exercise the cronaca_curioso badge threshold. chat_a@test.it seed user is reset (total_votes/badges/profession cleared, votes deleted) before each test that consumes it.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Test file /app/backend/tests/test_cronaca_profession_migration.py is a full regression for the iter32 feature set. It relies on MongoDB direct access (MONGO_URL/DB_NAME from backend/.env). If chat_a@test.it seed user is missing, the chat_a_reset fixture will fail — restore via /app/test_reports/scripts/setup_test_user.sh. All test data is prefixed 'TEST_' and cleaned up automatically.",
+  "rca_of_issue": "N/A — no bugs found. Verified: 9 categories (cronaca present with label 'Cronaca'), 25 professions in canonical order, PATCH /api/auth/me/profile accepts profession (rejects 'Pippo' with 400 'Professione non valida'), enforces max_length=60 (422), accepts 'cronaca' as favorite, backward-compatible without profession. /auth/me exposes user.profession and user.achievements (3 tiers all locked initially with thresholds [5,25,75]). Anon signup with fresh email: user_id upgraded in place (auth_provider→email, total_votes preserved), verify-email flow keeps vote count intact. Anon login onto existing chat_a: vote migrated, anon user_id deleted from users collection. Anon signup with an email already owned by an unverified user: verification_tokens doc correctly stores pending_migration_from=<anon_uid>. Cronaca badge: after 5 votes on 5 distinct cronaca feuds, /auth/me achievements[cronaca_curioso].unlocked=true and badges_ever_awarded contains 'cronaca_curioso'; cronista/segugio remain locked."
+}

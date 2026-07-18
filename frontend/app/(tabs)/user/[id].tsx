@@ -317,6 +317,24 @@ export default function UserPublicScreen() {
             </View>
           )}
 
+          {profile.achievements && profile.achievements.some(a => a.unlocked) && (
+            <View style={styles.section} testID="public-achievements">
+              <Text style={styles.sectionTitle}>SPILLE COLLEZIONATE</Text>
+              <View style={styles.pubCollectionGrid}>
+                {profile.achievements.filter(a => a.unlocked).map((a) => (
+                  <View
+                    key={a.type}
+                    style={styles.pubCollectionItem}
+                    testID={`public-achievement-${a.type}`}
+                  >
+                    <Text style={styles.pubCollectionEmoji}>{a.emoji}</Text>
+                    <Text style={styles.pubCollectionLabel}>{a.label}</Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+          )}
+
           {profile.bio ? (
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>BIO</Text>
@@ -620,4 +638,26 @@ const styles = StyleSheet.create({
   hBadge: { fontSize: font.sizes.xs, letterSpacing: 1, paddingHorizontal: 6, paddingVertical: 2, borderWidth: 1, borderColor: colors.border },
   hBadgeMaj: { backgroundColor: colors.brandPrimary, color: colors.onBrandPrimary },
   hBadgeMin: { backgroundColor: colors.brandSecondary, color: colors.onBrandSecondary },
+  pubCollectionGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+    marginTop: spacing.xs,
+  },
+  pubCollectionItem: {
+    width: "31%",
+    borderWidth: 2,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    padding: spacing.sm,
+    alignItems: "center",
+    gap: 4,
+  },
+  pubCollectionEmoji: { fontSize: 32 },
+  pubCollectionLabel: {
+    fontSize: font.sizes.xs,
+    color: colors.onSurface,
+    textAlign: "center",
+    fontWeight: "500",
+  },
 });

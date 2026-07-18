@@ -32,6 +32,7 @@ criteri, scegli l'argomento in lista):
 - Amici
 - Calcio (partite, calciomercato, VAR)
 - Cronaca nera
+- Casi famosi di cronaca
 - Gossip / influencer / rapper
 - Casi TV (litigi in diretta, gaffe, dichiarazioni provocatorie)
 - Gaffe e scivoloni di personaggi pubblici

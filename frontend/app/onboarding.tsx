@@ -18,24 +18,32 @@ const REGIONS = [
 ];
 
 type Sex = "F" | "M" | "other" | "na";
+type Step = 1 | 2 | 3 | 4;
 
 export default function Onboarding() {
   const router = useRouter();
   const { user, refreshMe, logout } = useAuth();
-  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [step, setStep] = useState<Step>(1);
   const [cats, setCats] = useState<{ id: string; label: string }[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [age, setAge] = useState<string>("");
   const [sex, setSex] = useState<Sex | null>(null);
   const [region, setRegion] = useState<string>("");
   const [regionOpen, setRegionOpen] = useState(false);
+  const [professions, setProfessions] = useState<string[]>([]);
+  const [profession, setProfession] = useState<string>("");
+  const [professionOpen, setProfessionOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     (async () => {
-      const r = await api.categories();
+      const [r, p] = await Promise.all([
+        api.categories(),
+        api.professions().catch(() => ({ professions: [] as string[] })),
+      ]);
       setCats(r.categories);
+      setProfessions((p as any).professions || []);
     })();
   }, []);
 
@@ -67,6 +75,9 @@ export default function Onboarding() {
       if (!ageNum || ageNum < 13 || ageNum > 120) { setError("Inserisci un'età valida (13-120)"); return; }
       if (!sex) { setError("Seleziona il sesso"); return; }
       setStep(3);
+    } else if (step === 3) {
+      if (!region) { setError("Seleziona la regione"); return; }
+      setStep(4);
     }
   };
 
@@ -74,11 +85,13 @@ export default function Onboarding() {
     setError(null);
     if (step === 2) setStep(1);
     else if (step === 3) setStep(2);
+    else if (step === 4) setStep(3);
   };
 
   const submit = async () => {
     setError(null);
     if (!region) { setError("Seleziona la regione"); return; }
+    if (!profession) { setError("Seleziona la professione"); return; }
     setSubmitting(true);
     try {
       const ageNum = parseInt(age, 10);
@@ -87,6 +100,7 @@ export default function Onboarding() {
         sex: sex as Sex,
         region,
         favorite_categories: Array.from(selected),
+        profession,
       });
       await refreshMe();
       router.replace("/(tabs)");
@@ -102,11 +116,11 @@ export default function Onboarding() {
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <View style={styles.header}>
           <View style={styles.progressRow}>
-            {[1, 2, 3].map((n) => (
+            {[1, 2, 3, 4].map((n) => (
               <View
                 key={n}
                 testID={`progress-${n}`}
-                style={[styles.progressDot, step >= (n as 1 | 2 | 3) && styles.progressDotOn]}
+                style={[styles.progressDot, step >= (n as Step) && styles.progressDotOn]}
               />
             ))}
           </View>
@@ -116,8 +130,9 @@ export default function Onboarding() {
             )}
             {step === 2 && "CHI SEI"}
             {step === 3 && "DA DOVE VIENI"}
+            {step === 4 && "COSA FAI"}
           </Text>
-          <Text style={styles.tagline}>Step {step} di 3</Text>
+          <Text style={styles.tagline}>Step {step} di 4</Text>
         </View>
 
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
@@ -207,6 +222,18 @@ export default function Onboarding() {
             </View>
           )}
 
+          {step === 4 && (
+            <View style={styles.section} testID="onboarding-step-4">
+              <Text style={styles.sectionHint}>Che lavoro fai? Ci aiuta a capire meglio la community.</Text>
+              <Pressable onPress={() => setProfessionOpen(true)} testID="profession-open" style={styles.regionBtn}>
+                <Text style={[styles.regionBtnTxt, !profession && { color: colors.muted }]}>
+                  {profession || "Seleziona professione"}
+                </Text>
+                <Ionicons name="chevron-down" size={20} color={colors.onSurface} />
+              </Pressable>
+            </View>
+          )}
+
           {error && <Text style={styles.error} testID="onboarding-error">{error}</Text>}
         </ScrollView>
 
@@ -233,7 +260,7 @@ export default function Onboarding() {
               <Text style={styles.backTxt}>INDIETRO</Text>
             </Pressable>
           )}
-          {step < 3 ? (
+          {step < 4 ? (
             <Pressable onPress={goNext} testID="onboarding-next" style={styles.cta}>
               <Text style={styles.ctaTxt}>AVANTI ›</Text>
             </Pressable>
@@ -271,6 +298,35 @@ export default function Onboarding() {
                     {item}
                   </Text>
                   {region === item && <Ionicons name="checkmark" size={20} color={colors.onBrandPrimary} />}
+                </Pressable>
+              )}
+            />
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={professionOpen} animationType="slide" transparent onRequestClose={() => setProfessionOpen(false)}>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalSheet}>
+            <View style={styles.modalHead}>
+              <Text style={styles.modalTitle}>PROFESSIONE</Text>
+              <Pressable onPress={() => setProfessionOpen(false)} testID="profession-close">
+                <Ionicons name="close" size={26} color={colors.onSurfaceInverse} />
+              </Pressable>
+            </View>
+            <FlatList
+              data={professions}
+              keyExtractor={(r) => r}
+              renderItem={({ item }) => (
+                <Pressable
+                  onPress={() => { setProfession(item); setProfessionOpen(false); }}
+                  style={[styles.regionItem, profession === item && styles.regionItemOn]}
+                  testID={`profession-${item.replace(/[^a-zA-Z0-9]/g, "-")}`}
+                >
+                  <Text style={[styles.regionItemTxt, profession === item && styles.regionItemTxtOn]}>
+                    {item}
+                  </Text>
+                  {profession === item && <Ionicons name="checkmark" size={20} color={colors.onBrandPrimary} />}
                 </Pressable>
               )}
             />

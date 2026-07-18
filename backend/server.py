@@ -262,6 +262,8 @@ class ProfileBody(BaseModel):
     sex: Literal['F', 'M', 'other', 'na']
     region: str = Field(min_length=2, max_length=40)
     favorite_categories: List[str] = Field(min_length=1)
+    # New field (optional for back-compat with previously onboarded users).
+    profession: Optional[str] = Field(default=None, max_length=60)
 
 
 class DetailsBody(BaseModel):
@@ -311,6 +313,7 @@ BADGE_META: dict = {
         'label': 'Utente di Buon Senso',
         'emoji': '⚖️',
         'group': 'alignment',
+        'is_achievement': False,
         'first_earn_body': (
             "Hai sbloccato la spilla ⚖️ Utente di Buon Senso: voti in linea "
             "con la maggioranza. Complimenti!"
@@ -320,14 +323,63 @@ BADGE_META: dict = {
         'label': 'Utente Bastian Contrario',
         'emoji': '🎭',
         'group': 'alignment',
+        'is_achievement': False,
         'first_earn_body': (
             "Hai sbloccato la spilla 🎭 Utente Bastian Contrario: voti spesso "
             "controcorrente. Solide opinioni personali!"
         ),
     },
+    # -------- Achievement badges (collezionabili) --------
+    # Cronaca — 3 tiers on cumulative cronaca votes. Independent of alignment:
+    # once earned they stay in the user's collection forever.
+    'cronaca_curioso': {
+        'label': 'Curioso di Cronaca',
+        'emoji': '🔍',
+        'group': 'cronaca',
+        'is_achievement': True,
+        'category': 'cronaca',
+        'threshold': 5,
+        'first_earn_body': (
+            "🔍 Hai votato 5 faide di cronaca. Hai sbloccato la spilla "
+            "Curioso di Cronaca."
+        ),
+    },
+    'cronaca_cronista': {
+        'label': 'Cronista Attento',
+        'emoji': '📰',
+        'group': 'cronaca',
+        'is_achievement': True,
+        'category': 'cronaca',
+        'threshold': 25,
+        'first_earn_body': (
+            "📰 25 voti di cronaca all'attivo. Sei ufficialmente un "
+            "Cronista Attento."
+        ),
+    },
+    'cronaca_segugio': {
+        'label': 'Segugio Provetto',
+        'emoji': '🕵️',
+        'group': 'cronaca',
+        'is_achievement': True,
+        'category': 'cronaca',
+        'threshold': 75,
+        'first_earn_body': (
+            "🕵️ 75 voti di cronaca: sei un Segugio Provetto. Nessun caso "
+            "ti sfugge."
+        ),
+    },
     # Future badges go here — same shape, different `group` (or same group if
     # they form another mutually-exclusive family).
 }
+
+
+# Order-preserved list of achievement badge types (used to render collections
+# in the UI). Alignment badges are handled separately via `compute_badge`.
+ACHIEVEMENT_BADGE_ORDER: List[str] = [
+    'cronaca_curioso',
+    'cronaca_cronista',
+    'cronaca_segugio',
+]
 
 
 def _badge_group(badge_type: Optional[str]) -> Optional[str]:
@@ -360,11 +412,15 @@ async def _evaluate_and_notify_badge_change(user_id: str) -> None:
         # clear the current badge but keep history.
         if u.get('current_badge'):
             await db.users.update_one({'user_id': user_id}, {'$set': {'current_badge': None}})
+        # Still evaluate achievement badges — those are decoupled from alignment.
+        await _evaluate_achievement_badges(user_id)
         return
     new_type = badge['type']
     prev_type = u.get('current_badge')
     if prev_type == new_type:
-        return  # no change
+        # No alignment change, but achievements may still tick over.
+        await _evaluate_achievement_badges(user_id)
+        return
     history = list(u.get('badges_ever_awarded') or [])
     meta_new = BADGE_META.get(new_type, {'label': new_type, 'emoji': '🏅', 'first_earn_body': f'Hai sbloccato la spilla {new_type}.', 'group': None})
     new_group = meta_new.get('group')
@@ -402,6 +458,102 @@ async def _evaluate_and_notify_badge_change(user_id: str) -> None:
         )
     except Exception as e:
         logger.warning(f"badge notification emit failed for {user_id}: {e}")
+    # Achievement badges are decoupled — evaluate them too on this pass.
+    await _evaluate_achievement_badges(user_id)
+
+
+async def _count_votes_in_category(user_id: str, category: str) -> int:
+    """Count how many votes a user has cast on feuds of a given category.
+
+    Uses the denormalized `feud_snapshot.category` when available (survives
+    feud purge), otherwise falls back to joining on `feuds`. Cheap enough for
+    live evaluation at vote-time given user vote counts are bounded.
+    """
+    # Primary: direct match on the snapshot field.
+    n = await db.votes.count_documents(
+        {'user_id': user_id, 'feud_snapshot.category': category}
+    )
+    if n:
+        return n
+    # Fallback for historical votes without snapshot.category.
+    total = 0
+    async for v in db.votes.find(
+        {'user_id': user_id, 'feud_snapshot.category': {'$exists': False}},
+        {'_id': 0, 'feud_id': 1},
+    ):
+        f = await db.feuds.find_one({'feud_id': v['feud_id']}, {'_id': 0, 'category': 1})
+        if f and f.get('category') == category:
+            total += 1
+    return total
+
+
+async def _evaluate_achievement_badges(user_id: str) -> None:
+    """Award/notify achievement badges (independent of the alignment group).
+
+    Achievement badges are cumulative: once earned they stay in
+    `badges_ever_awarded` forever. Currently: 3 tiers of cronaca votes.
+    Fires a "NUOVA SPILLA" in-app + push notification on first earn.
+    """
+    u = await db.users.find_one({'user_id': user_id}, {'_id': 0})
+    if not u:
+        return
+    if u.get('is_anonymous') or u.get('auth_provider') == 'anonymous':
+        return
+    history = list(u.get('badges_ever_awarded') or [])
+    history_set = set(history)
+    # Group thresholds by category so we only count once per category.
+    by_cat: dict = {}
+    for bt in ACHIEVEMENT_BADGE_ORDER:
+        meta = BADGE_META.get(bt) or {}
+        if not meta.get('is_achievement'):
+            continue
+        cat = meta.get('category')
+        if not cat:
+            continue
+        by_cat.setdefault(cat, []).append((bt, int(meta.get('threshold', 0)), meta))
+    newly_earned: List[tuple] = []
+    for cat, tiers in by_cat.items():
+        count = await _count_votes_in_category(user_id, cat)
+        for bt, threshold, meta in tiers:
+            if count >= threshold and bt not in history_set:
+                history.append(bt)
+                history_set.add(bt)
+                newly_earned.append((bt, meta))
+    if newly_earned:
+        await db.users.update_one(
+            {'user_id': user_id},
+            {'$set': {'badges_ever_awarded': history}},
+        )
+        for bt, meta in newly_earned:
+            title = f"{meta.get('emoji','🏅')} NUOVA SPILLA"
+            body = meta.get('first_earn_body') or f"Hai sbloccato la spilla {meta.get('label', bt)}."
+            try:
+                await _emit_notification(
+                    user_id=user_id, ntype='badge',
+                    title=title, body=body,
+                    send_push_too=True,
+                )
+            except Exception as e:
+                logger.warning(f"achievement badge notify failed for {user_id}/{bt}: {e}")
+
+
+def _user_achievements(u: dict) -> List[dict]:
+    """Build the public list of collectible badges the user has earned."""
+    owned = set(u.get('badges_ever_awarded') or [])
+    out: List[dict] = []
+    for bt in ACHIEVEMENT_BADGE_ORDER:
+        meta = BADGE_META.get(bt) or {}
+        if not meta.get('is_achievement'):
+            continue
+        out.append({
+            'type': bt,
+            'label': meta.get('label', bt),
+            'emoji': meta.get('emoji', '🏅'),
+            'category': meta.get('category'),
+            'threshold': meta.get('threshold'),
+            'unlocked': bt in owned,
+        })
+    return out
 
 
 def _public_user(u: dict) -> dict:
@@ -418,6 +570,7 @@ def _public_user(u: dict) -> dict:
         'age': u.get('age'),
         'sex': u.get('sex'),
         'region': u.get('region'),
+        'profession': u.get('profession'),
         'favorite_categories': u.get('favorite_categories', []),
         'onboarding_completed': bool(u.get('onboarding_completed', False)),
         'bio': u.get('bio'),
@@ -425,6 +578,7 @@ def _public_user(u: dict) -> dict:
         'primary_photo_id': u.get('primary_photo_id'),
         'photos_count': u.get('photos_count', 0),
         'badge': compute_badge(u),
+        'achievements': _user_achievements(u),
         'push_notifications': u.get('push_notifications', True),
     }
 
@@ -777,13 +931,50 @@ async def me(user: dict = Depends(get_current_user)):
     return {'user': _public_user(user)}
 
 
-VALID_CATEGORY_IDS = {'politica', 'tv', 'musica', 'sport', 'cinema', 'social', 'gossip', 'tech'}
+VALID_CATEGORY_IDS = {'politica', 'tv', 'musica', 'sport', 'cinema', 'social', 'gossip', 'tech', 'cronaca'}
 ITALIAN_REGIONS = {
     'Abruzzo', 'Basilicata', 'Calabria', 'Campania', 'Emilia-Romagna',
     'Friuli-Venezia Giulia', 'Lazio', 'Liguria', 'Lombardia', 'Marche',
     'Molise', 'Piemonte', 'Puglia', 'Sardegna', 'Sicilia', 'Toscana',
     "Trentino-Alto Adige", 'Umbria', "Valle d'Aosta", 'Veneto', 'Altro',
 }
+
+# Classic profession/occupation categories offered during onboarding.
+# Broad enough to cover most working-age Italians without becoming a job title
+# taxonomy — the exact string is stored on the user document as-is.
+PROFESSIONS = [
+    'Studente/Studentessa',
+    'Impiegato/a',
+    'Operaio/a',
+    'Insegnante',
+    'Dirigente / Manager',
+    'Libero professionista',
+    'Imprenditore/Imprenditrice',
+    'Artigiano/a',
+    'Commerciante',
+    'Agricoltore/Agricoltrice',
+    'Medico / Personale sanitario',
+    'Avvocato / Notaio',
+    'Ingegnere / Architetto',
+    'Ricercatore/Ricercatrice',
+    'Militare / Forze dell\'ordine',
+    'Artista / Creativo',
+    'Giornalista / Comunicazione',
+    'Informatico / Tecnologia',
+    'Trasporti / Logistica',
+    'Ristorazione / Turismo',
+    'Casalingo/a',
+    'In cerca di occupazione',
+    'Pensionato/a',
+    'Altro',
+    'Preferisco non dirlo',
+]
+VALID_PROFESSIONS = set(PROFESSIONS)
+
+
+@api_router.get('/professions')
+async def get_professions():
+    return {'professions': PROFESSIONS}
 
 
 def _reject_if_anonymous(user: dict):
@@ -799,17 +990,21 @@ async def update_profile(body: ProfileBody, user: dict = Depends(get_current_use
         raise HTTPException(status_code=400, detail=f"Categorie non valide: {', '.join(invalid)}")
     if body.region not in ITALIAN_REGIONS:
         raise HTTPException(status_code=400, detail='Regione non valida')
-    await db.users.update_one(
-        {'user_id': user['user_id']},
-        {'$set': {
-            'age': body.age,
-            'sex': body.sex,
-            'region': body.region,
-            'favorite_categories': body.favorite_categories,
-            'onboarding_completed': True,
-            'profile_updated_at': now_utc(),
-        }},
-    )
+    # Profession is optional but, if provided, must be one of the allowed
+    # values (kept in sync with `/professions`).
+    if body.profession and body.profession not in VALID_PROFESSIONS:
+        raise HTTPException(status_code=400, detail='Professione non valida')
+    updates: dict = {
+        'age': body.age,
+        'sex': body.sex,
+        'region': body.region,
+        'favorite_categories': body.favorite_categories,
+        'onboarding_completed': True,
+        'profile_updated_at': now_utc(),
+    }
+    if body.profession is not None:
+        updates['profession'] = body.profession
+    await db.users.update_one({'user_id': user['user_id']}, {'$set': updates})
     updated = await db.users.find_one({'user_id': user['user_id']}, {'_id': 0})
     return {'user': _public_user(updated)}
 
@@ -1045,6 +1240,9 @@ async def public_user(user_id: str):
         'majority_votes': u.get('majority_votes', 0),
         'minority_votes': u.get('minority_votes', 0),
         'badge': compute_badge(u),
+        'achievements': _user_achievements(u),
+        'profession': u.get('profession'),
+        'region': u.get('region'),
     }
 
 
@@ -1064,6 +1262,7 @@ CATEGORIES = [
     {'id': 'cinema', 'label': 'Cinema'},
     {'id': 'social', 'label': 'Social'},
     {'id': 'gossip', 'label': 'Gossip'},
+    {'id': 'cronaca', 'label': 'Cronaca'},
     {'id': 'tech', 'label': 'Tech'},
 ]
 
@@ -1814,6 +2013,7 @@ SEED_SPONSORS = [
     {'category': 'social', 'sponsor': 'TrendReport', 'headline': 'Analisi virali ogni 24 ore.', 'cta': 'ISCRIVITI', 'image_url': 'https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=800'},
     {'category': 'gossip', 'sponsor': 'Chi Magazine', 'headline': 'Tutti i retroscena in edicola.', 'cta': 'SFOGLIA', 'image_url': 'https://images.unsplash.com/photo-1561890244-e880c1e6d54e?w=800'},
     {'category': 'tech', 'sponsor': 'Amazon Prime Day', 'headline': 'Le offerte tech del giorno, prima di tutti.', 'cta': 'SCOPRI', 'image_url': 'https://images.unsplash.com/photo-1518770660439-4636190af475?w=800'},
+    {'category': 'cronaca', 'sponsor': 'Cronache Italia', 'headline': 'Cronaca nera e casi mai risolti: inchieste in edicola.', 'cta': 'LEGGI', 'image_url': 'https://images.unsplash.com/photo-1495556650867-99590cea3657?w=800'},
 ]
 
 
@@ -2418,6 +2618,11 @@ def _image_for_category(cat_id: str, seed: Optional[str] = None) -> str:
             'https://images.unsplash.com/photo-1518770660439-4636190af475?w=1200',
             'https://images.unsplash.com/photo-1550751827-4bd374c3f58b?w=1200',
             'https://images.unsplash.com/photo-1517694712202-14dd9538aa97?w=1200',
+        ],
+        'cronaca': [
+            'https://images.unsplash.com/photo-1590486803833-1c5dc8ddd4c8?w=1200',
+            'https://images.unsplash.com/photo-1587653263995-422546a7a559?w=1200',
+            'https://images.unsplash.com/photo-1495556650867-99590cea3657?w=1200',
         ],
     }
     options = mapping.get(cat_id, mapping['gossip'])
@@ -3330,6 +3535,14 @@ RSS_FEEDS: dict = {
         ('SmartWorld', 'https://www.smartworld.it/feed'),
         ('Everyeye Tech', 'https://www.everyeye.it/rss/tech.xml'),
     ],
+    'cronaca': [
+        ('ANSA Cronaca', 'https://www.ansa.it/sito/notizie/cronaca/cronaca_rss.xml'),
+        ('Repubblica Cronaca', 'https://www.repubblica.it/rss/cronaca/rss2.0.xml'),
+        ('Corriere Cronache', 'https://xml2.corriereobjects.it/rss/cronache.xml'),
+        ('Fanpage Cronaca', 'https://www.fanpage.it/cronaca/feed/'),
+        ('Il Fatto Quotidiano Cronaca', 'https://www.ilfattoquotidiano.it/cronaca/feed/'),
+        ('TgCom24 Cronaca', 'https://www.tgcom24.mediaset.it/rss/cronaca.xml'),
+    ],
 }
 
 
@@ -3457,6 +3670,11 @@ SEED_FEUDS = [
      'party_a': "L'influencer", 'party_b': 'Gli utenti indignati',
      'summary': "Un post che pubblicizzava un integratore senza dichiararlo come inserzione ha scatenato una tempesta di segnalazioni. L'influencer difende la buona fede, gli utenti chiedono trasparenza.",
      'question': 'Serve una multa esemplare?'},
+    {'category': 'cronaca', 'category_label': 'Cronaca',
+     'title': 'Caso di cronaca al centro del dibattito',
+     'party_a': "Chi chiede pene certe", 'party_b': 'Chi difende le garanzie',
+     'summary': "Un fatto di cronaca nera divide l'opinione pubblica tra chi invoca inasprimento delle pene e chi sottolinea la necessità di rispettare il giusto processo. I talk show dedicano ore al caso.",
+     'question': 'Servono pene più severe o più garanzie processuali?'},
 ]
 
 

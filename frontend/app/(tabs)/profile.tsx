@@ -75,6 +75,9 @@ export default function Profile() {
   const [prefsOpen, setPrefsOpen] = useState(false);
   const [pushEnabled, setPushEnabled] = useState<boolean>(user?.push_notifications !== false);
   const [cats, setCats] = useState<{ id: string; label: string }[]>([]);
+  const [professionsList, setProfessionsList] = useState<string[]>([]);
+  const [professionOpen, setProfessionOpen] = useState(false);
+  const [savingProfession, setSavingProfession] = useState(false);
   const [editSel, setEditSel] = useState<Set<string>>(new Set());
   const [savingPrefs, setSavingPrefs] = useState(false);
   const [prefsError, setPrefsError] = useState<string | null>(null);
@@ -150,8 +153,36 @@ export default function Profile() {
         const c = await api.categories();
         setCats(c.categories);
       } catch {}
+      try {
+        const p = await api.professions();
+        setProfessionsList((p as any).professions || []);
+      } catch {}
     })();
   }, []);
+
+  const saveProfession = async (value: string) => {
+    if (!user) return;
+    if (!user.age || !user.sex || !user.region) {
+      // Falls back to prefs modal, which surfaces onboarding message.
+      setProfessionOpen(false);
+      openPrefs();
+      return;
+    }
+    setSavingProfession(true);
+    try {
+      await api.updateProfile({
+        age: user.age,
+        sex: user.sex as "F" | "M" | "other" | "na",
+        region: user.region,
+        favorite_categories: user.favorite_categories || [],
+        profession: value,
+      });
+      await refreshMe();
+    } finally {
+      setSavingProfession(false);
+      setProfessionOpen(false);
+    }
+  };
 
   const loadPhotos = useCallback(async () => {
     setLoadingPhotos(true);
@@ -429,6 +460,7 @@ export default function Profile() {
         sex: user.sex as "F" | "M" | "other" | "na",
         region: user.region,
         favorite_categories: Array.from(editSel),
+        ...(user.profession ? { profession: user.profession } : {}),
       });
       await refreshMe();
       setPrefsOpen(false);
@@ -576,6 +608,36 @@ export default function Profile() {
           </Text>
         </View>
 
+        {!isAnonymous && user.achievements && user.achievements.length > 0 && (
+          <View style={styles.collectionSection} testID="achievements-section">
+            <Text style={styles.collectionTitle}>SPILLE COLLEZIONATE</Text>
+            <Text style={styles.collectionSubtitle}>
+              {user.achievements.filter(a => a.unlocked).length}/{user.achievements.length} sbloccate
+            </Text>
+            <View style={styles.collectionGrid}>
+              {user.achievements.map((a) => (
+                <View
+                  key={a.type}
+                  style={[styles.collectionItem, !a.unlocked && styles.collectionItemLocked]}
+                  testID={`achievement-${a.type}${a.unlocked ? '-unlocked' : '-locked'}`}
+                >
+                  <Text style={[styles.collectionEmoji, !a.unlocked && styles.collectionEmojiLocked]}>
+                    {a.unlocked ? a.emoji : "🔒"}
+                  </Text>
+                  <Text style={[styles.collectionLabel, !a.unlocked && styles.collectionLabelLocked]}>
+                    {a.label}
+                  </Text>
+                  {a.threshold != null && (
+                    <Text style={styles.collectionThreshold}>
+                      {a.unlocked ? "SBLOCCATA" : `${a.threshold} voti`}
+                    </Text>
+                  )}
+                </View>
+              ))}
+            </View>
+          </View>
+        )}
+
         <View style={styles.statsRow}>
           <View style={styles.statBox}>
             <Text style={styles.statValue}>{user.total_votes}</Text>
@@ -626,6 +688,27 @@ export default function Profile() {
                 </Pressable>
               </View>
             )}
+          </View>
+        )}
+
+        {!isAnonymous && (
+          <View style={styles.prefsSection} testID="profession-section">
+            <Pressable
+              onPress={() => setProfessionOpen(true)}
+              testID="profession-open"
+              style={styles.prefsHeadRow}
+            >
+              <Text style={styles.prefsTitle}>PROFESSIONE</Text>
+              <View style={styles.sectionHeadRight}>
+                <Text
+                  style={[styles.professionValue, !user.profession && { color: colors.muted }]}
+                  numberOfLines={1}
+                >
+                  {user.profession || "Non impostata"}
+                </Text>
+                <Ionicons name="chevron-forward" size={20} color={colors.onSurface} />
+              </View>
+            </Pressable>
           </View>
         )}
 
@@ -942,6 +1025,48 @@ export default function Profile() {
         onCancel={() => { setCropperOpen(false); setCropperUri(null); setCropperSize(null); setCropperReplaceId(null); setCropperOriginalSourceUri(null); }}
         onConfirm={uploadCroppedPhoto}
       />
+
+      <Modal
+        visible={professionOpen}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setProfessionOpen(false)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalSheet} testID="profession-modal">
+            <View style={styles.modalHead}>
+              <Text style={styles.modalTitle}>PROFESSIONE</Text>
+              <Pressable onPress={() => setProfessionOpen(false)} testID="profession-modal-close" hitSlop={10}>
+                <Ionicons name="close" size={26} color={colors.onSurfaceInverse} />
+              </Pressable>
+            </View>
+            {savingProfession && (
+              <View style={styles.savingBar}>
+                <ActivityIndicator color={colors.brandPrimary} />
+              </View>
+            )}
+            <ScrollView contentContainerStyle={{ paddingBottom: spacing.lg }}>
+              {professionsList.map((p) => {
+                const isSel = user.profession === p;
+                return (
+                  <Pressable
+                    key={p}
+                    onPress={() => saveProfession(p)}
+                    disabled={savingProfession}
+                    style={[styles.professionItem, isSel && styles.professionItemOn]}
+                    testID={`profession-opt-${p.replace(/[^a-zA-Z0-9]/g, '-')}`}
+                  >
+                    <Text style={[styles.professionItemTxt, isSel && styles.professionItemTxtOn]}>
+                      {p}
+                    </Text>
+                    {isSel && <Ionicons name="checkmark" size={20} color={colors.onBrandPrimary} />}
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -1053,4 +1178,78 @@ const styles = StyleSheet.create({
   prefsErr: { color: colors.error, borderWidth: 2, borderColor: colors.error, padding: spacing.sm, fontSize: font.sizes.base },
   prefsSaveBtn: { backgroundColor: colors.brandPrimary, borderTopWidth: 2, borderColor: colors.border, paddingVertical: spacing.lg, alignItems: "center" },
   prefsSaveTxt: { color: colors.onBrandPrimary, fontSize: font.sizes.xl, letterSpacing: 2, fontWeight: "500" },
+  // Achievements collection
+  collectionSection: {
+    marginTop: spacing.md,
+    marginHorizontal: spacing.md,
+    borderWidth: 2,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceSecondary,
+    padding: spacing.md,
+    gap: spacing.sm,
+  },
+  collectionTitle: {
+    fontSize: font.sizes.base,
+    letterSpacing: 2,
+    fontWeight: "500",
+    color: colors.onSurface,
+  },
+  collectionSubtitle: {
+    fontSize: font.sizes.xs,
+    color: colors.muted,
+    letterSpacing: 1,
+  },
+  collectionGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+    marginTop: spacing.xs,
+  },
+  collectionItem: {
+    width: "31%",
+    borderWidth: 2,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    padding: spacing.sm,
+    alignItems: "center",
+    gap: 4,
+  },
+  collectionItemLocked: {
+    opacity: 0.55,
+    backgroundColor: colors.surfaceTertiary,
+  },
+  collectionEmoji: { fontSize: 32 },
+  collectionEmojiLocked: { fontSize: 28 },
+  collectionLabel: {
+    fontSize: font.sizes.xs,
+    color: colors.onSurface,
+    textAlign: "center",
+    fontWeight: "500",
+  },
+  collectionLabelLocked: { color: colors.muted },
+  collectionThreshold: {
+    fontSize: 9,
+    letterSpacing: 1,
+    color: colors.muted,
+    marginTop: 2,
+  },
+  // Profession row
+  professionValue: {
+    fontSize: font.sizes.base,
+    color: colors.onSurface,
+    maxWidth: 180,
+  },
+  professionItem: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+    borderBottomWidth: 1,
+    borderColor: colors.border,
+  },
+  professionItemOn: { backgroundColor: colors.brandPrimary },
+  professionItemTxt: { fontSize: font.sizes.lg, color: colors.onSurface },
+  professionItemTxtOn: { color: colors.onBrandPrimary, fontWeight: "500" },
+  savingBar: { paddingVertical: spacing.sm, alignItems: "center", backgroundColor: colors.surfaceSecondary },
 });

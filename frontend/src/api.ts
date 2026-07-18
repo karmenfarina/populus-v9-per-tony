@@ -155,8 +155,9 @@ export const api = {
     request(`/users/me/history?filter=${filter}`),
   search: (q: string) => request(`/search?q=${encodeURIComponent(q)}`),
   share: (id: string) => request(`/share/${id}`),
-  updateProfile: (body: { age: number; sex: 'F'|'M'|'other'|'na'; region: string; favorite_categories: string[] }) =>
+  updateProfile: (body: { age: number; sex: 'F'|'M'|'other'|'na'; region: string; favorite_categories: string[]; profession?: string }) =>
     request('/auth/me/profile', { method: 'PATCH', body: JSON.stringify(body) }),
+  professions: () => request('/professions'),
   updateDetails: (body: { bio?: string; social_links?: Record<string, string> }) =>
     request('/auth/me/details', { method: 'PATCH', body: JSON.stringify(body) }),
   myPhotos: () => request('/auth/me/photos'),
@@ -214,6 +215,15 @@ export const api = {
     request(`/users/${userId}/report`, { method: 'POST', body: JSON.stringify({ reason, message_id }) }),
 };
 
+export type Achievement = {
+  type: string;
+  label: string;
+  emoji: string;
+  category?: string | null;
+  threshold?: number | null;
+  unlocked: boolean;
+};
+
 export type User = {
   user_id: string;
   email: string | null;
@@ -225,6 +235,7 @@ export type User = {
   age?: number | null;
   sex?: 'F' | 'M' | 'other' | 'na' | null;
   region?: string | null;
+  profession?: string | null;
   favorite_categories?: string[];
   push_notifications?: boolean;
   onboarding_completed?: boolean;
@@ -241,6 +252,7 @@ export type User = {
     progress?: number;
     target?: number;
   } | null;
+  achievements?: Achievement[];
 };
 
 export type UserPhoto = { photo_id: string; data: string; position: number; is_primary?: boolean; created_at?: string };
@@ -258,6 +270,9 @@ export type PublicUser = {
   majority_votes: number;
   minority_votes: number;
   badge: User['badge'];
+  achievements?: Achievement[];
+  profession?: string | null;
+  region?: string | null;
 };
 
 export type Sponsor = {
