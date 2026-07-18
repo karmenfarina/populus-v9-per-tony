@@ -550,7 +550,7 @@ export default function Profile() {
               </Pressable>
             )}
             <View style={{ flex: 1 }}>
-              <Text style={styles.nickname} testID="profile-nickname">@{user.nickname}</Text>
+              <Text style={styles.nickname} testID="profile-nickname">{user.nickname}</Text>
               <Text style={styles.provider}>
                 {user.auth_provider === "email" ? "Email" : user.auth_provider === "google" ? "Google" : "Anonimo"}
               </Text>
