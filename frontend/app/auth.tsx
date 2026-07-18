@@ -15,7 +15,16 @@ type Mode = "email" | "google" | "anon";
 export default function AuthScreen() {
   const router = useRouter();
   const { login, signup, anonymous, loginWithGoogle } = useAuth();
-  const [mode, setMode] = useState<Mode>("email");
+  // NOTE: The EMAIL tab is currently HIDDEN from the UI (verification email
+  // delivery isn't operational yet). All the email login/signup code below
+  // is intentionally preserved and functional — flip AUTH_EMAIL_ENABLED to
+  // `true` (or remove the guards on the tabs render/default mode) to bring
+  // the tab back without any other changes.
+  const AUTH_EMAIL_ENABLED = false;
+  const VISIBLE_MODES: Mode[] = AUTH_EMAIL_ENABLED
+    ? (["email", "google", "anon"] as Mode[])
+    : (["google", "anon"] as Mode[]);
+  const [mode, setMode] = useState<Mode>(AUTH_EMAIL_ENABLED ? "email" : "google");
   const [isSignup, setIsSignup] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -112,7 +121,7 @@ export default function AuthScreen() {
           </View>
 
           <View style={styles.tabsRow}>
-            {(["email", "google", "anon"] as Mode[]).map((m) => (
+            {VISIBLE_MODES.map((m) => (
               <Pressable
                 key={m}
                 testID={`auth-tab-${m}`}
