@@ -1,0 +1,27 @@
+{
+  "summary": "Frontend-only bug regression for 'home shows only favorite categories'. All 7 requested scenarios PASSED end-to-end against https://faide-poll.preview.emergentagent.com. Registered user chat_a@test.it with favorite_categories=['tech','cronaca'] sees chip row [TUTTE, TECH, CRONACA] (7 non-favorite chips hidden) and 'Tutte' feed contains only TECH+CRONACA cards. Selecting TECH chip shows only TECH cards; selecting CRONACA shows only CRONACA cards. Updating favorites via PATCH /api/auth/me/profile to ['musica'] and reloading updates the chip row to [TUTTE, MUSICA] and the feed to MUSICA-only cards. Anonymous user (favorites=[]) sees all 10 chips (Tutte + 9 categories) and the Tutte feed contains cards from all 9 categories, confirming the fallback branch. No React Native deprecated packages, no red-screen errors, no console errors related to this feature.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/test_reports/iteration_33.json"
+  ],
+  "action_items": [
+    "No action required — home category filtering by user.favorite_categories works exactly as specified for both registered and anonymous users."
+  ],
+  "critical_code_review_comments": [
+    "index.tsx L58-66: filtering the 'all' scope by user.favorite_categories is done client-side after the /feuds fetch — fine for the current volume (~26 feuds) but consider server-side filtering (POST body or repeated category params) if the corpus grows past a few hundred, otherwise mobile clients will download and drop feuds they will never see.",
+    "index.tsx L92: setSelected('all') is unconditionally called inside the categories/favorites effect. If the user was already viewing e.g. 'chip-tech' and their favorites change under them (e.g. remote profile edit), the tab silently jumps back to Tutte. Acceptable but worth documenting."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (frontend-only request)", "frontend": "100% (7/7 scenarios)"},
+  "seed_data_creation": "No seed data created. Used chat_a@test.it (pre-verified) and toggled its favorite_categories via PATCH /api/auth/me/profile. Favorites left at ['tech','cronaca'] at end of run.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "To authenticate as a registered user in the web preview (email/password tab is HIDDEN), login via POST /api/auth/login then inject the token before app JS runs using page.add_init_script with `localStorage.setItem('faide_token', JSON.stringify('<jwt>'))`. AsyncStorage on web is backed by localStorage under the exact key `faide_token` and the value is JSON-encoded (i.e. quoted). Chip row items expose data-testid=chip-<id> (chip-all, chip-tech, chip-cronaca, chip-politica, chip-tv, chip-musica, chip-sport, chip-cinema, chip-social, chip-gossip). To assert feud card categories while excluding the chip row, exclude descendants of [data-testid='category-chip-row'].",
+  "rca_of_issue": "Original bug: home always showed every category chip and every feud. Root cause was that HomeFeed built the chip list directly from GET /api/categories and rendered the raw /api/feuds response without any client-side favorites filter. Fix (already applied in index.tsx L68-97 and L50-66): the chip row is now [Tutte, ...user.favorite_categories] with a fallback to all categories when favorites are empty, and when the 'Tutte' scope is active the feed is filtered by `favSet.has(f.category)`. Both branches are keyed on `user.favorite_categories` in useEffect deps so profile edits + refreshMe re-render correctly. Verified by A/B comparison between registered chat_a (favs=[tech,cronaca] → 3 chips, 2 label types) and a fresh anonymous session (0 favs → 10 chips, 9 label types)."
+}

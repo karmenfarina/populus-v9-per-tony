@@ -49,24 +49,40 @@ export default function HomeFeed() {
 
   const load = useCallback(async (category: string) => {
     const res = await api.feuds(category);
-    setFeuds(res.feuds);
-  }, []);
+    let list: Feud[] = res.feuds;
+    // "Tutte" scope: when the user has favorite categories set, we restrict
+    // the aggregated feed to their favorites — otherwise the chip labelled
+    // "Tutte" would contradict the personalization the user chose in
+    // onboarding. If no favorites are set (anonymous / not yet onboarded)
+    // "Tutte" keeps its literal meaning and shows everything.
+    if (category === "all") {
+      const favs = user?.favorite_categories || [];
+      if (favs.length > 0) {
+        const favSet = new Set(favs);
+        list = list.filter((f) => favSet.has(f.category));
+      }
+    }
+    setFeuds(list);
+  }, [user?.favorite_categories]);
 
   useEffect(() => {
     (async () => {
       try {
         const c = await api.categories();
         const favs = user?.favorite_categories || [];
-        // Reorder: Tutte first, then favorites in the order the user picked them,
-        // then the remaining categories.
-        const favIds = new Set(favs);
+        // Chip row: always start with "Tutte", then ONLY the user's favorite
+        // categories (in the order chosen). Non-favorite categories are
+        // intentionally hidden — the user opted out of them in onboarding.
+        // Users without favorites (anonymous / not yet onboarded) still see
+        // the full category list.
         const ordered: { id: string; label: string }[] = [ALL_CAT];
-        for (const id of favs) {
-          const found = c.categories.find((x: any) => x.id === id);
-          if (found) ordered.push(found);
-        }
-        for (const cat of c.categories) {
-          if (!favIds.has(cat.id)) ordered.push(cat);
+        if (favs.length > 0) {
+          for (const id of favs) {
+            const found = c.categories.find((x: any) => x.id === id);
+            if (found) ordered.push(found);
+          }
+        } else {
+          for (const cat of c.categories) ordered.push(cat);
         }
         setCats(ordered);
         // Preselected category defaults to "Tutte" for every user, including
