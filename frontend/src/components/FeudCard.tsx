@@ -29,10 +29,25 @@ function formatRelativeTime(iso?: string): string {
 export default function FeudCard({ feud, onPress, showArchivedBadge = false }: {
   feud: Feud;
   onPress: () => void;
+  /** Kept for backwards compatibility. Since the "ARCHIVIATA" tag was replaced
+   *  with the plain absolute date, this flag only forces the DD/MM date badge
+   *  regardless of how recent the feud is. */
   showArchivedBadge?: boolean;
 }) {
   const revealed = feud.revealed;
   const timeLabel = formatRelativeTime(feud.created_at);
+  // When the caller signals "this is an old/archived post" (e.g. from the
+  // archive tab), render the short absolute date (DD/MM) instead of the
+  // relative time. For very recent items we still fall back to timeLabel.
+  const dateOnly = (() => {
+    if (!feud.created_at) return timeLabel;
+    const dt = new Date(/[zZ]$|[+-]\d{2}:?\d{2}$/.test(feud.created_at) ? feud.created_at : `${feud.created_at}Z`);
+    if (isNaN(dt.getTime())) return timeLabel;
+    const dd = String(dt.getDate()).padStart(2, "0");
+    const mm = String(dt.getMonth() + 1).padStart(2, "0");
+    return `${dd}/${mm}`;
+  })();
+  const badgeLabel = showArchivedBadge ? dateOnly : timeLabel;
   return (
     <Pressable style={styles.card} onPress={onPress} testID={`feud-card-${feud.feud_id}`}>
       <ImageBackground source={{ uri: feud.image_url }} style={styles.cardImage}>
@@ -40,14 +55,9 @@ export default function FeudCard({ feud, onPress, showArchivedBadge = false }: {
           colors={["rgba(0,0,0,0)", "rgba(0,0,0,0.85)"]}
           style={StyleSheet.absoluteFill}
         />
-        {showArchivedBadge && (
-          <View style={styles.archivedBadge} testID={`archived-${feud.feud_id}`}>
-            <Text style={styles.archivedBadgeTxt}>ARCHIVIATA</Text>
-          </View>
-        )}
-        {!showArchivedBadge && timeLabel ? (
+        {badgeLabel ? (
           <View style={styles.timeBadge} testID={`feud-time-${feud.feud_id}`}>
-            <Text style={styles.timeBadgeTxt}>{timeLabel}</Text>
+            <Text style={styles.timeBadgeTxt}>{badgeLabel}</Text>
           </View>
         ) : null}
         <View style={styles.cardImageContent}>

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Modal, TextInput, Image, KeyboardAvoidingView, Platform, Switch, Alert } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import * as ImageManipulator from "expo-image-manipulator";
@@ -106,6 +106,11 @@ export default function Profile() {
   // itself as `original_data` and send it to the backend — this is what
   // makes re-cropping non-destructive (the user can zoom back out later).
   const [cropperOriginalSourceUri, setCropperOriginalSourceUri] = useState<string | null>(null);
+  // Pre-encoded original — populated in the background as soon as the user
+  // picks a source to crop. By the time they hit "confirm", encoding is
+  // already done and the upload feels instantaneous (the biggest chunk of
+  // perceived latency in the previous flow was this synchronous encode).
+  const preEncodedOriginalRef = useRef<{ uri: string; base64: string | null }>({ uri: "", base64: null });
   const [openingRecrop, setOpeningRecrop] = useState<string | null>(null);
   const isAnonymous = user?.auth_provider === "anonymous";
 
@@ -304,54 +309,87 @@ export default function Profile() {
     }
   }, []);
 
+  // Kick off the original encoding IN BACKGROUND the moment we know which
+  // source URI is going to be cropped. This runs in parallel with the user
+  // panning/zooming inside the cropper, so by the time they hit "confirm"
+  // the (relatively slow) 1440px re-encode is already sitting in
+  // `preEncodedOriginalRef.current.base64` — no user-visible wait.
+  useEffect(() => {
+    const src = cropperOriginalSourceUri;
+    if (!src) return;
+    if (cropperReplaceId) return; // re-crop path doesn't need to re-send original
+    // Skip if already encoded for this exact URI.
+    if (preEncodedOriginalRef.current.uri === src && preEncodedOriginalRef.current.base64) return;
+    let cancelled = false;
+    preEncodedOriginalRef.current = { uri: src, base64: null };
+    (async () => {
+      const b64 = await encodeOriginalForUpload(src);
+      if (cancelled) return;
+      // Only commit if the source URI hasn't changed under us mid-flight.
+      if (preEncodedOriginalRef.current.uri === src) {
+        preEncodedOriginalRef.current = { uri: src, base64: b64 };
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [cropperOriginalSourceUri, cropperReplaceId, encodeOriginalForUpload]);
+
   const uploadCroppedPhoto = useCallback(async (base64: string) => {
-    // Optional safety net: if payload is still very large after the cropper
-    // capped to 1080px, downscale again. Threshold ~900 KB base64 chars.
-    let payload = base64;
-    if (payload.length > 900_000) {
-      try {
-        const manipulated = await ImageManipulator.manipulateAsync(
-          `data:image/jpeg;base64,${payload}`,
-          [{ resize: { width: 900 } }],
-          { compress: 0.75, format: ImageManipulator.SaveFormat.JPEG, base64: true },
-        );
-        if (manipulated.base64) payload = manipulated.base64;
-      } catch { /* keep original */ }
-    }
+    // Close the cropper modal immediately after we have the crop payload.
+    // The heavy work (encoding + network + refresh) continues in the
+    // background — the user sees the profile again right away instead of
+    // watching a spinner. Any error is surfaced via Alert as before.
+    setCropperOpen(false);
+    setCropperUri(null);
+    setCropperSize(null);
+    const replaceId = cropperReplaceId;
+    const origUri = cropperOriginalSourceUri;
+    setCropperReplaceId(null);
+    setCropperOriginalSourceUri(null);
+
+    // Fire off — but do NOT await — the state refreshes at the end. They
+    // update UI once they resolve; blocking on them just makes the confirm
+    // feel slow. `loadPhotos` + `refreshMe` return quickly enough on their
+    // own but we don't want them on the critical path.
     try {
-      if (cropperReplaceId) {
-        // On re-crop, keep `original_data` intact on the backend — send only
-        // the new cropped payload. If the DB happens to still be missing an
-        // original (legacy photo), the backend will back-fill from what we
-        // pass here.
-        await api.replacePhoto(cropperReplaceId, payload);
+      let payload = base64;
+      // Only re-shrink when payload is genuinely huge — the cropper already
+      // caps at 480px (see PhotoCropper.tsx) so this rarely triggers.
+      if (payload.length > 900_000) {
+        try {
+          const manipulated = await ImageManipulator.manipulateAsync(
+            `data:image/jpeg;base64,${payload}`,
+            [{ resize: { width: 900 } }],
+            { compress: 0.75, format: ImageManipulator.SaveFormat.JPEG, base64: true },
+          );
+          if (manipulated.base64) payload = manipulated.base64;
+        } catch { /* keep original */ }
+      }
+      if (replaceId) {
+        await api.replacePhoto(replaceId, payload);
       } else {
-        // Fresh upload: also send the full-resolution source so the user can
-        // re-crop later without losing information (true zoom-out).
+        // Use the PRE-ENCODED original if we have it (it was encoded in the
+        // background while the user was cropping). Fall back to a fresh
+        // encode only if the pre-encode didn't finish in time.
         let originalPayload: string | undefined;
-        if (cropperOriginalSourceUri) {
-          const encoded = await encodeOriginalForUpload(cropperOriginalSourceUri);
-          if (encoded) originalPayload = encoded;
+        if (origUri) {
+          if (preEncodedOriginalRef.current.uri === origUri && preEncodedOriginalRef.current.base64) {
+            originalPayload = preEncodedOriginalRef.current.base64;
+          } else {
+            const encoded = await encodeOriginalForUpload(origUri);
+            if (encoded) originalPayload = encoded;
+          }
         }
         await api.uploadPhoto(payload, originalPayload);
       }
-      setCropperOpen(false);
-      setCropperUri(null);
-      setCropperSize(null);
-      setCropperReplaceId(null);
-      setCropperOriginalSourceUri(null);
-      await loadPhotos();
-      await refreshMe();
+      // Refresh in background — do not block.
+      loadPhotos().catch(() => {});
+      refreshMe().catch(() => {});
+      // Clear the pre-encoded cache once used.
+      preEncodedOriginalRef.current = { uri: "", base64: null };
     } catch (e: any) {
       const msg = e?.detail || e?.message || "Errore durante il salvataggio della foto";
-      // Show a modal alert so the user always sees why the save failed, even
-      // if the profile edit sheet was closed. `setDetailsError` alone is
-      // easy to miss because it renders inside a sheet that may not be open.
       Alert.alert("Impossibile salvare la foto", String(msg));
       setDetailsError(msg);
-      setCropperOpen(false);
-      setCropperReplaceId(null);
-      setCropperOriginalSourceUri(null);
     }
   }, [loadPhotos, refreshMe, cropperReplaceId, cropperOriginalSourceUri, encodeOriginalForUpload]);
 

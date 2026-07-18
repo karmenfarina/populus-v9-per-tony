@@ -283,9 +283,9 @@ export default function PhotoCropper({
           },
         },
       ];
-      if (width > 720) actions.push({ resize: { width: 720 } });
+      if (width > 512) actions.push({ resize: { width: 512 } });
       const out = await ImageManipulator.manipulateAsync(uri, actions, {
-        compress: 0.78,
+        compress: 0.72,
         format: ImageManipulator.SaveFormat.JPEG,
         base64: true,
       });
