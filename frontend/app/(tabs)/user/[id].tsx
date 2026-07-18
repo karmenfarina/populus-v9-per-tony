@@ -8,6 +8,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { api, PublicUser, HistoryItem } from "@/src/api";
 import { useAuth } from "@/src/auth/AuthContext";
 import { colors, spacing, font, sideColor } from "@/src/theme";
+import { PhotoGalleryViewer } from "@/src/components/PhotoGalleryViewer";
 
 const SOCIAL_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
   instagram: "logo-instagram",
@@ -34,6 +35,7 @@ export default function UserPublicScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [idx, setIdx] = useState(0);
+  const [viewerOpen, setViewerOpen] = useState(false);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [loadingH, setLoadingH] = useState(false);
   const [filter, setFilter] = useState<HFilter>("all");
@@ -223,12 +225,18 @@ export default function UserPublicScreen() {
         <View style={styles.galleryWrap}>
           <View style={styles.avatarRing}>
             {hasPhotos ? (
-              <Image
-                source={{ uri: `data:image/jpeg;base64,${current!.data}` }}
-                style={styles.avatarImg}
-                resizeMode="cover"
-                testID={`gallery-image-${idx}`}
-              />
+              <Pressable
+                onPress={() => setViewerOpen(true)}
+                testID="open-gallery-viewer"
+                style={{ width: "100%", height: "100%" }}
+              >
+                <Image
+                  source={{ uri: `data:image/jpeg;base64,${current!.data}` }}
+                  style={styles.avatarImg}
+                  resizeMode="cover"
+                  testID={`gallery-image-${idx}`}
+                />
+              </Pressable>
             ) : (
               <View style={[styles.avatarImg, styles.noPhotoBox]}>
                 <Ionicons name="person-outline" size={72} color={colors.muted} />
@@ -492,6 +500,13 @@ export default function UserPublicScreen() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      <PhotoGalleryViewer
+        visible={viewerOpen}
+        photos={photos}
+        initialIndex={idx}
+        onClose={() => setViewerOpen(false)}
+      />
     </SafeAreaView>
   );
 }
