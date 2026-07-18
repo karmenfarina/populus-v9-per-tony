@@ -215,15 +215,6 @@ export const api = {
     request(`/users/${userId}/report`, { method: 'POST', body: JSON.stringify({ reason, message_id }) }),
 };
 
-export type Achievement = {
-  type: string;
-  label: string;
-  emoji: string;
-  category?: string | null;
-  threshold?: number | null;
-  unlocked: boolean;
-};
-
 export type User = {
   user_id: string;
   email: string | null;
@@ -252,7 +243,6 @@ export type User = {
     progress?: number;
     target?: number;
   } | null;
-  achievements?: Achievement[];
 };
 
 export type UserPhoto = { photo_id: string; data: string; position: number; is_primary?: boolean; created_at?: string };
@@ -270,7 +260,6 @@ export type PublicUser = {
   majority_votes: number;
   minority_votes: number;
   badge: User['badge'];
-  achievements?: Achievement[];
   profession?: string | null;
   region?: string | null;
 };

@@ -35,10 +35,6 @@ Politica, Programmi TV, Musica, Sport, Cinema, Social, Gossip, Cronaca, Tech.
 
 ## Badge rules
 - Alignment badge (buon_senso / bastian_contrario): unlocked at `total_votes >= 10`, mutually exclusive.
-- Achievement badges (cumulative, collectible in `badges_ever_awarded`):
-  - `cronaca_curioso` 🔍 (5 cronaca votes)
-  - `cronaca_cronista` 📰 (25 cronaca votes)
-  - `cronaca_segugio` 🕵️ (75 cronaca votes)
 
 ## Anon → Registered migration
 When a user is anonymous and signs up (fresh email), logs in (existing email), or Google-logs-in:

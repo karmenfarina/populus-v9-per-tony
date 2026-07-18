@@ -608,36 +608,6 @@ export default function Profile() {
           </Text>
         </View>
 
-        {!isAnonymous && user.achievements && user.achievements.length > 0 && (
-          <View style={styles.collectionSection} testID="achievements-section">
-            <Text style={styles.collectionTitle}>SPILLE COLLEZIONATE</Text>
-            <Text style={styles.collectionSubtitle}>
-              {user.achievements.filter(a => a.unlocked).length}/{user.achievements.length} sbloccate
-            </Text>
-            <View style={styles.collectionGrid}>
-              {user.achievements.map((a) => (
-                <View
-                  key={a.type}
-                  style={[styles.collectionItem, !a.unlocked && styles.collectionItemLocked]}
-                  testID={`achievement-${a.type}${a.unlocked ? '-unlocked' : '-locked'}`}
-                >
-                  <Text style={[styles.collectionEmoji, !a.unlocked && styles.collectionEmojiLocked]}>
-                    {a.unlocked ? a.emoji : "🔒"}
-                  </Text>
-                  <Text style={[styles.collectionLabel, !a.unlocked && styles.collectionLabelLocked]}>
-                    {a.label}
-                  </Text>
-                  {a.threshold != null && (
-                    <Text style={styles.collectionThreshold}>
-                      {a.unlocked ? "SBLOCCATA" : `${a.threshold} voti`}
-                    </Text>
-                  )}
-                </View>
-              ))}
-            </View>
-          </View>
-        )}
-
         <View style={styles.statsRow}>
           <View style={styles.statBox}>
             <Text style={styles.statValue}>{user.total_votes}</Text>
@@ -1178,61 +1148,6 @@ const styles = StyleSheet.create({
   prefsErr: { color: colors.error, borderWidth: 2, borderColor: colors.error, padding: spacing.sm, fontSize: font.sizes.base },
   prefsSaveBtn: { backgroundColor: colors.brandPrimary, borderTopWidth: 2, borderColor: colors.border, paddingVertical: spacing.lg, alignItems: "center" },
   prefsSaveTxt: { color: colors.onBrandPrimary, fontSize: font.sizes.xl, letterSpacing: 2, fontWeight: "500" },
-  // Achievements collection
-  collectionSection: {
-    marginTop: spacing.md,
-    marginHorizontal: spacing.md,
-    borderWidth: 2,
-    borderColor: colors.border,
-    backgroundColor: colors.surfaceSecondary,
-    padding: spacing.md,
-    gap: spacing.sm,
-  },
-  collectionTitle: {
-    fontSize: font.sizes.base,
-    letterSpacing: 2,
-    fontWeight: "500",
-    color: colors.onSurface,
-  },
-  collectionSubtitle: {
-    fontSize: font.sizes.xs,
-    color: colors.muted,
-    letterSpacing: 1,
-  },
-  collectionGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.sm,
-    marginTop: spacing.xs,
-  },
-  collectionItem: {
-    width: "31%",
-    borderWidth: 2,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
-    padding: spacing.sm,
-    alignItems: "center",
-    gap: 4,
-  },
-  collectionItemLocked: {
-    opacity: 0.55,
-    backgroundColor: colors.surfaceTertiary,
-  },
-  collectionEmoji: { fontSize: 32 },
-  collectionEmojiLocked: { fontSize: 28 },
-  collectionLabel: {
-    fontSize: font.sizes.xs,
-    color: colors.onSurface,
-    textAlign: "center",
-    fontWeight: "500",
-  },
-  collectionLabelLocked: { color: colors.muted },
-  collectionThreshold: {
-    fontSize: 9,
-    letterSpacing: 1,
-    color: colors.muted,
-    marginTop: 2,
-  },
   // Profession row
   professionValue: {
     fontSize: font.sizes.base,
