@@ -14,27 +14,38 @@ Italian mobile app (Expo) where daily controversies from news/gossip are turned 
 - Emergent-managed Google OAuth (WebBrowser + session_id → session_token).
 
 ## Categories
-Politica, Programmi TV, Musica, Sport, Cinema, Social, Gossip.
+Politica, Programmi TV, Musica, Sport, Cinema, Social, Gossip, Cronaca, Tech.
 
 ## Key API endpoints (all under `/api`)
 - `POST /auth/signup|login|anonymous|google-session|logout`, `GET /auth/me`
-- `GET /categories`
+- `GET /categories`, `GET /professions`
 - `GET /feuds?category=`, `GET /feuds/{id}`
 - `POST /feuds/{id}/vote` (side A|B)
 - `GET|POST /feuds/{id}/comments`
 - `GET|POST /comments/{id}/replies`
 - `POST /admin/generate-daily?count=N` (AI generation)
+- `PATCH /auth/me/profile` (age, sex, region, favorite_categories, profession)
 
 ## Screens
 - `/auth` — three-tab entry (EMAIL / GOOGLE / ANONIMO).
 - `/(tabs)` — Home feed with sticky category chip row + full-width feud cards with 50/50 split poll preview.
-- `/(tabs)/profile` — Nickname, badge state (locked / bastian contrario / buon senso), voting stats.
+- `/(tabs)/profile` — Nickname, badge state, achievement badges collection, profession picker, voting stats.
 - `/feud/[id]` — Hero image, article summary, big split poll, two-column comments (Pro A / Pro B) with reply threads.
+- `/onboarding` — 4 steps: categorie preferite → età+sesso → regione → professione.
 
 ## Badge rules
-- Locked until `total_votes >= 5`.
-- Compare cumulative majority vs minority votes on each vote → recompute alignment.
+- Alignment badge (buon_senso / bastian_contrario): unlocked at `total_votes >= 10`, mutually exclusive.
+- Achievement badges (cumulative, collectible in `badges_ever_awarded`):
+  - `cronaca_curioso` 🔍 (5 cronaca votes)
+  - `cronaca_cronista` 📰 (25 cronaca votes)
+  - `cronaca_segugio` 🕵️ (75 cronaca votes)
+
+## Anon → Registered migration
+When a user is anonymous and signs up (fresh email), logs in (existing email), or Google-logs-in:
+- Fresh target → in-place upgrade preserves user_id and all engagement.
+- Existing target → votes/comments/replies/messages reassigned then anon user deleted.
+- For email signup where target is already taken (unverified), migration is deferred until verify-email (via `pending_migration_from` on the verification token).
 
 ## Deferred
-- Real ad banners targeted per category.
+- Real ad banners targeted per category (AdMob requires native build).
 - Push notifications for new daily feuds.
