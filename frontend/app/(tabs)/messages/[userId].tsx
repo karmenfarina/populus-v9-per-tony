@@ -447,6 +447,38 @@ export default function ChatScreen() {
                 </Text>
               ) : (
                 <>
+                  {item.shared_feud ? (
+                    <Pressable
+                      onPress={() => router.push(`/feud/${item.shared_feud!.feud_id}`)}
+                      style={styles.sharedFeudCard}
+                      testID={`msg-shared-feud-${bubbleId}`}
+                    >
+                      {item.shared_feud.image_url ? (
+                        <Image
+                          source={{ uri: item.shared_feud.image_url }}
+                          style={styles.sharedFeudImg}
+                        />
+                      ) : (
+                        <View style={[styles.sharedFeudImg, { backgroundColor: colors.surfaceSecondary, alignItems: "center", justifyContent: "center" }]}>
+                          <Ionicons name="newspaper-outline" size={40} color={colors.muted} />
+                        </View>
+                      )}
+                      <View style={styles.sharedFeudBody}>
+                        {item.shared_feud.category_label ? (
+                          <Text style={styles.sharedFeudCat} numberOfLines={1}>
+                            {item.shared_feud.category_label.toUpperCase()}
+                          </Text>
+                        ) : null}
+                        <Text style={styles.sharedFeudTitle} numberOfLines={3}>
+                          {item.shared_feud.title || "Apri il post"}
+                        </Text>
+                        <View style={styles.sharedFeudCta}>
+                          <Ionicons name="open-outline" size={14} color={colors.brandPrimary} />
+                          <Text style={styles.sharedFeudCtaTxt}>APRI IL POST</Text>
+                        </View>
+                      </View>
+                    </Pressable>
+                  ) : null}
                   {bubbleImage ? (
                     <Image
                       source={{ uri: `data:image/jpeg;base64,${bubbleImage}` }}
@@ -834,6 +866,40 @@ const styles = StyleSheet.create({
   txtTheirs: { color: colors.onSurface },
   txtItalic: { fontStyle: "italic" },
   msgImg: { width: 220, height: 220, borderRadius: 8, marginBottom: 6, backgroundColor: colors.surfaceTertiary },
+  sharedFeudCard: {
+    width: 240,
+    borderWidth: 2,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    marginBottom: 6,
+    overflow: "hidden",
+  },
+  sharedFeudImg: { width: 240, height: 140, backgroundColor: colors.surfaceTertiary },
+  sharedFeudBody: { padding: 10, gap: 6 },
+  sharedFeudCat: {
+    fontSize: 10,
+    letterSpacing: 2,
+    color: colors.brandPrimary,
+    fontWeight: "500",
+  },
+  sharedFeudTitle: {
+    fontSize: font.sizes.base,
+    color: colors.onSurface,
+    fontWeight: "500",
+    lineHeight: 18,
+  },
+  sharedFeudCta: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    marginTop: 4,
+  },
+  sharedFeudCtaTxt: {
+    color: colors.brandPrimary,
+    fontSize: 11,
+    letterSpacing: 1,
+    fontWeight: "500",
+  },
   metaRow: { flexDirection: "row", alignItems: "center", justifyContent: "flex-end", marginTop: 2 },
   metaTxt: { fontSize: 10 },
   metaMine: { color: "rgba(255,255,255,0.75)" },

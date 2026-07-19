@@ -200,8 +200,13 @@ export const api = {
     p.set('limit', String(limit));
     return request(`/messages/with/${userId}?${p.toString()}`);
   },
-  sendMessage: (recipient_id: string, text?: string, image_data?: string) =>
-    request('/messages/send', { method: 'POST', body: JSON.stringify({ recipient_id, text, image_data }) }),
+  sendMessage: (recipient_id: string, text?: string, image_data?: string, shared_feud_id?: string) =>
+    request('/messages/send', { method: 'POST', body: JSON.stringify({ recipient_id, text, image_data, shared_feud_id }) }),
+  shareFeudToUsers: (feud_id: string, recipient_ids: string[], text?: string) =>
+    request(`/feuds/${feud_id}/share`, { method: 'POST', body: JSON.stringify({ recipient_ids, text }) }),
+  shareSuggestions: (limit = 21) => request(`/messages/share-suggestions?limit=${limit}`),
+  searchUsers: (q: string, limit = 20) =>
+    request(`/search/users?q=${encodeURIComponent(q)}&limit=${limit}`),
   markConversationRead: (userId: string) =>
     request(`/messages/with/${userId}/read`, { method: 'POST' }),
   reactMessage: (messageId: string, emoji: string) =>
@@ -361,6 +366,14 @@ export type MiniUser = {
   photo_data?: string | null;
 };
 
+export type SharedFeud = {
+  feud_id: string;
+  title?: string | null;
+  image_url?: string | null;
+  category?: string | null;
+  category_label?: string | null;
+};
+
 export type ChatMessage = {
   message_id: string;
   conversation_id: string;
@@ -368,7 +381,8 @@ export type ChatMessage = {
   recipient_id: string;
   text: string | null;
   image_data: string | null;
-  kind: 'text' | 'image' | 'mixed';
+  shared_feud?: SharedFeud | null;
+  kind: 'text' | 'image' | 'mixed' | 'shared_feud';
   reactions: Record<string, string>;
   created_at: string;
   read_at: string | null;

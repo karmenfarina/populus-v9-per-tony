@@ -14,6 +14,7 @@ import { colors, spacing, font, sideColor, onSideColor } from "@/src/theme";
 import FeudMediaBlock from "@/src/components/FeudMediaBlock";
 import FeudStatsModal from "@/src/components/FeudStatsModal";
 import ShareSheet from "@/src/components/ShareSheet";
+import InAppShareSheet from "@/src/components/InAppShareSheet";
 import { useUIPrefs } from "@/src/ui/UIPrefs";
 import { useAuth } from "@/src/auth/AuthContext";
 
@@ -77,6 +78,7 @@ export default function FeudDetail() {
   const [activeSide, setActiveSide] = useState<"A" | "B" | null>(null);
   const [statsOpen, setStatsOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [inAppShareOpen, setInAppShareOpen] = useState(false);
   const { sourcesExpanded, setSourcesExpanded } = useUIPrefs();
   const scrollRef = useRef<ScrollView>(null);
 
@@ -248,12 +250,14 @@ export default function FeudDetail() {
 
   const onShare = () => {
     if (!feud) return;
-    // ALWAYS open our custom bottom-sheet so the user gets the same rich
-    // set of options (WhatsApp / Telegram / X / Facebook / Email / Copy)
-    // regardless of platform. The native system sheet was inconsistent
-    // (web preview iframes lacked `web-share` permission, anonymous
-    // browser sessions failed silently, etc.).
-    setShareOpen(true);
+    // Registered users get the in-app share sheet first (Instagram-style
+    // "share to a friend" flow). Anonymous users can't send DMs, so we
+    // fall back directly to the external social-share sheet for them.
+    if (isAnonymous) {
+      setShareOpen(true);
+    } else {
+      setInAppShareOpen(true);
+    }
   };
 
   if (loading) {
@@ -569,6 +573,13 @@ export default function FeudDetail() {
         title={feud.title}
         message={`${feud.title}\n\nCon chi ti schieri? ${feud.party_a} vs ${feud.party_b}`}
         onCopy={copyShareLink}
+      />
+      <InAppShareSheet
+        visible={inAppShareOpen}
+        feudId={feud.feud_id}
+        feudTitle={feud.title}
+        onClose={() => setInAppShareOpen(false)}
+        onOpenExternal={() => setShareOpen(true)}
       />
     </SafeAreaView>
   );

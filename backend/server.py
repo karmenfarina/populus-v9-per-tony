@@ -13,6 +13,7 @@ import json
 import re
 import time
 import html as html_lib
+import re as _re
 import feedparser
 import asyncio
 from pathlib import Path
@@ -3795,6 +3796,22 @@ class SendMessageBody(BaseModel):
     recipient_id: str = Field(min_length=1)
     text: Optional[str] = Field(default=None, max_length=MAX_MSG_TEXT)
     image_data: Optional[str] = Field(default=None, max_length=MAX_MSG_IMAGE_BYTES)
+    # Instagram-style "share a post to a friend" — attaches a snapshot of the
+    # feud so the recipient sees a preview inline in chat that they can tap
+    # to open. Only feud_id is trusted from the client; the snapshot fields
+    # are built server-side from the current feud document.
+    shared_feud_id: Optional[str] = Field(default=None, min_length=1, max_length=120)
+
+
+class ShareToUsersBody(BaseModel):
+    """Payload for /feuds/{id}/share — the fan-out share-sheet endpoint.
+
+    `recipient_ids` is the list of users the sender wants to share the feud
+    with in a single tap (Instagram-style multi-select). `text` is optional
+    and attached identically to every generated message.
+    """
+    recipient_ids: List[str] = Field(min_length=1, max_length=25)
+    text: Optional[str] = Field(default=None, max_length=MAX_MSG_TEXT)
 
 
 class ReactMessageBody(BaseModel):
@@ -3884,7 +3901,13 @@ def _serialize_message(m: dict) -> dict:
     return out
 
 
-def _preview_text(text: Optional[str], has_image: bool) -> str:
+def _preview_text(text: Optional[str], has_image: bool, shared_feud: Optional[dict] = None) -> str:
+    if shared_feud:
+        title = (shared_feud.get('title') or '').strip()
+        base = '📎 Post condiviso' + (f' · {title}' if title else '')
+        if text and text.strip():
+            return (text.strip() + ' · ' + base)[:120]
+        return base[:120]
     if text and text.strip():
         return text.strip()[:120]
     if has_image:
@@ -3921,6 +3944,202 @@ async def messages_unread_count(user: dict = Depends(get_current_user)):
         'deleted': {'$ne': True},
     })
     return {'count': n}
+
+
+@api_router.get('/messages/share-suggestions')
+async def share_suggestions(limit: int = 21, user: dict = Depends(get_current_user)):
+    """Instagram-style "share to" suggestions.
+
+    Ranking heuristic (weighted, most→least):
+    1. Existing conversation partners in the last 90 days, ordered by
+       cumulative message count (both directions).
+    2. Users the caller has recently REPLIED to on public comments.
+    3. Users who have recently replied to the caller's public comments.
+
+    Anonymous users get an empty list (they can't send messages anyway).
+    We de-duplicate, exclude self + blocked users, and return a compact
+    payload including the primary photo (base64 preview) so the client can
+    render the grid without a follow-up per-user fetch.
+    """
+    if user.get('is_anonymous') or user.get('auth_provider') == 'anonymous':
+        return {'users': []}
+    me = user['user_id']
+    limit = max(1, min(int(limit or 21), 60))
+    scores: dict[str, float] = {}
+    since = now_utc() - timedelta(days=90)
+
+    # 1) Chat partners
+    try:
+        cursor = db.messages.find(
+            {
+                '$or': [{'sender_id': me}, {'recipient_id': me}],
+                'deleted': {'$ne': True},
+                'created_at': {'$gte': since},
+            },
+            {'_id': 0, 'sender_id': 1, 'recipient_id': 1},
+        ).limit(5000)
+        async for m in cursor:
+            other = m['recipient_id'] if m['sender_id'] == me else m['sender_id']
+            if other == me:
+                continue
+            scores[other] = scores.get(other, 0.0) + 1.0
+    except Exception as e:
+        logger.warning(f"share suggestions (messages) failed: {e}")
+
+    # 2) Users I've replied to (public comments)
+    try:
+        my_replies = db.replies.find(
+            {'user_id': me, 'created_at': {'$gte': since}},
+            {'_id': 0, 'comment_id': 1},
+        ).limit(300)
+        async for r in my_replies:
+            parent = await db.comments.find_one(
+                {'comment_id': r['comment_id']}, {'_id': 0, 'user_id': 1}
+            )
+            if parent and parent.get('user_id') and parent['user_id'] != me:
+                scores[parent['user_id']] = scores.get(parent['user_id'], 0.0) + 0.4
+    except Exception as e:
+        logger.warning(f"share suggestions (replies) failed: {e}")
+
+    # 3) Users who replied to my comments
+    try:
+        my_comments = db.comments.find(
+            {'user_id': me, 'created_at': {'$gte': since}},
+            {'_id': 0, 'comment_id': 1},
+        ).limit(300)
+        my_comment_ids: list[str] = []
+        async for c in my_comments:
+            my_comment_ids.append(c['comment_id'])
+        if my_comment_ids:
+            replies_in = db.replies.find(
+                {'comment_id': {'$in': my_comment_ids}, 'user_id': {'$ne': me}},
+                {'_id': 0, 'user_id': 1},
+            ).limit(400)
+            async for r in replies_in:
+                uid = r.get('user_id')
+                if uid and uid != me:
+                    scores[uid] = scores.get(uid, 0.0) + 0.3
+    except Exception as e:
+        logger.warning(f"share suggestions (replies_in) failed: {e}")
+
+    # Exclude blocked pairs
+    try:
+        blocks = db.user_blocks.find(
+            {'$or': [{'user_id': me}, {'blocked_user_id': me}]},
+            {'_id': 0, 'user_id': 1, 'blocked_user_id': 1},
+        )
+        async for b in blocks:
+            other = b['blocked_user_id'] if b['user_id'] == me else b['user_id']
+            scores.pop(other, None)
+    except Exception:
+        pass
+
+    # Rank and hydrate
+    ranked = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)[:limit]
+    if not ranked:
+        return {'users': []}
+    uids = [u for u, _ in ranked]
+    users_map: dict[str, dict] = {}
+    async for u in db.users.find(
+        {'user_id': {'$in': uids}, 'auth_provider': {'$ne': 'anonymous'}, 'is_anonymous': {'$ne': True}},
+        {'_id': 0, 'user_id': 1, 'nickname': 1, 'primary_photo_id': 1},
+    ):
+        users_map[u['user_id']] = u
+    out: List[dict] = []
+    for uid, score in ranked:
+        u = users_map.get(uid)
+        if not u:
+            continue
+        photo_data = None
+        if u.get('primary_photo_id'):
+            ph = await db.user_photos.find_one(
+                {'user_id': uid, 'photo_id': u['primary_photo_id']},
+                {'_id': 0, 'data': 1},
+            )
+            photo_data = (ph or {}).get('data')
+        out.append({
+            'user_id': uid,
+            'nickname': u.get('nickname') or 'Utente',
+            'primary_photo_id': u.get('primary_photo_id'),
+            'photo_data': photo_data,
+            'score': round(score, 2),
+        })
+    return {'users': out}
+
+
+@api_router.get('/search/users')
+async def search_users(q: str, limit: int = 20, user: dict = Depends(get_current_user)):
+    """Nickname substring search — case-insensitive, excludes self and
+    anonymous accounts. Used by the share-sheet's search bar."""
+    if user.get('is_anonymous') or user.get('auth_provider') == 'anonymous':
+        return {'users': []}
+    q = (q or '').strip()
+    if len(q) < 1:
+        return {'users': []}
+    # Escape regex special chars in the user's raw query so a stray '.' or
+    # '+' doesn't broaden the match.
+    safe = _re.escape(q)
+    limit = max(1, min(int(limit or 20), 40))
+    cursor = db.users.find(
+        {
+            'nickname': {'$regex': safe, '$options': 'i'},
+            'user_id': {'$ne': user['user_id']},
+            'auth_provider': {'$ne': 'anonymous'},
+            'is_anonymous': {'$ne': True},
+        },
+        {'_id': 0, 'user_id': 1, 'nickname': 1, 'primary_photo_id': 1},
+    ).limit(limit)
+    results: List[dict] = []
+    async for u in cursor:
+        photo_data = None
+        if u.get('primary_photo_id'):
+            ph = await db.user_photos.find_one(
+                {'user_id': u['user_id'], 'photo_id': u['primary_photo_id']},
+                {'_id': 0, 'data': 1},
+            )
+            photo_data = (ph or {}).get('data')
+        results.append({
+            'user_id': u['user_id'],
+            'nickname': u.get('nickname') or 'Utente',
+            'primary_photo_id': u.get('primary_photo_id'),
+            'photo_data': photo_data,
+        })
+    return {'users': results}
+
+
+@api_router.post('/feuds/{feud_id}/share')
+async def share_feud_to_users(feud_id: str, body: ShareToUsersBody, user: dict = Depends(get_current_user)):
+    """Fan-out multi-recipient share — one DM per selected recipient, all
+    carrying the same optional text + a snapshot of the feud."""
+    if user.get('is_anonymous') or user.get('auth_provider') == 'anonymous':
+        raise HTTPException(status_code=403, detail="Gli utenti anonimi non possono condividere post")
+    feud = await db.feuds.find_one(
+        {'feud_id': feud_id},
+        {'_id': 0, 'feud_id': 1, 'title': 1, 'image_url': 1, 'category': 1, 'category_label': 1},
+    )
+    if not feud:
+        raise HTTPException(status_code=404, detail='Post non trovato')
+    text = (body.text or '').strip() or None
+    ok: List[str] = []
+    failed: List[dict] = []
+    for rid in body.recipient_ids:
+        if rid == user['user_id']:
+            failed.append({'user_id': rid, 'error': 'self'})
+            continue
+        try:
+            # Delegate to the standard send-message path so all the usual
+            # invariants (blocked pair check, WS delivery, push, unread
+            # counter) apply uniformly.
+            await send_message(
+                SendMessageBody(recipient_id=rid, text=text, shared_feud_id=feud_id),
+                user=user,
+            )
+            ok.append(rid)
+        except HTTPException as e:
+            failed.append({'user_id': rid, 'error': str(e.detail)})
+        except Exception as e:
+            failed.append({'user_id': rid, 'error': str(e)})
+    return {'sent': ok, 'failed': failed}
 
 
 @api_router.get('/messages/conversations')
@@ -4008,11 +4227,35 @@ async def send_message(body: SendMessageBody, user: dict = Depends(get_current_u
         # strip prefix if present
         if img.startswith('data:'):
             img = img.split(',', 1)[-1]
-    if not text and not img:
+    # Optionally attach a shared feud snapshot. We fetch the feud server-side
+    # so a client can't spoof title/image and so a stale local snapshot never
+    # ends up in someone's inbox.
+    shared_feud: Optional[dict] = None
+    if body.shared_feud_id:
+        f = await db.feuds.find_one(
+            {'feud_id': body.shared_feud_id},
+            {'_id': 0, 'feud_id': 1, 'title': 1, 'image_url': 1, 'category': 1, 'category_label': 1},
+        )
+        if f:
+            shared_feud = {
+                'feud_id': f['feud_id'],
+                'title': f.get('title'),
+                'image_url': f.get('image_url'),
+                'category': f.get('category'),
+                'category_label': f.get('category_label'),
+            }
+    if not text and not img and not shared_feud:
         raise HTTPException(status_code=400, detail='Messaggio vuoto')
     conv = await _ensure_conversation(user['user_id'], body.recipient_id)
     now = now_utc()
-    kind = 'image' if img and not text else ('text' if text and not img else 'mixed')
+    if shared_feud:
+        kind = 'shared_feud'
+    elif img and not text:
+        kind = 'image'
+    elif text and not img:
+        kind = 'text'
+    else:
+        kind = 'mixed'
     doc = {
         'message_id': new_id('msg'),
         'conversation_id': conv['conversation_id'],
@@ -4020,6 +4263,7 @@ async def send_message(body: SendMessageBody, user: dict = Depends(get_current_u
         'recipient_id': body.recipient_id,
         'text': text,
         'image_data': img,
+        'shared_feud': shared_feud,
         'kind': kind,
         'reactions': {},
         'created_at': now,
@@ -4027,7 +4271,7 @@ async def send_message(body: SendMessageBody, user: dict = Depends(get_current_u
         'deleted': False,
     }
     await db.messages.insert_one(doc)
-    preview = _preview_text(text, bool(img))
+    preview = _preview_text(text, bool(img), shared_feud)
     await db.conversations.update_one(
         {'conversation_id': conv['conversation_id']},
         {'$set': {
