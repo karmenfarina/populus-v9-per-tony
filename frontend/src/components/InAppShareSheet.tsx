@@ -236,7 +236,7 @@ export default function InAppShareSheet({ visible, feudId, feudTitle, onClose, o
               <View style={styles.actionBar} testID="share-action-bar">
                 <TextInput
                   testID="share-caption-input"
-                  placeholder={`Scrivi un messaggio${feudTitle ? ` su "${feudTitle}"` : ""}...`}
+                  placeholder="Scrivi un messaggio..."
                   placeholderTextColor={colors.muted}
                   value={caption}
                   onChangeText={setCaption}
@@ -324,7 +324,8 @@ const styles = StyleSheet.create({
     fontWeight: "500",
   },
   gridRow: {
-    justifyContent: "space-between",
+    justifyContent: "flex-start",
+    gap: spacing.sm,
     marginBottom: spacing.md,
   },
   userCell: {
