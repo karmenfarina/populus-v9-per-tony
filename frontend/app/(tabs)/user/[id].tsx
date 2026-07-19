@@ -184,14 +184,14 @@ export default function UserPublicScreen() {
             <Ionicons name="chevron-back" size={22} color={colors.onSurfaceInverse} />
             <Text style={styles.backTxt}>INDIETRO</Text>
           </Pressable>
-          <Text style={styles.topNick}>@{profile.nickname}</Text>
+          <Text style={styles.topNick}>{profile.nickname}</Text>
         </View>
         <View style={styles.anonBox} testID="public-anonymous">
           <View style={styles.anonAvatar}>
             <Ionicons name="glasses-outline" size={80} color={colors.brandSecondary} />
           </View>
           <Text style={styles.anonTitle}>UTENTE ANONIMO</Text>
-          <Text style={styles.anonSubtitle}>@{profile.nickname}</Text>
+          <Text style={styles.anonSubtitle}>{profile.nickname}</Text>
           <Text style={styles.anonHint}>
             Gli utenti anonimi non condividono foto, storico voti, spille o profilo pubblico.
           </Text>
@@ -211,7 +211,7 @@ export default function UserPublicScreen() {
           <Ionicons name="chevron-back" size={22} color={colors.onSurfaceInverse} />
           <Text style={styles.backTxt}>INDIETRO</Text>
         </Pressable>
-        <Text style={styles.topNick}>@{profile.nickname}</Text>
+        <Text style={styles.topNick}>{profile.nickname}</Text>
         {canMessage ? (
           <Pressable onPress={() => setMenuOpen(true)} testID="user-menu" style={styles.menuBtn}>
             <Ionicons name="ellipsis-vertical" size={20} color={colors.onSurfaceInverse} />
@@ -263,7 +263,7 @@ export default function UserPublicScreen() {
         </View>
 
         <View style={styles.body}>
-          <Text style={styles.nick}>@{profile.nickname}</Text>
+          <Text style={styles.nick}>{profile.nickname}</Text>
           <Text style={styles.stat}>
             {profile.total_votes} voti · {profile.majority_votes} maggioranza · {profile.minority_votes} minoranza
           </Text>

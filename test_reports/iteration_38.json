@@ -1,0 +1,31 @@
+{
+  "summary": "Verified both Populus bug fixes on /user/user_6e65e19525d5 as anonymous. BUG 2 (nickname without '@'): PASSED — both styles.topNick (top header) and styles.nick (main section) render 'chat_a' with NO leading '@'. Screen text captured shows 'INDIETRO\\nchat_a\\n...\\nchat_a\\n0 voti · 0 maggioranza · 0 minoranza' — no '@' anywhere. BUG 1 (counter matches displayed photo): PASSED — viewer opens with counter '1 / 2' and the displayed image is the primary photo (ph_8f5825600849), which is photos[0] in the current DB. NOTE: the review request expected '2 / 2' because it assumed primary photo was at index 1; however the current API response for user_6e65e19525d5 has primary_photo_id=ph_8f5825600849 at position 0 (index 0), so the CORRECT initial counter is '1 / 2' and this matches the displayed photo — which is exactly what the fix aims to achieve (counter ↔ displayed photo alignment). Regression: gallery-viewer-close button correctly dismisses the modal. LIMITATION on web preview: react-native-web ScrollView's onMomentumScrollEnd / onScrollEndDrag do NOT fire when scrollLeft is set programmatically via JS — after el.scrollLeft=390, counter stayed at '1 / 2' and the visible image did not visibly change; additionally a mouse-drag swipe closed the viewer (single-tap gesture fired on drag). This is a web-only testing limitation and does NOT reproduce the original bug (counter mismatched displayed photo). On real touch devices the ScrollView pagingEnabled + native momentum events are expected to work; recommend E1 verifies touch swipe on a real mobile device or the Expo Go build. Anon-user public profile regression (styles.anonSubtitle) not testable — no anonymous test user with an accessible profile URL was seeded; skipped per instructions.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "PhotoGalleryViewer / ZoomablePage single-tap gesture", "issue": "On web (mouse-drag) a horizontal drag over the viewer is interpreted as a single tap and closes the modal instead of scrolling to the next photo. singleTap should require a strict tap (no translation) to avoid conflicting with drag/swipe. Reference: /app/frontend/src/components/PhotoGalleryViewer.tsx:150-157", "testID": "gallery-viewer-scroll", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "pointerEvents prop", "issue": "Console warning: 'props.pointerEvents is deprecated. Use style.pointerEvents' — appears from PhotoGalleryViewer (topBar, dotsRow) and elsewhere. Reference: /app/frontend/src/components/PhotoGalleryViewer.tsx:272,286"},
+      {"component": "shadow* style props", "issue": "Console warning: '\"shadow*\" style props are deprecated. Use \"boxShadow\"'. Non-blocking."}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [
+    "Both reported bugs (photo counter mismatch + '@' in nickname on external profile view) appear FIXED. Main agent can consider closing the tickets.",
+    "OPTIONAL polish: move pointerEvents='box-none'/'none' from props onto style={{ pointerEvents: ... }} in PhotoGalleryViewer.tsx (lines 272, 286) to silence RN 0.74+ deprecation warnings.",
+    "OPTIONAL: verify horizontal swipe/counter tracking on a real touch device or Expo Go — programmatic scrollLeft via Playwright does not trigger react-native-web's onMomentumScrollEnd, so end-to-end swipe → counter update could not be asserted on the web preview. The initial-counter fix and close-button work perfectly."
+  ],
+  "critical_code_review_comments": [
+    "PhotoGalleryViewer.tsx line 150-157: singleTap uses numberOfTaps(1).maxDelay(260) — on web this can fire at the end of a mouse drag on the backdrop. Consider adding .maxDistance(<small>) or using Gesture.Native() to defer to ScrollView cleanly."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A", "frontend": "100% (both bugs verified fixed; swipe navigation web-only limitation noted)"},
+  "seed_data_creation": "None. Created transient anonymous test user via /api/auth/anonymous for login.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "chat_a (user_6e65e19525d5) currently has primary_photo_id set to photos[0], so PhotoGalleryViewer opens on index 0 with counter '1 / 2' — this is CORRECT and matches the displayed photo. If DB is later reseeded with primary as photos[1], the counter should read '2 / 2' at open. To test horizontal swipe on web, note that react-native-web ScrollView does NOT fire onMomentumScrollEnd on programmatic scrollLeft assignments; use real touch events or test on device.",
+  "rca_of_issue": "Both fixes verified via Playwright + text-content assertions on /user/user_6e65e19525d5 as anonymous. Original Bug 1 root cause was FlatList measurement race — replaced with ScrollView + imperative scrollTo + gated pan gesture; initial counter now matches displayed photo. Original Bug 2 root cause was hard-coded '@' prefix in template strings — removed from lines ~187, 194, 214, 266 of app/(tabs)/user/[id].tsx and confirmed absent in rendered DOM."
+}

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Modal, View, Image, FlatList, Pressable, StyleSheet, Text,
-  useWindowDimensions, StatusBar, Platform,
+  Modal, View, Image, ScrollView, Pressable, StyleSheet, Text,
+  useWindowDimensions, StatusBar, Platform, NativeSyntheticEvent, NativeScrollEvent,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
@@ -13,27 +13,23 @@ import { spacing } from "@/src/theme";
 /**
  * Full-screen photo viewer.
  *
- * - Horizontal swipe (FlatList `pagingEnabled`) to navigate between photos.
- * - Pinch-to-zoom on the currently focused photo (up to 4x).
- * - Pan while zoomed to move around the image.
- * - Double-tap to toggle between fit and 2.5x zoom.
- * - Tap on backdrop (when not zoomed) closes the viewer.
+ * Uses a horizontal, paging `ScrollView` (more reliable than `FlatList` on
+ * web/native for this exact scenario) with one zoomable page per photo.
  *
- * Accepts base64 strings OR pre-formatted `data:image/...;base64,...` URIs
- * OR `file://` / `http(s)://` URIs — anything the RN `<Image>` component can
- * consume.
+ * - Swipe horizontally to navigate.
+ * - Pinch to zoom the CURRENT page (up to 4x).
+ * - Pan while zoomed to move around.
+ * - Double-tap toggles zoom.
+ * - Single tap on backdrop closes the viewer.
  *
- * Implementation notes:
- * - Uses the modern `Gesture.Pinch()` / `Gesture.Pan()` / `Gesture.Tap()`
- *   API (compatible with react-native-reanimated v4, which dropped
- *   `useAnimatedGestureHandler`).
- * - We build a `Gesture.Race(pan, pinch)` so the two zoom gestures don't
- *   fight the parent FlatList horizontal swipe when at rest.
+ * Critical implementation detail: pan is DISABLED while at fit-scale (1×) so
+ * it doesn't fight the parent ScrollView for horizontal touches. This is what
+ * makes horizontal swipe reliably work between photos. See `.enabled(zoomed)`
+ * on the pan gesture below.
  */
 
 export type GalleryPhoto = {
   photo_id?: string;
-  /** Base64 payload (without `data:` prefix) OR a full URI. */
   data?: string;
   uri?: string;
 };
@@ -58,12 +54,14 @@ function ZoomablePage({
   height,
   isActive,
   onCloseTap,
+  onZoomChange,
 }: {
   uri: string;
   width: number;
   height: number;
   isActive: boolean;
   onCloseTap: () => void;
+  onZoomChange: (zoomed: boolean) => void;
 }) {
   const scale = useSharedValue(1);
   const savedScale = useSharedValue(1);
@@ -71,18 +69,25 @@ function ZoomablePage({
   const translateY = useSharedValue(0);
   const savedTx = useSharedValue(0);
   const savedTy = useSharedValue(0);
+  const [zoomed, setZoomed] = useState(false);
+
+  const applyZoomState = (z: boolean) => {
+    setZoomed(z);
+    onZoomChange(z);
+  };
 
   useEffect(() => {
     if (!isActive) {
-      // Reset zoom when scrolled off-screen so re-entry always begins at fit.
       scale.value = withTiming(1, { duration: 150 });
       translateX.value = withTiming(0, { duration: 150 });
       translateY.value = withTiming(0, { duration: 150 });
       savedScale.value = 1;
       savedTx.value = 0;
       savedTy.value = 0;
+      if (zoomed) applyZoomState(false);
     }
-  }, [isActive, scale, translateX, translateY, savedScale, savedTx, savedTy]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isActive]);
 
   const pinch = Gesture.Pinch()
     .onStart(() => {
@@ -100,22 +105,23 @@ function ZoomablePage({
         savedScale.value = 1;
         savedTx.value = 0;
         savedTy.value = 0;
+        runOnJS(applyZoomState)(false);
       } else {
         savedScale.value = scale.value;
+        runOnJS(applyZoomState)(true);
       }
     });
 
+  // Pan is ONLY enabled while zoomed. When at fit-scale, we hand horizontal
+  // touches back to the parent ScrollView so page-swipe works reliably.
   const pan = Gesture.Pan()
     .maxPointers(1)
+    .enabled(zoomed)
     .onStart(() => {
       savedTx.value = translateX.value;
       savedTy.value = translateY.value;
     })
     .onUpdate((e) => {
-      // Panning only makes sense while zoomed in — otherwise the parent
-      // FlatList horizontal swipe should own the gesture. We enforce this
-      // in the worklet so RN's gesture system can bail early.
-      if (scale.value <= 1) return;
       const maxX = (width * (scale.value - 1)) / 2;
       const maxY = (height * (scale.value - 1)) / 2;
       translateX.value = Math.max(-maxX, Math.min(maxX, savedTx.value + e.translationX));
@@ -124,7 +130,7 @@ function ZoomablePage({
 
   const doubleTap = Gesture.Tap()
     .numberOfTaps(2)
-    .maxDelay(280)
+    .maxDelay(260)
     .onEnd(() => {
       if (scale.value > 1) {
         scale.value = withTiming(1, { duration: 180 });
@@ -133,25 +139,23 @@ function ZoomablePage({
         savedScale.value = 1;
         savedTx.value = 0;
         savedTy.value = 0;
+        runOnJS(applyZoomState)(false);
       } else {
         scale.value = withTiming(2.5, { duration: 180 });
         savedScale.value = 2.5;
+        runOnJS(applyZoomState)(true);
       }
     });
 
   const singleTap = Gesture.Tap()
     .numberOfTaps(1)
-    .maxDelay(280)
+    .maxDelay(260)
     .onEnd(() => {
-      // Only close on tap when at rest — a tap during zoom would be
-      // unpredictable and often unintended.
       if (scale.value <= 1) {
         runOnJS(onCloseTap)();
       }
     });
 
-  // Recognize the double-tap BEFORE the single-tap so a fast twin-tap
-  // triggers zoom rather than close.
   const tapCombo = Gesture.Exclusive(doubleTap, singleTap);
   const composed = Gesture.Simultaneous(pinch, Gesture.Race(pan, tapCombo));
 
@@ -164,37 +168,70 @@ function ZoomablePage({
   }));
 
   return (
-    <GestureDetector gesture={composed}>
-      <Animated.View style={[{ width, height, justifyContent: "center", alignItems: "center" }, style]}>
-        <Image
-          source={{ uri }}
-          style={{ width, height }}
-          resizeMode="contain"
-          testID="gallery-viewer-image"
-        />
-      </Animated.View>
-    </GestureDetector>
+    <View style={{ width, height, justifyContent: "center", alignItems: "center" }}>
+      <GestureDetector gesture={composed}>
+        <Animated.View style={[{ width, height, justifyContent: "center", alignItems: "center" }, style]}>
+          <Image
+            source={{ uri }}
+            style={{ width, height }}
+            resizeMode="contain"
+            testID="gallery-viewer-image"
+          />
+        </Animated.View>
+      </GestureDetector>
+    </View>
   );
 }
 
 export function PhotoGalleryViewer({ visible, photos, initialIndex = 0, onClose }: Props) {
   const { width, height } = useWindowDimensions();
-  const listRef = useRef<FlatList<GalleryPhoto>>(null);
+  const scrollRef = useRef<ScrollView>(null);
   const [activeIdx, setActiveIdx] = useState<number>(initialIndex);
-
-  useEffect(() => {
-    if (visible) setActiveIdx(initialIndex);
-  }, [visible, initialIndex]);
+  const [anyPageZoomed, setAnyPageZoomed] = useState(false);
+  const initialScrollDoneRef = useRef(false);
 
   const data = useMemo(() => photos.filter((p) => resolveUri(p)), [photos]);
   const total = data.length;
 
-  const onViewableItemsChanged = useRef(({ viewableItems }: any) => {
-    if (viewableItems && viewableItems.length > 0) {
-      const idx = viewableItems[0].index ?? 0;
+  // Whenever the viewer becomes visible, jump the ScrollView to the caller's
+  // initial index. We queue the scroll for the next frame so the ScrollView
+  // has had a chance to render pages. Using `scrollTo` (imperative) is more
+  // reliable across web + native than `contentOffset` prop or `initialScrollIndex`.
+  useEffect(() => {
+    if (!visible) {
+      initialScrollDoneRef.current = false;
+      return;
+    }
+    setActiveIdx(initialIndex);
+    // Attempt the scroll a couple of times to defeat the race where the
+    // ScrollView measures its layout AFTER we tried to scroll.
+    const tries = [30, 90, 220, 450];
+    const timers: any[] = [];
+    tries.forEach((ms) => {
+      timers.push(setTimeout(() => {
+        try {
+          scrollRef.current?.scrollTo({ x: initialIndex * width, y: 0, animated: false });
+        } catch { /* noop */ }
+      }, ms));
+    });
+    // Mark initial scroll as done shortly after last attempt so momentum
+    // handlers start tracking user swipes only from that point on.
+    timers.push(setTimeout(() => { initialScrollDoneRef.current = true; }, 550));
+    return () => { timers.forEach(clearTimeout); };
+  }, [visible, initialIndex, width]);
+
+  const handleScrollEnd = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    // Only update the counter AFTER the initial scroll settle to avoid the
+    // "opened on photo 2 but counter says 1/N" bug that plagued the FlatList
+    // implementation. Once the user starts actually swiping we trust the
+    // native scroll offset as the source of truth.
+    if (!initialScrollDoneRef.current) return;
+    const offsetX = e.nativeEvent.contentOffset.x;
+    const idx = Math.round(offsetX / width);
+    if (idx >= 0 && idx < total && idx !== activeIdx) {
       setActiveIdx(idx);
     }
-  }).current;
+  };
 
   if (!visible || total === 0) return null;
 
@@ -208,42 +245,43 @@ export function PhotoGalleryViewer({ visible, photos, initialIndex = 0, onClose 
     >
       <StatusBar barStyle="light-content" backgroundColor="#000" />
       <View style={styles.container} testID="gallery-viewer-root">
-        <FlatList
-          ref={listRef}
-          data={data}
-          keyExtractor={(item, i) => item.photo_id || `p-${i}`}
+        <ScrollView
+          ref={scrollRef}
           horizontal
           pagingEnabled
-          initialScrollIndex={initialIndex < total ? initialIndex : 0}
-          getItemLayout={(_, i) => ({ length: width, offset: width * i, index: i })}
+          scrollEnabled={!anyPageZoomed}
           showsHorizontalScrollIndicator={false}
-          onViewableItemsChanged={onViewableItemsChanged}
-          viewabilityConfig={{ itemVisiblePercentThreshold: 70 }}
-          renderItem={({ item, index }) => (
+          onMomentumScrollEnd={handleScrollEnd}
+          onScrollEndDrag={handleScrollEnd}
+          decelerationRate="fast"
+          testID="gallery-viewer-scroll"
+        >
+          {data.map((item, index) => (
             <ZoomablePage
+              key={item.photo_id || `p-${index}`}
               uri={resolveUri(item)}
               width={width}
               height={height}
               isActive={index === activeIdx}
               onCloseTap={onClose}
+              onZoomChange={setAnyPageZoomed}
             />
-          )}
-          removeClippedSubviews={Platform.OS !== "web"}
-        />
+          ))}
+        </ScrollView>
 
-        {/* Top overlay: close button + counter */}
         <View style={styles.topBar} pointerEvents="box-none">
           <Pressable onPress={onClose} hitSlop={12} style={styles.closeBtn} testID="gallery-viewer-close">
             <Ionicons name="close" size={28} color="#fff" />
           </Pressable>
           {total > 1 && (
             <View style={styles.counterPill}>
-              <Text style={styles.counterTxt}>{activeIdx + 1} / {total}</Text>
+              <Text style={styles.counterTxt} testID="gallery-viewer-counter">
+                {activeIdx + 1} / {total}
+              </Text>
             </View>
           )}
         </View>
 
-        {/* Bottom dots */}
         {total > 1 && (
           <View style={styles.dotsRow} pointerEvents="none">
             {data.map((_, i) => (
