@@ -19,10 +19,10 @@ import { useUIPrefs } from "@/src/ui/UIPrefs";
 import { useAuth } from "@/src/auth/AuthContext";
 
 export default function FeudDetail() {
-  const { id, comment: commentParam, side: sideParam, from, archiveCat, archiveDate } =
+  const { id, comment: commentParam, side: sideParam, from, archiveCat, archiveDate, messagesUserId } =
     useLocalSearchParams<{
       id: string; comment?: string; side?: string; from?: string;
-      archiveCat?: string; archiveDate?: string;
+      archiveCat?: string; archiveDate?: string; messagesUserId?: string;
     }>();
   const router = useRouter();
   const { user } = useAuth();
@@ -34,6 +34,19 @@ export default function FeudDetail() {
   const goBack = () => {
     if (from === "top") { router.replace("/top"); return; }
     if (from === "notifications") { router.replace("/notifications"); return; }
+    // When opened from a chat message (shared_feud card), go back to that
+    // exact conversation — not the tab root or the feed. If for some reason
+    // we don't have the counterparty user_id, fall back to the messages
+    // conversation list.
+    if (from === "messages") {
+      const uid = (messagesUserId as string) || "";
+      if (uid) {
+        router.replace(`/messages/${encodeURIComponent(uid)}`);
+      } else {
+        router.replace("/messages");
+      }
+      return;
+    }
     // When launched from the archive, return to the SAME archive day and
     // category the user was viewing — not the default "all / newest" state.
     if (from === "archive") {
@@ -61,7 +74,7 @@ export default function FeudDetail() {
     });
     return () => { try { sub.remove(); } catch { /* noop */ } };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [from, archiveCat, archiveDate]);
+  }, [from, archiveCat, archiveDate, messagesUserId]);
   const [feud, setFeud] = useState<Feud | null>(null);
   const [sponsor, setSponsor] = useState<Sponsor | null>(null);
   const [sideA, setSideA] = useState<Comment[]>([]);

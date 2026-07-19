@@ -449,7 +449,14 @@ export default function ChatScreen() {
                 <>
                   {item.shared_feud ? (
                     <Pressable
-                      onPress={() => router.push(`/feud/${item.shared_feud!.feud_id}`)}
+                      onPress={() => router.push({
+                        pathname: "/feud/[id]",
+                        params: {
+                          id: item.shared_feud!.feud_id,
+                          from: "messages",
+                          messagesUserId: String(userId || ""),
+                        },
+                      })}
                       style={styles.sharedFeudCard}
                       testID={`msg-shared-feud-${bubbleId}`}
                     >
