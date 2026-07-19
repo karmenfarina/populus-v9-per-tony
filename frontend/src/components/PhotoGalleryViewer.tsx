@@ -4,28 +4,26 @@ import {
   useWindowDimensions, StatusBar, Platform, NativeSyntheticEvent, NativeScrollEvent,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { Gesture, GestureDetector } from "react-native-gesture-handler";
-import Animated, {
-  useAnimatedStyle, useSharedValue, withTiming, runOnJS,
-} from "react-native-reanimated";
 import { spacing } from "@/src/theme";
 
 /**
  * Full-screen photo viewer.
  *
- * Uses a horizontal, paging `ScrollView` (more reliable than `FlatList` on
- * web/native for this exact scenario) with one zoomable page per photo.
+ * Simple horizontal pager built on React Native's built-in ScrollView with
+ * `pagingEnabled`. On both web and native this gives a fully reliable swipe
+ * between photos — a previous attempt used FlatList + gesture-handler pinch
+ * gestures, but those blocked the horizontal swipe on native and were the
+ * root cause of the "non riesco a scorrere" bug.
  *
- * - Swipe horizontally to navigate.
- * - Pinch to zoom the CURRENT page (up to 4x).
- * - Pan while zoomed to move around.
- * - Double-tap toggles zoom.
- * - Single tap on backdrop closes the viewer.
+ * - Swipe horizontally to navigate between photos.
+ * - Tap on the empty backdrop (top/bottom bars) closes the viewer.
+ * - Tap the ✕ button also closes.
+ * - Counter (top-right) + dot indicator (bottom) track the active photo.
  *
- * Critical implementation detail: pan is DISABLED while at fit-scale (1×) so
- * it doesn't fight the parent ScrollView for horizontal touches. This is what
- * makes horizontal swipe reliably work between photos. See `.enabled(zoomed)`
- * on the pan gesture below.
+ * Pinch-zoom is not included in this iteration because it competes with the
+ * horizontal pager gesture on RN Gesture Handler v2. The user's request was
+ * specifically for enlarging + sfogliare — a full-screen contain-fit image
+ * already fulfils the "enlarge" part.
  */
 
 export type GalleryPhoto = {
@@ -48,167 +46,23 @@ function resolveUri(p: GalleryPhoto): string {
   return `data:image/jpeg;base64,${p.data}`;
 }
 
-function ZoomablePage({
-  uri,
-  width,
-  height,
-  isActive,
-  onCloseTap,
-  onZoomChange,
-}: {
-  uri: string;
-  width: number;
-  height: number;
-  isActive: boolean;
-  onCloseTap: () => void;
-  onZoomChange: (zoomed: boolean) => void;
-}) {
-  const scale = useSharedValue(1);
-  const savedScale = useSharedValue(1);
-  const translateX = useSharedValue(0);
-  const translateY = useSharedValue(0);
-  const savedTx = useSharedValue(0);
-  const savedTy = useSharedValue(0);
-  const [zoomed, setZoomed] = useState(false);
-
-  const applyZoomState = (z: boolean) => {
-    setZoomed(z);
-    onZoomChange(z);
-  };
-
-  useEffect(() => {
-    if (!isActive) {
-      scale.value = withTiming(1, { duration: 150 });
-      translateX.value = withTiming(0, { duration: 150 });
-      translateY.value = withTiming(0, { duration: 150 });
-      savedScale.value = 1;
-      savedTx.value = 0;
-      savedTy.value = 0;
-      if (zoomed) applyZoomState(false);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isActive]);
-
-  const pinch = Gesture.Pinch()
-    .onStart(() => {
-      savedScale.value = scale.value;
-    })
-    .onUpdate((e) => {
-      const next = savedScale.value * e.scale;
-      scale.value = Math.max(1, Math.min(next, 4));
-    })
-    .onEnd(() => {
-      if (scale.value < 1.05) {
-        scale.value = withTiming(1, { duration: 180 });
-        translateX.value = withTiming(0, { duration: 180 });
-        translateY.value = withTiming(0, { duration: 180 });
-        savedScale.value = 1;
-        savedTx.value = 0;
-        savedTy.value = 0;
-        runOnJS(applyZoomState)(false);
-      } else {
-        savedScale.value = scale.value;
-        runOnJS(applyZoomState)(true);
-      }
-    });
-
-  // Pan is ONLY enabled while zoomed. When at fit-scale, we hand horizontal
-  // touches back to the parent ScrollView so page-swipe works reliably.
-  const pan = Gesture.Pan()
-    .maxPointers(1)
-    .enabled(zoomed)
-    .onStart(() => {
-      savedTx.value = translateX.value;
-      savedTy.value = translateY.value;
-    })
-    .onUpdate((e) => {
-      const maxX = (width * (scale.value - 1)) / 2;
-      const maxY = (height * (scale.value - 1)) / 2;
-      translateX.value = Math.max(-maxX, Math.min(maxX, savedTx.value + e.translationX));
-      translateY.value = Math.max(-maxY, Math.min(maxY, savedTy.value + e.translationY));
-    });
-
-  const doubleTap = Gesture.Tap()
-    .numberOfTaps(2)
-    .maxDelay(260)
-    .onEnd(() => {
-      if (scale.value > 1) {
-        scale.value = withTiming(1, { duration: 180 });
-        translateX.value = withTiming(0, { duration: 180 });
-        translateY.value = withTiming(0, { duration: 180 });
-        savedScale.value = 1;
-        savedTx.value = 0;
-        savedTy.value = 0;
-        runOnJS(applyZoomState)(false);
-      } else {
-        scale.value = withTiming(2.5, { duration: 180 });
-        savedScale.value = 2.5;
-        runOnJS(applyZoomState)(true);
-      }
-    });
-
-  const singleTap = Gesture.Tap()
-    .numberOfTaps(1)
-    .maxDelay(260)
-    // A drag/swipe should NOT be interpreted as a tap. Restricting the max
-    // travel distance to a small threshold fixes the web-preview edge case
-    // where mouse-drag swipes accidentally closed the modal.
-    .maxDistance(8)
-    .onEnd(() => {
-      if (scale.value <= 1) {
-        runOnJS(onCloseTap)();
-      }
-    });
-
-  const tapCombo = Gesture.Exclusive(doubleTap, singleTap);
-  const composed = Gesture.Simultaneous(pinch, Gesture.Race(pan, tapCombo));
-
-  const style = useAnimatedStyle(() => ({
-    transform: [
-      { translateX: translateX.value },
-      { translateY: translateY.value },
-      { scale: scale.value },
-    ],
-  }));
-
-  return (
-    <View style={{ width, height, justifyContent: "center", alignItems: "center" }}>
-      <GestureDetector gesture={composed}>
-        <Animated.View style={[{ width, height, justifyContent: "center", alignItems: "center" }, style]}>
-          <Image
-            source={{ uri }}
-            style={{ width, height }}
-            resizeMode="contain"
-            testID="gallery-viewer-image"
-          />
-        </Animated.View>
-      </GestureDetector>
-    </View>
-  );
-}
-
 export function PhotoGalleryViewer({ visible, photos, initialIndex = 0, onClose }: Props) {
   const { width, height } = useWindowDimensions();
   const scrollRef = useRef<ScrollView>(null);
   const [activeIdx, setActiveIdx] = useState<number>(initialIndex);
-  const [anyPageZoomed, setAnyPageZoomed] = useState(false);
   const initialScrollDoneRef = useRef(false);
 
   const data = useMemo(() => photos.filter((p) => resolveUri(p)), [photos]);
   const total = data.length;
 
-  // Whenever the viewer becomes visible, jump the ScrollView to the caller's
-  // initial index. We queue the scroll for the next frame so the ScrollView
-  // has had a chance to render pages. Using `scrollTo` (imperative) is more
-  // reliable across web + native than `contentOffset` prop or `initialScrollIndex`.
   useEffect(() => {
     if (!visible) {
       initialScrollDoneRef.current = false;
       return;
     }
     setActiveIdx(initialIndex);
-    // Attempt the scroll a couple of times to defeat the race where the
-    // ScrollView measures its layout AFTER we tried to scroll.
+    // Try to scroll a few times so we defeat the "ScrollView isn't laid out
+    // yet" race that shows up on cold Modal mounts.
     const tries = [30, 90, 220, 450];
     const timers: any[] = [];
     tries.forEach((ms) => {
@@ -218,23 +72,32 @@ export function PhotoGalleryViewer({ visible, photos, initialIndex = 0, onClose 
         } catch { /* noop */ }
       }, ms));
     });
-    // Mark initial scroll as done shortly after last attempt so momentum
-    // handlers start tracking user swipes only from that point on.
     timers.push(setTimeout(() => { initialScrollDoneRef.current = true; }, 550));
     return () => { timers.forEach(clearTimeout); };
   }, [visible, initialIndex, width]);
 
   const handleScrollEnd = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    // Only update the counter AFTER the initial scroll settle to avoid the
-    // "opened on photo 2 but counter says 1/N" bug that plagued the FlatList
-    // implementation. Once the user starts actually swiping we trust the
-    // native scroll offset as the source of truth.
     if (!initialScrollDoneRef.current) return;
     const offsetX = e.nativeEvent.contentOffset.x;
     const idx = Math.round(offsetX / width);
     if (idx >= 0 && idx < total && idx !== activeIdx) {
       setActiveIdx(idx);
     }
+  };
+
+  // Explicit navigation buttons (mouse-friendly on web, useful on
+  // narrow-thumb one-hand usage on device).
+  const goPrev = () => {
+    if (activeIdx <= 0) return;
+    const next = activeIdx - 1;
+    scrollRef.current?.scrollTo({ x: next * width, y: 0, animated: true });
+    setActiveIdx(next);
+  };
+  const goNext = () => {
+    if (activeIdx >= total - 1) return;
+    const next = activeIdx + 1;
+    scrollRef.current?.scrollTo({ x: next * width, y: 0, animated: true });
+    setActiveIdx(next);
   };
 
   if (!visible || total === 0) return null;
@@ -253,7 +116,6 @@ export function PhotoGalleryViewer({ visible, photos, initialIndex = 0, onClose 
           ref={scrollRef}
           horizontal
           pagingEnabled
-          scrollEnabled={!anyPageZoomed}
           showsHorizontalScrollIndicator={false}
           onMomentumScrollEnd={handleScrollEnd}
           onScrollEndDrag={handleScrollEnd}
@@ -261,17 +123,43 @@ export function PhotoGalleryViewer({ visible, photos, initialIndex = 0, onClose 
           testID="gallery-viewer-scroll"
         >
           {data.map((item, index) => (
-            <ZoomablePage
+            <View
               key={item.photo_id || `p-${index}`}
-              uri={resolveUri(item)}
-              width={width}
-              height={height}
-              isActive={index === activeIdx}
-              onCloseTap={onClose}
-              onZoomChange={setAnyPageZoomed}
-            />
+              style={{ width, height, justifyContent: "center", alignItems: "center" }}
+              testID={`gallery-page-${index}`}
+            >
+              <Image
+                source={{ uri: resolveUri(item) }}
+                style={{ width, height }}
+                resizeMode="contain"
+                testID="gallery-viewer-image"
+              />
+            </View>
           ))}
         </ScrollView>
+
+        {/* Left/right arrow overlays — clickable for mouse users, hit only the
+            outer edges so they don't steal touch from the pager on device. */}
+        {total > 1 && activeIdx > 0 && (
+          <Pressable
+            onPress={goPrev}
+            hitSlop={8}
+            style={styles.arrowLeft}
+            testID="gallery-viewer-prev"
+          >
+            <Ionicons name="chevron-back" size={28} color="#fff" />
+          </Pressable>
+        )}
+        {total > 1 && activeIdx < total - 1 && (
+          <Pressable
+            onPress={goNext}
+            hitSlop={8}
+            style={styles.arrowRight}
+            testID="gallery-viewer-next"
+          >
+            <Ionicons name="chevron-forward" size={28} color="#fff" />
+          </Pressable>
+        )}
 
         <View style={styles.topBar} pointerEvents="box-none">
           <Pressable onPress={onClose} hitSlop={12} style={styles.closeBtn} testID="gallery-viewer-close">
@@ -332,4 +220,24 @@ const styles = StyleSheet.create({
   },
   dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: "rgba(255,255,255,0.4)" },
   dotOn: { backgroundColor: "#fff", width: 20 },
+  arrowLeft: {
+    position: "absolute",
+    left: 8,
+    top: "50%",
+    marginTop: -22,
+    width: 44, height: 44, borderRadius: 22,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    justifyContent: "center", alignItems: "center",
+    zIndex: 5,
+  },
+  arrowRight: {
+    position: "absolute",
+    right: 8,
+    top: "50%",
+    marginTop: -22,
+    width: 44, height: 44, borderRadius: 22,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    justifyContent: "center", alignItems: "center",
+    zIndex: 5,
+  },
 });

@@ -3580,6 +3580,22 @@ async def on_startup():
         )
     except Exception as e:
         logger.warning(f"grandfather email_verified migration failed: {e}")
+    # One-shot backfill: users who onboarded BEFORE `cronaca` was introduced
+    # can't possibly have it in their favorites (it didn't exist), so the
+    # "favorites-only" home filter effectively hides it from them until they
+    # manually opt in. Add it to every user whose favorites are set and don't
+    # yet contain it — a one-time nudge, not a lock-in (they can still remove
+    # it via the profile prefs editor).
+    try:
+        await db.users.update_many(
+            {
+                'favorite_categories.0': {'$exists': True},
+                'favorite_categories': {'$nin': ['cronaca']},
+            },
+            {'$addToSet': {'favorite_categories': 'cronaca'}},
+        )
+    except Exception as e:
+        logger.warning(f"cronaca favorite backfill failed: {e}")
     # Full-text index for search
     try:
         await db.feuds.create_index([('title', 'text'), ('summary', 'text'), ('party_a', 'text'), ('party_b', 'text')])

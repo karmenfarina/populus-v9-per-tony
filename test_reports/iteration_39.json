@@ -1,0 +1,34 @@
+{
+  "summary": "Both bug fixes VERIFIED end-to-end. Bug 1 (cronaca backfill): (a) MongoDB check confirms 263 users have non-empty favorite_categories and ALL of them now contain 'cronaca' (query for favorites without cronaca returns 0). (b) chat_a@test.it login returns favorite_categories=['tech','cronaca'] via /api/auth/me. (c) Home chip row for chat_a renders exactly 'TUTTE / TECH / CRONACA' — both chip-tech and chip-cronaca present with the correct testIDs. (d) Regression: fresh anonymous user (favs=[]) still sees ALL 9 categories in the chip row (politica, tv, musica, sport, cinema, social, gossip, cronaca, tech) plus TUTTE. Bug 2 (photo gallery swipe): (a) Opening the viewer via avatar tap on /user/user_6e65e19525d5 renders gallery-viewer-root and counter '1 / 2'. (b) Initial state correctly shows ONLY gallery-viewer-next (prev is absent on first page). (c) Clicking gallery-viewer-next advances counter to '2 / 2', ScrollView scrollLeft=390 (= 1 * viewport width) confirming gallery-page-1 is now the visible page, and gallery-viewer-prev appears while gallery-viewer-next disappears (correct edge behavior). (d) Clicking gallery-viewer-prev returns counter to '1 / 2'. (e) gallery-viewer-close dismisses the viewer (regression passes). (f) NO react-native-gesture-handler pinch/pan warnings in console (imports removed as claimed). Two React Native deprecation warnings persist but are non-blocking. All 5 backend pytest cases PASS.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "pointerEvents prop", "issue": "Console warning: 'props.pointerEvents is deprecated. Use style.pointerEvents' — emitted from PhotoGalleryViewer topBar (line 164) and dotsRow (line 178). Non-blocking but should migrate to style.pointerEvents for RN 0.74+ compliance. Reference: /app/frontend/src/components/PhotoGalleryViewer.tsx:164,178"},
+      {"component": "shadow* style props", "issue": "Console warning: '\"shadow*\" style props are deprecated. Use \"boxShadow\"'. Not localized to the gallery viewer — appears across the app. Non-blocking."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_cronaca_and_gallery.py",
+    "/app/test_reports/pytest/cronaca_gallery.xml"
+  ],
+  "action_items": [
+    "OPTIONAL polish (non-blocking): migrate `pointerEvents='box-none'` / `pointerEvents='none'` from JSX props onto `style={{ pointerEvents: '...' }}` in PhotoGalleryViewer.tsx lines 164 and 178.",
+    "Both reported bugs (cronaca chip missing + gallery swipe not working) can be closed — verified fixed."
+  ],
+  "critical_code_review_comments": [
+    "Backfill query at server.py:3583-3598 correctly uses `favorite_categories.0: {$exists: true}` to only touch users with non-empty favorites, and `$addToSet` guarantees idempotence — safe to re-run.",
+    "PhotoGalleryViewer.tsx conditional arrow rendering (lines 143 & 153: `total > 1 && activeIdx > 0` / `total > 1 && activeIdx < total - 1`) correctly hides both arrows when total===1 and only shows the appropriate arrow at the edges — verified in DOM at page 0 (only next) and page 1 (only prev)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_cronaca_and_gallery.py (new pytest file)"
+  ],
+  "success_rate": {"backend": "100% (5/5 tests pass)", "frontend": "100% (all Bug 1 + Bug 2 flows verified)"},
+  "seed_data_creation": "Created one transient anonymous user 'testAnonQC' via /api/auth/anonymous for chip-row regression test. chat_a and chat_b are pre-seeded per test_credentials.md.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "chat_a (user_6e65e19525d5) has 2 photos and favorite_categories=['tech','cronaca'] after backfill. chat_b has favorite_categories=['politica','gossip','tv','sport','cronaca']. PhotoGalleryViewer.tsx is now a pure ScrollView + pagingEnabled with explicit chevron buttons — no gesture-handler imports. When testing on web, prefer clicking gallery-viewer-next/prev (arrow buttons) rather than programmatic pointer drag, because react-native-web ScrollView does NOT fire onMomentumScrollEnd on synthetic mouse-drag; the arrow buttons drive both the scrollTo AND the setActiveIdx call so counter/scrollLeft stay in sync deterministically.",
+  "rca_of_issue": "Bug 1 RCA: users onboarded before 'cronaca' category was introduced had it absent from favorite_categories; the home applies a favorites-only chip filter (index.tsx:78-86), so those users saw only their older favorites. Fix: startup one-shot db.users.update_many with $addToSet at server.py:3589-3598, gated on favorite_categories.0 existing (i.e., only users with non-empty favorites), leaving fully-empty anon users untouched. Verified via direct MongoDB count and per-user login response.  Bug 2 RCA: previous PhotoGalleryViewer used react-native-gesture-handler Pan/Pinch gestures wrapping each page — on native these captured horizontal touches BEFORE the parent ScrollView, blocking pagination. Fix: rewrote PhotoGalleryViewer as plain ScrollView + pagingEnabled with NO child gesture handlers, added explicit ← / → chevron Pressables (testID gallery-viewer-prev / gallery-viewer-next) driven by scrollRef.current.scrollTo + setActiveIdx. Verified on mobile viewport (390x844) that next/prev navigation updates counter, updates scrollLeft to N*width, and swaps the visible image."
+}
