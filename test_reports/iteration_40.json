@@ -1,0 +1,25 @@
+{
+  "summary": "'Primary photo first' feature VERIFIED end-to-end via 6 backend pytest cases — all PASS. (1) Startup backfill: /var/log/supervisor/backend.err.log contains 'photo position backfill: reordered 5 users' after latest backend boot (matches the DB state: exactly 5 users have primary_photo_id set). (2) DB integrity across ALL users: iterated every user in db.users with primary_photo_id != null and confirmed that db.user_photos.find_one({user_id, position:0}) has photo_id == primary_photo_id for each — zero violations. Orphan primaries (primary_photo_id points to a deleted photo) are gracefully skipped per feature scope. (3) Public endpoint chat_a: GET /api/users/user_6e65e19525d5 returns photos[0].photo_id == primary_photo_id ('ph_8f5825600849'), and positions are a contiguous 0,1 sequence. (4) SWAP: created fresh email-verified user, uploaded 2 photos (ph1 auto-set as primary at position 0, ph2 at position 1), then PATCH /api/auth/me/photos/{ph2}/primary → response.primary_photo_id==ph2, DB user_photos now shows [ph2:pos0, ph1:pos1], and public GET /api/users/{new_user_id} returns photos[0]==ph2, photos[1]==ph1. (5) IDEMPOTENCY: PATCH primary on the already-current primary caused zero position drift — both for the fresh test user (ph2 stays at 0) and for chat_a (before/after snapshots identical). No backend errors observed. No code changes required to server.py.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": [], "react_native_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_photo_primary_reorder.py",
+    "/app/test_reports/pytest/photo_primary_reorder.xml"
+  ],
+  "action_items": [
+    "Feature ready to ship — no fixes required. Frontend regression (small carousel opens at idx=0, gallery-viewer-counter '1 / 2', swipe forward to '2 / 2') was not re-verified this iteration per the request scope ('backend only'); iteration_39 already confirmed those flows on the same user."
+  ],
+  "critical_code_review_comments": [
+    "_reorder_photos_primary_first (server.py:1008-1035) correctly (a) sorts photos by current position, (b) pops the primary out and inserts at index 0 preserving relative order of the rest, (c) writes only positions that actually changed. Uses one update_one per changed row — fine for the MAX_PHOTOS ceiling but could be a single bulk_write if the ceiling ever grows.",
+    "Startup migration at server.py:3636-3651 is properly idempotent (safe to run on every boot), narrowed to users with primary_photo_id set, and each user's failure is caught individually so one bad row can't abort the whole backfill.",
+    "set_primary_photo (server.py:1038-1049) writes users.primary_photo_id BEFORE calling _reorder_photos_primary_first — the reorder helper explicitly documents that the caller must pass the intended primary_photo_id (not re-read from users) which matches this call site correctly. No TOCTOU concern for a single-primary-per-user model."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_photo_primary_reorder.py (new pytest file, 6 tests)"
+  ],
+  "success_rate": {"backend": "100% (6/6 tests pass)", "frontend": "not tested this iteration (scope: backend only)"},
+  "seed_data_creation": "Fixture creates one fresh email/password user (TEST_reorder_<uuid>@test.it) with 2 tiny PNG photos for the swap test; teardown deletes the user, their photos, and their sessions. Also cleaned one leftover TEST_reorder user from a first-run signup where the assertion mismatch (case-sensitive email lookup) prevented the fixture from completing setup — fixed by lower-casing the email in DB lookups.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "chat_a (user_6e65e19525d5) has 2 photos with primary at position 0. Total users with primary_photo_id in db.users == 5, all satisfy the position=0 invariant. Test file at /app/backend/tests/test_photo_primary_reorder.py is fully idempotent (creates + tears down its own user) — safe to re-run. IMPORTANT: /auth/signup lowercases the email before storing; any test that reads the DB after signup must use email.lower() as the lookup key. To bypass email verification, directly db.users.update_one({'email':email.lower()},{'$set':{'email_verified': True}}) after signup, then POST /api/auth/login with the lower-cased email."
+}

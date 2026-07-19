@@ -1005,6 +1005,36 @@ async def my_photo_original(photo_id: str, user: dict = Depends(get_current_user
     }
 
 
+async def _reorder_photos_primary_first(user_id: str, primary_photo_id: Optional[str]) -> None:
+    """Rewrite `position` on all user photos so `primary_photo_id` sits at 0
+    and every other photo follows in its current relative order.
+
+    Idempotent: safe to call on every set-primary event. Also used by the
+    one-shot startup migration for pre-existing users. Runs a single bulk
+    write so it's cheap even for the max-photos ceiling.
+
+    Callers must pass the CURRENT primary_photo_id — we don't re-read `users`
+    because the write to `users` is what typically races with this call.
+    """
+    photos = await db.user_photos.find(
+        {'user_id': user_id}, {'_id': 0, 'photo_id': 1, 'position': 1}
+    ).sort('position', 1).to_list(MAX_PHOTOS)
+    if not photos:
+        return
+    # Move the primary to the front, keep the remaining order stable.
+    if primary_photo_id:
+        primary_idx = next((i for i, p in enumerate(photos) if p['photo_id'] == primary_photo_id), None)
+        if primary_idx is not None and primary_idx != 0:
+            head = photos.pop(primary_idx)
+            photos.insert(0, head)
+    # Write only the positions that changed.
+    for new_pos, p in enumerate(photos):
+        if p.get('position') != new_pos:
+            await db.user_photos.update_one(
+                {'photo_id': p['photo_id']}, {'$set': {'position': new_pos}}
+            )
+
+
 @api_router.patch('/auth/me/photos/{photo_id}/primary')
 async def set_primary_photo(photo_id: str, user: dict = Depends(get_current_user)):
     _reject_if_anonymous(user)
@@ -1012,6 +1042,10 @@ async def set_primary_photo(photo_id: str, user: dict = Depends(get_current_user
     if not photo:
         raise HTTPException(status_code=404, detail='Foto non trovata')
     await db.users.update_one({'user_id': user['user_id']}, {'$set': {'primary_photo_id': photo_id}})
+    # Reorder so the new primary is at position 0 — matches the UX rule that
+    # external viewers see the primary FIRST and can swipe forward through
+    # the rest without paging backwards.
+    await _reorder_photos_primary_first(user['user_id'], photo_id)
     return {'primary_photo_id': photo_id}
 
 
@@ -3596,6 +3630,25 @@ async def on_startup():
         )
     except Exception as e:
         logger.warning(f"cronaca favorite backfill failed: {e}")
+    # One-shot: reorder every user's photos so their primary sits at position
+    # 0 — pre-existing accounts had position frozen at upload time, which
+    # made external viewers land on a random photo when opening the gallery.
+    try:
+        cur = db.users.find(
+            {'primary_photo_id': {'$exists': True, '$ne': None}},
+            {'_id': 0, 'user_id': 1, 'primary_photo_id': 1},
+        )
+        migrated = 0
+        async for u in cur:
+            try:
+                await _reorder_photos_primary_first(u['user_id'], u['primary_photo_id'])
+                migrated += 1
+            except Exception as inner:
+                logger.warning(f"reorder photos failed for {u.get('user_id')}: {inner}")
+        if migrated:
+            logger.info(f"photo position backfill: reordered {migrated} users")
+    except Exception as e:
+        logger.warning(f"photo position backfill failed: {e}")
     # Full-text index for search
     try:
         await db.feuds.create_index([('title', 'text'), ('summary', 'text'), ('party_a', 'text'), ('party_b', 'text')])
