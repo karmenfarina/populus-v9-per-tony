@@ -150,6 +150,10 @@ function ZoomablePage({
   const singleTap = Gesture.Tap()
     .numberOfTaps(1)
     .maxDelay(260)
+    // A drag/swipe should NOT be interpreted as a tap. Restricting the max
+    // travel distance to a small threshold fixes the web-preview edge case
+    // where mouse-drag swipes accidentally closed the modal.
+    .maxDistance(8)
     .onEnd(() => {
       if (scale.value <= 1) {
         runOnJS(onCloseTap)();
