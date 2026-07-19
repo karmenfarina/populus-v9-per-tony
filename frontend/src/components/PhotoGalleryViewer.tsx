@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
-  Modal, View, Image, ScrollView, Pressable, StyleSheet, Text,
-  useWindowDimensions, StatusBar, Platform, NativeSyntheticEvent, NativeScrollEvent,
+  Modal, View, Image, Pressable, StyleSheet, Text,
+  useWindowDimensions, StatusBar, Platform,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { spacing } from "@/src/theme";
@@ -9,21 +9,16 @@ import { spacing } from "@/src/theme";
 /**
  * Full-screen photo viewer.
  *
- * Simple horizontal pager built on React Native's built-in ScrollView with
- * `pagingEnabled`. On both web and native this gives a fully reliable swipe
- * between photos — a previous attempt used FlatList + gesture-handler pinch
- * gestures, but those blocked the horizontal swipe on native and were the
- * root cause of the "non riesco a scorrere" bug.
+ * Renders a SINGLE photo at a time. Navigation is exclusively via the
+ * on-screen ← / → buttons. No ScrollView, no gesture handlers — this
+ * eliminates all touch-competition edge cases (swipe overshooting multiple
+ * photos, first-tap-of-arrow being eaten by a phantom scroll gesture, etc.).
  *
- * - Swipe horizontally to navigate between photos.
- * - Tap on the empty backdrop (top/bottom bars) closes the viewer.
- * - Tap the ✕ button also closes.
+ * - ← / → buttons on the sides advance one photo at a time.
  * - Counter (top-right) + dot indicator (bottom) track the active photo.
- *
- * Pinch-zoom is not included in this iteration because it competes with the
- * horizontal pager gesture on RN Gesture Handler v2. The user's request was
- * specifically for enlarging + sfogliare — a full-screen contain-fit image
- * already fulfils the "enlarge" part.
+ * - ✕ button in the top-left closes the viewer.
+ * - Modal itself has no tap-to-close backdrop (would conflict with the
+ *   arrow buttons that live near the edges).
  */
 
 export type GalleryPhoto = {
@@ -48,60 +43,25 @@ function resolveUri(p: GalleryPhoto): string {
 
 export function PhotoGalleryViewer({ visible, photos, initialIndex = 0, onClose }: Props) {
   const { width, height } = useWindowDimensions();
-  const scrollRef = useRef<ScrollView>(null);
   const [activeIdx, setActiveIdx] = useState<number>(initialIndex);
-  const initialScrollDoneRef = useRef(false);
 
   const data = useMemo(() => photos.filter((p) => resolveUri(p)), [photos]);
   const total = data.length;
 
   useEffect(() => {
-    if (!visible) {
-      initialScrollDoneRef.current = false;
-      return;
-    }
-    setActiveIdx(initialIndex);
-    // Try to scroll a few times so we defeat the "ScrollView isn't laid out
-    // yet" race that shows up on cold Modal mounts.
-    const tries = [30, 90, 220, 450];
-    const timers: any[] = [];
-    tries.forEach((ms) => {
-      timers.push(setTimeout(() => {
-        try {
-          scrollRef.current?.scrollTo({ x: initialIndex * width, y: 0, animated: false });
-        } catch { /* noop */ }
-      }, ms));
-    });
-    timers.push(setTimeout(() => { initialScrollDoneRef.current = true; }, 550));
-    return () => { timers.forEach(clearTimeout); };
-  }, [visible, initialIndex, width]);
+    if (visible) setActiveIdx(initialIndex);
+  }, [visible, initialIndex]);
 
-  const handleScrollEnd = (_e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    // No-op: swipe is disabled (scrollEnabled=false). Navigation is driven
-    // entirely by the ← / → buttons which mutate `activeIdx` directly and
-    // programmatically scroll. Kept as a stub because removing the wiring
-    // would require touching the ScrollView JSX — cheap to leave as a
-    // future extension point if we ever bring swipe back with a fixed
-    // one-page-per-gesture guarantee.
-  };
-  void handleScrollEnd;
-
-  // Explicit navigation buttons (mouse-friendly on web, useful on
-  // narrow-thumb one-hand usage on device).
   const goPrev = () => {
-    if (activeIdx <= 0) return;
-    const next = activeIdx - 1;
-    scrollRef.current?.scrollTo({ x: next * width, y: 0, animated: true });
-    setActiveIdx(next);
+    setActiveIdx((i) => Math.max(0, i - 1));
   };
   const goNext = () => {
-    if (activeIdx >= total - 1) return;
-    const next = activeIdx + 1;
-    scrollRef.current?.scrollTo({ x: next * width, y: 0, animated: true });
-    setActiveIdx(next);
+    setActiveIdx((i) => Math.min(total - 1, i + 1));
   };
 
   if (!visible || total === 0) return null;
+
+  const currentUri = resolveUri(data[Math.max(0, Math.min(activeIdx, total - 1))]);
 
   return (
     <Modal
@@ -113,60 +73,46 @@ export function PhotoGalleryViewer({ visible, photos, initialIndex = 0, onClose 
     >
       <StatusBar barStyle="light-content" backgroundColor="#000" />
       <View style={styles.container} testID="gallery-viewer-root">
-        <ScrollView
-          ref={scrollRef}
-          horizontal
-          pagingEnabled
-          // Swipe manuale DISABILITATO: la navigazione avviene esclusivamente
-          // tramite i bottoni ← / → posizionati sui lati. Su react-native-web
-          // e su alcuni build native il momentum di `pagingEnabled` era
-          // inconsistente (uno swipe energico saltava 2-3 foto), quindi il
-          // comportamento più prevedibile — che l'utente ha chiesto
-          // esplicitamente — è confinare lo scorrimento agli arrow tap.
-          // `scrollTo` programmatico continua a funzionare anche con
-          // scrollEnabled=false, quindi le frecce restano operative.
-          scrollEnabled={false}
-          showsHorizontalScrollIndicator={false}
-          decelerationRate="fast"
-          testID="gallery-viewer-scroll"
+        {/* Single image, swapped by activeIdx. No scroll container = no
+            touch/pointer conflict with the arrow buttons. */}
+        <View
+          style={{ width, height, justifyContent: "center", alignItems: "center" }}
+          testID={`gallery-page-${activeIdx}`}
         >
-          {data.map((item, index) => (
-            <View
-              key={item.photo_id || `p-${index}`}
-              style={{ width, height, justifyContent: "center", alignItems: "center" }}
-              testID={`gallery-page-${index}`}
-            >
-              <Image
-                source={{ uri: resolveUri(item) }}
-                style={{ width, height }}
-                resizeMode="contain"
-                testID="gallery-viewer-image"
-              />
-            </View>
-          ))}
-        </ScrollView>
+          <Image
+            source={{ uri: currentUri }}
+            style={{ width, height }}
+            resizeMode="contain"
+            testID="gallery-viewer-image"
+          />
+        </View>
 
-        {/* Left/right arrow overlays — clickable for mouse users, hit only the
-            outer edges so they don't steal touch from the pager on device. */}
-        {total > 1 && activeIdx > 0 && (
-          <Pressable
-            onPress={goPrev}
-            hitSlop={8}
-            style={styles.arrowLeft}
-            testID="gallery-viewer-prev"
-          >
-            <Ionicons name="chevron-back" size={28} color="#fff" />
-          </Pressable>
-        )}
-        {total > 1 && activeIdx < total - 1 && (
-          <Pressable
-            onPress={goNext}
-            hitSlop={8}
-            style={styles.arrowRight}
-            testID="gallery-viewer-next"
-          >
-            <Ionicons name="chevron-forward" size={28} color="#fff" />
-          </Pressable>
+        {/* Arrow buttons — always allocated when there's more than one
+            photo, but INVISIBLE at the ends. Keeping the Pressable mounted
+            (rather than conditionally removing it) means the touch target
+            doesn't flicker in/out and the first tap on the opposite arrow
+            always registers immediately. */}
+        {total > 1 && (
+          <>
+            <Pressable
+              onPress={goPrev}
+              disabled={activeIdx === 0}
+              hitSlop={12}
+              style={[styles.arrowLeft, activeIdx === 0 && styles.arrowDisabled]}
+              testID="gallery-viewer-prev"
+            >
+              <Ionicons name="chevron-back" size={28} color="#fff" />
+            </Pressable>
+            <Pressable
+              onPress={goNext}
+              disabled={activeIdx >= total - 1}
+              hitSlop={12}
+              style={[styles.arrowRight, activeIdx >= total - 1 && styles.arrowDisabled]}
+              testID="gallery-viewer-next"
+            >
+              <Ionicons name="chevron-forward" size={28} color="#fff" />
+            </Pressable>
+          </>
         )}
 
         <View style={styles.topBar} pointerEvents="box-none">
@@ -248,4 +194,5 @@ const styles = StyleSheet.create({
     justifyContent: "center", alignItems: "center",
     zIndex: 5,
   },
+  arrowDisabled: { opacity: 0 },
 });
