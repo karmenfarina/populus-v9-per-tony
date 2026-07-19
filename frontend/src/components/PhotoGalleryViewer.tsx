@@ -116,6 +116,14 @@ export function PhotoGalleryViewer({ visible, photos, initialIndex = 0, onClose 
           ref={scrollRef}
           horizontal
           pagingEnabled
+          // One swipe = one photo. Without `disableIntervalMomentum` a fast
+          // fling could carry the ScrollView past two or three pages in a
+          // single gesture, which the user found disorienting ("passi dalla
+          // prima alla terza senza vedere la seconda"). Enabling this pins
+          // the scroll to a single-page advance regardless of fling velocity.
+          disableIntervalMomentum
+          snapToInterval={width}
+          snapToAlignment="start"
           showsHorizontalScrollIndicator={false}
           onMomentumScrollEnd={handleScrollEnd}
           onScrollEndDrag={handleScrollEnd}
