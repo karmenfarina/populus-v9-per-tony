@@ -15,7 +15,6 @@ import FeudMediaBlock from "@/src/components/FeudMediaBlock";
 import FeudStatsModal from "@/src/components/FeudStatsModal";
 import ShareSheet from "@/src/components/ShareSheet";
 import InAppShareSheet from "@/src/components/InAppShareSheet";
-import EmojiPickerBar from "@/src/components/EmojiPickerBar";
 import { useUIPrefs } from "@/src/ui/UIPrefs";
 import { useAuth } from "@/src/auth/AuthContext";
 
@@ -488,22 +487,16 @@ export default function FeudDetail() {
                 onChangeText={setCommentText}
                 multiline
               />
-              <View style={styles.commentActionsRow}>
-                <EmojiPickerBar
-                  testIDPrefix="comment-emoji"
-                  onPick={(e) => setCommentText((v) => (v + e).slice(0, 2000))}
-                />
-                <Pressable
-                  testID="submit-comment"
-                  style={[styles.postBtn, { backgroundColor: sideColor(feud.my_vote) }]}
-                  onPress={submitComment}
-                  disabled={posting}
-                >
-                  <Text style={[styles.postBtnTxt, { color: onSideColor(feud.my_vote) }]}>
-                    {posting ? "..." : "PUBBLICA"}
-                  </Text>
-                </Pressable>
-              </View>
+              <Pressable
+                testID="submit-comment"
+                style={[styles.postBtn, { backgroundColor: sideColor(feud.my_vote) }]}
+                onPress={submitComment}
+                disabled={posting}
+              >
+                <Text style={[styles.postBtnTxt, { color: onSideColor(feud.my_vote) }]}>
+                  {posting ? "..." : "PUBBLICA"}
+                </Text>
+              </Pressable>
             </View>
           )}
 
@@ -679,15 +672,9 @@ function CommentItem({
               multiline
               testID={`reply-input-${c.comment_id}`}
             />
-            <View style={cs.replyActionsRow}>
-              <EmojiPickerBar
-                testIDPrefix={`reply-emoji-${c.comment_id}`}
-                onPick={(e) => setReplyText((replyText + e).slice(0, 1000))}
-              />
-              <Pressable onPress={onSubmitReply} style={cs.replySend} testID={`reply-send-${c.comment_id}`}>
-                <Text style={cs.replySendTxt}>INVIA</Text>
-              </Pressable>
-            </View>
+            <Pressable onPress={onSubmitReply} style={cs.replySend} testID={`reply-send-${c.comment_id}`}>
+              <Text style={cs.replySendTxt}>INVIA</Text>
+            </Pressable>
           </View>
         )}
       </View>
@@ -724,12 +711,6 @@ const cs = StyleSheet.create({
   reply: { flexDirection: "row", paddingVertical: spacing.xs, gap: spacing.sm, overflow: "hidden" },
   replySideBar: { width: 3, alignSelf: "stretch", borderRadius: 2 },
   replyInputWrap: { marginTop: spacing.sm, gap: spacing.xs },
-  replyActionsRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
-    gap: spacing.sm,
-  },
   replyInput: { borderWidth: 2, borderColor: colors.border, padding: spacing.xs, fontSize: font.sizes.sm, color: colors.onSurface, minHeight: 44, backgroundColor: colors.surface },
   replySend: { backgroundColor: colors.onSurface, paddingVertical: spacing.xs, alignItems: "center" },
   replySendTxt: { color: colors.onSurfaceInverse, fontSize: font.sizes.xs, letterSpacing: 1 },
@@ -804,12 +785,6 @@ const styles = StyleSheet.create({
   },
   err: { color: colors.error, padding: spacing.md, borderWidth: 2, borderColor: colors.error, margin: spacing.lg },
   commentInputWrap: { padding: spacing.md, borderBottomWidth: 2, borderColor: colors.border, backgroundColor: colors.surface, gap: spacing.sm },
-  commentActionsRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
-    gap: spacing.sm,
-  },
   commentInput: { borderWidth: 2, borderColor: colors.border, padding: spacing.sm, minHeight: 60, fontSize: font.sizes.base, color: colors.onSurface, backgroundColor: colors.surfaceSecondary },
   postBtn: { paddingVertical: spacing.sm, alignItems: "center", borderWidth: 2, borderColor: colors.border },
   postBtnTxt: { fontSize: font.sizes.base, letterSpacing: 2, fontWeight: "500" },
