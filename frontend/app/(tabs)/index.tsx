@@ -13,6 +13,7 @@ import { colors, spacing, font } from "@/src/theme";
 import FeudCard from "@/src/components/FeudCard";
 
 const ALL_CAT = { id: "all", label: "Tutte" };
+const HYPE_CAT = { id: "hype", label: "🔥 Hype" };
 
 export default function HomeFeed() {
   const router = useRouter();
@@ -48,6 +49,16 @@ export default function HomeFeed() {
   useEffect(() => { centerChip(selected); }, [selected, centerChip]);
 
   const load = useCallback(async (category: string) => {
+    // The always-on HYPE rail bypasses `/feuds` entirely and hits its own
+    // endpoint. It has independent ordering rules (chronological days
+    // desc + engagement score desc within each day) and does NOT honour
+    // the user's favorite_categories filter — by design it's a global
+    // "what's blowing up" ribbon.
+    if (category === "hype") {
+      const res = await api.feudsHype();
+      setFeuds(res.feuds);
+      return;
+    }
     const res = await api.feuds(category);
     let list: Feud[] = res.feuds;
     // "Tutte" scope: when the user has favorite categories set, we restrict
@@ -70,12 +81,11 @@ export default function HomeFeed() {
       try {
         const c = await api.categories();
         const favs = user?.favorite_categories || [];
-        // Chip row: always start with "Tutte", then ONLY the user's favorite
-        // categories (in the order chosen). Non-favorite categories are
-        // intentionally hidden — the user opted out of them in onboarding.
-        // Users without favorites (anonymous / not yet onboarded) still see
-        // the full category list.
-        const ordered: { id: string; label: string }[] = [ALL_CAT];
+        // Chip row order: [TUTTE, HYPE, ...user favorites]. HYPE is fixed
+        // right after "Tutte" — it can never be hidden or reordered by the
+        // user, and it deliberately doesn't appear in the profile/onboarding
+        // category preferences list.
+        const ordered: { id: string; label: string }[] = [ALL_CAT, HYPE_CAT];
         if (favs.length > 0) {
           for (const id of favs) {
             const found = c.categories.find((x: any) => x.id === id);

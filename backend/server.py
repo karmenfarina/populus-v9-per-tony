@@ -1190,6 +1190,72 @@ async def _user_voted_ids(user_id: str, feud_ids: List[str]) -> dict:
     return {v['feud_id']: v['side'] for v in votes}
 
 
+@api_router.get('/feuds/hype')
+async def list_hype_feuds(user: Optional[dict] = Depends(get_current_user_optional)):
+    """The always-on 'HYPE' rail.
+
+    Returns the most-discussed feuds from the last 7 days grouped by day
+    (most recent day first) and, within each day, ranked by an engagement
+    score = total_votes + 2*total_comments. This mirrors the user's rule:
+    "in ordine cronologico dalle notizie del giorno a quelle dei giorni
+    passati, tutte le notizie più discusse".
+
+    This section is deliberately outside `/api/categories` and outside a
+    user's favorite_categories filter — it always appears in every user's
+    home. See the frontend chip row for the always-mounted HYPE chip.
+    """
+    since = now_utc() - timedelta(days=7)
+    docs = await db.feuds.find(
+        {'created_at': {'$gte': since}}, {'_id': 0}
+    ).sort('created_at', -1).to_list(400)
+    if not docs:
+        return {'feuds': [], 'personalized': False}
+    # Comment counts in a single aggregation to avoid N+1 queries.
+    feud_ids = [d['feud_id'] for d in docs]
+    comment_counts: dict = {}
+    try:
+        pipeline = [
+            {'$match': {'feud_id': {'$in': feud_ids}}},
+            {'$group': {'_id': '$feud_id', 'count': {'$sum': 1}}},
+        ]
+        async for row in db.comments.aggregate(pipeline):
+            comment_counts[row['_id']] = int(row.get('count') or 0)
+    except Exception as e:
+        logger.warning(f"hype: comments aggregation failed: {e}")
+
+    # Score + day-bucket. Day bucket key = YYYY-MM-DD (UTC) so ordering is
+    # trivial: bigger key = more recent day.
+    def _day_key(dt) -> str:
+        if isinstance(dt, datetime):
+            return dt.strftime('%Y-%m-%d')
+        return str(dt)[:10]
+
+    for d in docs:
+        votes = int(d.get('votes_a', 0) or 0) + int(d.get('votes_b', 0) or 0)
+        cc = comment_counts.get(d['feud_id'], 0)
+        d['_hype_score'] = votes + 2 * cc
+        d['_day_key'] = _day_key(d.get('created_at'))
+
+    # Sort: day DESC, then hype DESC, then created_at DESC as final tiebreak.
+    docs.sort(key=lambda d: (d['_day_key'], d['_hype_score'], d.get('created_at') or ''), reverse=True)
+
+    # Cap the rail (users don't need 400 items in a "hype" ribbon).
+    docs = docs[:80]
+
+    voted_map: dict = {}
+    if user and docs:
+        voted_map = await _user_voted_ids(user['user_id'], [d['feud_id'] for d in docs])
+    for d in docs:
+        my_vote = voted_map.get(d['feud_id']) if user else None
+        _attach_percentages(d, revealed=bool(my_vote))
+        d['my_vote'] = my_vote
+        if isinstance(d.get('created_at'), datetime):
+            d['created_at'] = _iso_utc(d['created_at'])
+        d.pop('_hype_score', None)
+        d.pop('_day_key', None)
+    return {'feuds': docs, 'personalized': False, 'source': 'hype'}
+
+
 @api_router.get('/feuds')
 async def list_feuds(category: Optional[str] = None, user: Optional[dict] = Depends(get_current_user_optional)):
     q = {}

@@ -123,6 +123,7 @@ export const api = {
   logout: () => request('/auth/logout', { method: 'POST' }),
   categories: () => request('/categories'),
   feuds: (category?: string) => request(`/feuds${category && category !== 'all' ? `?category=${category}` : ''}`),
+  feudsHype: () => request('/feuds/hype'),
   feud: (id: string) => request(`/feuds/${id}`),
   recordView: (id: string) =>
     request(`/feuds/${id}/view`, { method: 'POST' }).catch(() => null),
