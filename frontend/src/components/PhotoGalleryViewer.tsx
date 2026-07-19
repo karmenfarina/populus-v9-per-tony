@@ -55,14 +55,6 @@ export function PhotoGalleryViewer({ visible, photos, initialIndex = 0, onClose 
   const data = useMemo(() => photos.filter((p) => resolveUri(p)), [photos]);
   const total = data.length;
 
-  // Tracks the page index the user was on when they STARTED the current drag.
-  // We use this at scroll-end to enforce "one swipe = one page" by clamping
-  // any momentum landing that overshot the immediate neighbour back to
-  // dragStart ± 1. Fixes the bug where a fast fling could sail past 2-3
-  // photos in a single gesture — the built-in `disableIntervalMomentum`
-  // ScrollView prop is unreliable on react-native-web.
-  const dragStartIdxRef = useRef<number>(initialIndex);
-
   useEffect(() => {
     if (!visible) {
       initialScrollDoneRef.current = false;
@@ -84,36 +76,15 @@ export function PhotoGalleryViewer({ visible, photos, initialIndex = 0, onClose 
     return () => { timers.forEach(clearTimeout); };
   }, [visible, initialIndex, width]);
 
-  const handleScrollBeginDrag = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    // Snapshot where the user is BEFORE they start swinging their finger.
-    // Used by handleScrollEnd to detect + correct multi-page skips.
-    dragStartIdxRef.current = Math.round(e.nativeEvent.contentOffset.x / width);
+  const handleScrollEnd = (_e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    // No-op: swipe is disabled (scrollEnabled=false). Navigation is driven
+    // entirely by the ← / → buttons which mutate `activeIdx` directly and
+    // programmatically scroll. Kept as a stub because removing the wiring
+    // would require touching the ScrollView JSX — cheap to leave as a
+    // future extension point if we ever bring swipe back with a fixed
+    // one-page-per-gesture guarantee.
   };
-
-  const handleScrollEnd = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    if (!initialScrollDoneRef.current) return;
-    const offsetX = e.nativeEvent.contentOffset.x;
-    let landed = Math.round(offsetX / width);
-    // Enforce "one swipe = one photo": if the momentum carried past the
-    // immediate neighbour of where the drag started, snap back to
-    // dragStart ± 1 and forcibly scroll there. Without this, native
-    // `pagingEnabled` + `disableIntervalMomentum` are inconsistent across
-    // platforms and can allow 2-3-page overshoots on fast flings.
-    const start = dragStartIdxRef.current;
-    if (Math.abs(landed - start) > 1) {
-      landed = start + (landed > start ? 1 : -1);
-      landed = Math.max(0, Math.min(total - 1, landed));
-      try {
-        scrollRef.current?.scrollTo({ x: landed * width, y: 0, animated: true });
-      } catch { /* noop */ }
-    }
-    if (landed >= 0 && landed < total && landed !== activeIdx) {
-      setActiveIdx(landed);
-    }
-    // Reset drag anchor to the freshly-committed page so the next swipe uses
-    // it as baseline.
-    dragStartIdxRef.current = landed;
-  };
+  void handleScrollEnd;
 
   // Explicit navigation buttons (mouse-friendly on web, useful on
   // narrow-thumb one-hand usage on device).
@@ -146,18 +117,16 @@ export function PhotoGalleryViewer({ visible, photos, initialIndex = 0, onClose 
           ref={scrollRef}
           horizontal
           pagingEnabled
-          // One swipe = one photo. Without `disableIntervalMomentum` a fast
-          // fling could carry the ScrollView past two or three pages in a
-          // single gesture, which the user found disorienting ("passi dalla
-          // prima alla terza senza vedere la seconda"). Enabling this pins
-          // the scroll to a single-page advance regardless of fling velocity.
-          disableIntervalMomentum
-          snapToInterval={width}
-          snapToAlignment="start"
+          // Swipe manuale DISABILITATO: la navigazione avviene esclusivamente
+          // tramite i bottoni ← / → posizionati sui lati. Su react-native-web
+          // e su alcuni build native il momentum di `pagingEnabled` era
+          // inconsistente (uno swipe energico saltava 2-3 foto), quindi il
+          // comportamento più prevedibile — che l'utente ha chiesto
+          // esplicitamente — è confinare lo scorrimento agli arrow tap.
+          // `scrollTo` programmatico continua a funzionare anche con
+          // scrollEnabled=false, quindi le frecce restano operative.
+          scrollEnabled={false}
           showsHorizontalScrollIndicator={false}
-          onScrollBeginDrag={handleScrollBeginDrag}
-          onMomentumScrollEnd={handleScrollEnd}
-          onScrollEndDrag={handleScrollEnd}
           decelerationRate="fast"
           testID="gallery-viewer-scroll"
         >
