@@ -274,8 +274,8 @@ metadata:
 
 test_plan:
   current_focus:
-    - "Profile Identity Editor (nickname + display_name)"
-    - "ShareSheet Instagram/Messenger behavior"
+    - "Profile edit modal now includes NICKNAME + NOME at top"
+    - "ShareSheet Instagram/Messenger paste-guide overlay"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"

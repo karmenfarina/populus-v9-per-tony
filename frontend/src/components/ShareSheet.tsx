@@ -8,7 +8,6 @@ import {
   ScrollView,
   Platform,
   Linking,
-  Alert,
 } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import { Ionicons } from "@expo/vector-icons";
@@ -49,10 +48,6 @@ const OPTIONS: Option[] = [
   { key: "email",     label: "Email",      icon: "mail",           color: "#6B7280" },
 ];
 
-/**
- * Copy a string to the clipboard using the platform-appropriate API.
- * Falls back to expo-clipboard on native, navigator.clipboard on web.
- */
 async function copyToClipboard(text: string): Promise<boolean> {
   try {
     if (Platform.OS === "web" && typeof navigator !== "undefined" && (navigator as any).clipboard) {
@@ -66,18 +61,14 @@ async function copyToClipboard(text: string): Promise<boolean> {
   }
 }
 
-/**
- * Try to open a URL on web (new tab) or via Linking on native.
- * Returns true if we believe the URL opened.
- */
 async function openUrl(target: string): Promise<boolean> {
   try {
     if (Platform.OS === "web" && typeof window !== "undefined" && window.open) {
-      // Some deep-link schemes (fb-messenger://, instagram://) will only
-      // work if the app is installed. window.open on those will fail
-      // silently but doesn't throw — we still return true and let the
-      // caller show a helpful toast.
-      window.open(target, "_blank", "noopener,noreferrer");
+      const w = window.open(target, "_blank", "noopener,noreferrer");
+      // Some browsers block popups — if we get back null, fall back to same-tab redirect
+      if (!w) {
+        window.location.href = target;
+      }
       return true;
     }
     await Linking.openURL(target);
@@ -87,69 +78,74 @@ async function openUrl(target: string): Promise<boolean> {
   }
 }
 
-/**
- * Cross-platform "notify user" helper — Alert on native, in-sheet banner on web
- * (Alert.alert is unreliable on RN-Web preview).
- */
-function notify(msg: string, showBanner: (m: string) => void) {
-  if (Platform.OS === "web") {
-    showBanner(msg);
-  } else {
-    Alert.alert("Populus", msg);
-  }
-}
+// Copy-and-paste guidance shown when the destination has no URL share API.
+type PasteGuide = {
+  key: "instagram" | "messenger";
+  appLabel: string;
+  color: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  mobileScheme: string;
+  webUrl: string;
+  instructions: string;
+};
+
+const PASTE_GUIDES: Record<"instagram" | "messenger", PasteGuide> = {
+  instagram: {
+    key: "instagram",
+    appLabel: "Instagram",
+    color: "#E1306C",
+    icon: "logo-instagram",
+    mobileScheme: "instagram://app",
+    webUrl: "https://www.instagram.com/",
+    instructions:
+      "Instagram non permette di aprire una chat con un link già pronto. Il link è stato copiato negli appunti: aprilo in un DM, una Storia o un post e incolla (tieni premuto → Incolla).",
+  },
+  messenger: {
+    key: "messenger",
+    appLabel: "Messenger",
+    color: "#0084FF",
+    icon: "chatbubbles",
+    mobileScheme: "fb-messenger://",
+    webUrl: "https://www.messenger.com/",
+    instructions:
+      "Messenger non permette la condivisione diretta da web. Il link è stato copiato negli appunti: apri una chat e incolla il link nel messaggio.",
+  },
+};
 
 export default function ShareSheet({ visible, onClose, url, title, message, onCopy }: Props) {
-  // Ephemeral banner shown at the top of the sheet on web (Alert is unreliable
-  // there). Auto-clears after 3.5s.
-  const [banner, setBanner] = useState<string | null>(null);
-  const showBanner = (m: string) => {
-    setBanner(m);
-    setTimeout(() => setBanner((cur) => (cur === m ? null : cur)), 3500);
+  const [pasteGuide, setPasteGuide] = useState<PasteGuide | null>(null);
+  const [pasteCopyOk, setPasteCopyOk] = useState<boolean>(false);
+
+  const openPasteGuide = async (key: "instagram" | "messenger") => {
+    const ok = await copyToClipboard(url);
+    setPasteCopyOk(ok);
+    setPasteGuide(PASTE_GUIDES[key]);
+  };
+
+  const openTargetAppFromGuide = async () => {
+    if (!pasteGuide) return;
+    // Try native scheme first, fallback to the web URL (which always opens).
+    let opened = false;
+    if (Platform.OS !== "web") {
+      opened = await openUrl(
+        pasteGuide.key === "messenger"
+          ? `fb-messenger://share/?link=${encodeURIComponent(url)}`
+          : pasteGuide.mobileScheme,
+      );
+    }
+    if (!opened) {
+      await openUrl(pasteGuide.webUrl);
+    }
+    setPasteGuide(null);
+    onClose();
   };
 
   const shareVia = async (key: OptionKey) => {
-    // Instagram — no URL-based DM/story share exists on web. Best UX:
-    // copy the link to the clipboard, open Instagram, and tell the user
-    // to paste it. On native we try the instagram:// deep link first so
-    // the app opens directly if installed.
-    if (key === "instagram") {
-      await copyToClipboard(url);
-      const opened = Platform.OS !== "web"
-        ? await openUrl("instagram://app").catch(() => false) || await openUrl("https://www.instagram.com/")
-        : await openUrl("https://www.instagram.com/");
-      notify(
-        opened
-          ? "Link copiato! Incollalo in una Storia, un post o un DM di Instagram."
-          : "Link copiato negli appunti. Apri Instagram e incollalo dove vuoi.",
-        showBanner,
-      );
+    if (key === "instagram" || key === "messenger") {
+      await openPasteGuide(key);
       return;
     }
 
-    // Messenger — the FB Send Dialog requires a whitelisted App ID and is
-    // unreliable in modern browsers. On native we try the fb-messenger://
-    // deep link (needs the app). On web we open messenger.com and copy the
-    // link so the user can paste it into a conversation.
-    if (key === "messenger") {
-      await copyToClipboard(url);
-      let opened = false;
-      if (Platform.OS !== "web") {
-        opened = await openUrl(`fb-messenger://share/?link=${encodeURIComponent(url)}`).catch(() => false);
-        if (!opened) opened = await openUrl("https://www.messenger.com/");
-      } else {
-        opened = await openUrl("https://www.messenger.com/");
-      }
-      notify(
-        opened
-          ? "Link copiato! Incolla il link nella conversazione Messenger che vuoi."
-          : "Link copiato negli appunti. Apri Messenger e incolla il link in una chat.",
-        showBanner,
-      );
-      return;
-    }
-
-    // Standard URL-based share intents that always work on any browser.
     let target = "";
     switch (key) {
       case "whatsapp":
@@ -184,13 +180,6 @@ export default function ShareSheet({ visible, onClose, url, title, message, onCo
             </Pressable>
           </View>
 
-          {banner ? (
-            <View style={styles.banner} testID="share-banner">
-              <Ionicons name="checkmark-circle" size={18} color="#16A34A" />
-              <Text style={styles.bannerTxt}>{banner}</Text>
-            </View>
-          ) : null}
-
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
@@ -224,12 +213,51 @@ export default function ShareSheet({ visible, onClose, url, title, message, onCo
           <View style={styles.urlBox}>
             <Text style={styles.urlLabel} numberOfLines={1}>{url}</Text>
           </View>
-
-          <Text style={styles.hint}>
-            {"Instagram e Messenger non permettono la condivisione diretta di link: il link viene copiato e l'app viene aperta per l'incolla."}
-          </Text>
         </Pressable>
       </Pressable>
+
+      {/* Paste-guide overlay for Instagram / Messenger. Sits above the share
+          sheet and clearly explains what to do after we copy the link. */}
+      <Modal
+        animationType="fade"
+        transparent
+        visible={!!pasteGuide}
+        onRequestClose={() => setPasteGuide(null)}
+      >
+        <Pressable style={styles.guideBackdrop} onPress={() => setPasteGuide(null)}>
+          <Pressable style={styles.guideCard} onPress={() => { /* consume */ }}>
+            {pasteGuide ? (
+              <>
+                <View style={[styles.guideIcon, { backgroundColor: pasteGuide.color }]}>
+                  <Ionicons name={pasteGuide.icon} size={34} color="#FFFFFF" />
+                </View>
+                <Text style={styles.guideTitle}>
+                  {pasteCopyOk ? "LINK COPIATO" : "APRI"} {pasteGuide.appLabel.toUpperCase()}
+                </Text>
+                <Text style={styles.guideBody}>{pasteGuide.instructions}</Text>
+
+                <View style={styles.guideActions}>
+                  <Pressable
+                    testID="paste-guide-cancel"
+                    onPress={() => setPasteGuide(null)}
+                    style={styles.guideSecondaryBtn}
+                  >
+                    <Text style={styles.guideSecondaryTxt}>CHIUDI</Text>
+                  </Pressable>
+                  <Pressable
+                    testID="paste-guide-open"
+                    onPress={openTargetAppFromGuide}
+                    style={[styles.guidePrimaryBtn, { backgroundColor: pasteGuide.color }]}
+                  >
+                    <Ionicons name="open-outline" size={16} color="#FFFFFF" />
+                    <Text style={styles.guidePrimaryTxt}>APRI {pasteGuide.appLabel.toUpperCase()}</Text>
+                  </Pressable>
+                </View>
+              </>
+            ) : null}
+          </Pressable>
+        </Pressable>
+      </Modal>
     </Modal>
   );
 }
@@ -253,16 +281,6 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   title: { color: colors.onSurface, fontSize: font.sizes.xl, letterSpacing: 2, fontWeight: "500" },
-  banner: {
-    flexDirection: "row", alignItems: "center", gap: 8,
-    backgroundColor: "#DCFCE7",
-    borderColor: "#16A34A",
-    borderWidth: 1,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    marginBottom: spacing.sm,
-  },
-  bannerTxt: { flex: 1, color: "#166534", fontSize: font.sizes.sm },
   optionsRow: { paddingHorizontal: spacing.sm, gap: spacing.md, paddingBottom: spacing.sm },
   optionItem: { alignItems: "center", justifyContent: "center", width: 72, marginRight: spacing.md },
   optionIcon: {
@@ -279,11 +297,80 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surfaceSecondary,
   },
   urlLabel: { color: colors.muted, fontSize: font.sizes.xs, fontFamily: Platform.OS === "web" ? "monospace" : undefined },
-  hint: {
+
+  // ────── paste-guide overlay ──────
+  guideBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.7)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: spacing.lg,
+  },
+  guideCard: {
+    width: "100%",
+    maxWidth: 380,
+    backgroundColor: colors.surface,
+    borderRadius: 16,
+    padding: spacing.lg,
+    alignItems: "center",
+    gap: spacing.sm,
+  },
+  guideIcon: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: spacing.sm,
+  },
+  guideTitle: {
+    color: colors.onSurface,
+    fontSize: font.sizes.lg,
+    letterSpacing: 1,
+    fontWeight: "700",
+    textAlign: "center",
+  },
+  guideBody: {
     color: colors.muted,
-    fontSize: font.sizes.xs,
-    marginTop: spacing.sm,
-    paddingHorizontal: spacing.sm,
-    fontStyle: "italic",
+    fontSize: font.sizes.sm,
+    textAlign: "center",
+    lineHeight: 20,
+    marginTop: spacing.xs,
+  },
+  guideActions: {
+    flexDirection: "row",
+    gap: spacing.sm,
+    marginTop: spacing.md,
+    width: "100%",
+  },
+  guideSecondaryBtn: {
+    flex: 1,
+    paddingVertical: spacing.md,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: colors.border,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  guideSecondaryTxt: {
+    color: colors.onSurface,
+    fontSize: font.sizes.sm,
+    fontWeight: "700",
+    letterSpacing: 1,
+  },
+  guidePrimaryBtn: {
+    flex: 1.4,
+    paddingVertical: spacing.md,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 6,
+  },
+  guidePrimaryTxt: {
+    color: "#FFFFFF",
+    fontSize: font.sizes.sm,
+    fontWeight: "800",
+    letterSpacing: 1,
   },
 });

@@ -78,11 +78,8 @@ export default function Profile() {
   const [professionsList, setProfessionsList] = useState<string[]>([]);
   const [professionOpen, setProfessionOpen] = useState(false);
   const [savingProfession, setSavingProfession] = useState(false);
-  const [identityOpen, setIdentityOpen] = useState(false);
   const [editNick, setEditNick] = useState("");
   const [editDisplay, setEditDisplay] = useState("");
-  const [savingIdentity, setSavingIdentity] = useState(false);
-  const [identityError, setIdentityError] = useState<string | null>(null);
   const [editSel, setEditSel] = useState<Set<string>>(new Set());
   const [savingPrefs, setSavingPrefs] = useState(false);
   const [prefsError, setPrefsError] = useState<string | null>(null);
@@ -223,6 +220,8 @@ export default function Profile() {
   const openProfileEdit = () => {
     setDetailsError(null);
     setBio(user?.bio || "");
+    setEditNick(user?.nickname || "");
+    setEditDisplay(user?.display_name || "");
     const sl = user?.social_links || {};
     setSocials({
       instagram: (sl as any).instagram || "",
@@ -458,10 +457,47 @@ export default function Profile() {
   const saveDetails = async () => {
     setSavingDetails(true); setDetailsError(null);
     try {
+      // Nickname / display name are stored on the profile record and require
+      // the age / sex / region trio to have been completed at onboarding.
+      const nick = editNick.trim().replace(/^@+/, "");
+      const displayName = editDisplay.trim();
+      const nickChanged = user && nick !== (user.nickname || "");
+      const displayChanged = user && displayName !== (user.display_name || "");
+
+      if (nickChanged) {
+        if (nick.length < 2 || nick.length > 24) {
+          setDetailsError("Il nickname deve avere 2-24 caratteri");
+          setSavingDetails(false);
+          return;
+        }
+      }
+
+      // 1) Persist bio + social handles (both always writable).
       await api.updateDetails({ bio: bio.trim(), social_links: socials });
+
+      // 2) If the nickname or display name changed, hit the profile endpoint.
+      //    We keep the existing onboarding fields exactly as they are so we
+      //    never regress age/sex/region/favorite_categories/profession.
+      if (user && (nickChanged || displayChanged)) {
+        if (!user.age || !user.sex || !user.region) {
+          setDetailsError("Completa prima l'onboarding");
+        } else {
+          await api.updateProfile({
+            age: user.age,
+            sex: user.sex as "F" | "M" | "other" | "na",
+            region: user.region,
+            favorite_categories: user.favorite_categories || [],
+            ...(nickChanged ? { nickname: nick } : {}),
+            ...(displayChanged ? { display_name: displayName } : {}),
+            ...(user.profession ? { profession: user.profession } : {}),
+          });
+        }
+      }
       await refreshMe();
       setProfileOpen(false);
-    } catch (e: any) { setDetailsError(e?.message || "Errore salvataggio"); }
+    } catch (e: any) {
+      setDetailsError(e?.message || e?.detail || "Errore salvataggio");
+    }
     finally { setSavingDetails(false); }
   };
 
@@ -706,24 +742,6 @@ export default function Profile() {
         )}
 
         {!isAnonymous && (
-          <View style={styles.prefsSection} testID="identity-section">
-            <Pressable
-              onPress={() => {
-                setEditNick(user.nickname || "");
-                setEditDisplay(user.display_name || "");
-                setIdentityError(null);
-                setIdentityOpen(true);
-              }}
-              testID="identity-open"
-              style={styles.prefsHeadRow}
-            >
-              <Text style={styles.prefsTitle}>MODIFICA IDENTITÀ</Text>
-              <Ionicons name="chevron-forward" size={20} color={colors.onSurface} />
-            </Pressable>
-          </View>
-        )}
-
-        {!isAnonymous && (
           <View style={styles.prefsSection} testID="profession-section">
             <Pressable
               onPress={() => setProfessionOpen(true)}
@@ -956,7 +974,33 @@ export default function Profile() {
                 keyboardShouldPersistTaps="handled"
                 showsVerticalScrollIndicator={false}
               >
-                <Text style={styles.editSectionTitle}>FOTO ({photos.length}/7)</Text>
+                <Text style={styles.editSectionTitle}>NICKNAME</Text>
+                <TextInput
+                  testID="edit-nickname-input"
+                  value={editNick}
+                  onChangeText={(t) => setEditNick(t.replace(/^@+/, "").slice(0, 24))}
+                  placeholder="es. gossip_queen"
+                  placeholderTextColor={colors.muted}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  maxLength={24}
+                  style={styles.identInput}
+                />
+                <Text style={styles.identHint}>2-24 caratteri. Deve essere unico.</Text>
+
+                <Text style={[styles.editSectionTitle, { marginTop: spacing.md }]}>NOME</Text>
+                <TextInput
+                  testID="edit-display-input"
+                  value={editDisplay}
+                  onChangeText={(t) => setEditDisplay(t.slice(0, 40))}
+                  placeholder="Es. Mario Rossi (opzionale)"
+                  placeholderTextColor={colors.muted}
+                  maxLength={40}
+                  style={styles.identInput}
+                />
+                <Text style={styles.identHint}>Nome visibile sotto al nickname. Lascia vuoto per rimuoverlo.</Text>
+
+                <Text style={[styles.editSectionTitle, { marginTop: spacing.md }]}>FOTO ({photos.length}/7)</Text>
                 <View style={styles.photosGrid}>
                   {loadingPhotos ? (
                     <ActivityIndicator color={colors.brandPrimary} />
@@ -1057,98 +1101,6 @@ export default function Profile() {
         onCancel={() => { setCropperOpen(false); setCropperUri(null); setCropperSize(null); setCropperReplaceId(null); setCropperOriginalSourceUri(null); }}
         onConfirm={uploadCroppedPhoto}
       />
-
-      <Modal
-        visible={identityOpen}
-        animationType="slide"
-        transparent
-        onRequestClose={() => setIdentityOpen(false)}
-      >
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalSheet} testID="identity-modal">
-            <View style={styles.modalHead}>
-              <Text style={styles.modalTitle}>MODIFICA IDENTITÀ</Text>
-              <Pressable onPress={() => setIdentityOpen(false)} testID="identity-modal-close" hitSlop={10}>
-                <Ionicons name="close" size={26} color={colors.onSurfaceInverse} />
-              </Pressable>
-            </View>
-            <ScrollView contentContainerStyle={{ padding: spacing.lg, gap: spacing.md }}>
-              <Text style={styles.fieldLabelIdent}>NICKNAME</Text>
-              <TextInput
-                testID="identity-nickname-input"
-                style={styles.identInput}
-                value={editNick}
-                onChangeText={(t) => setEditNick(t.replace(/^@+/, "").slice(0, 24))}
-                placeholder="es. gossip_queen"
-                placeholderTextColor={colors.muted}
-                autoCapitalize="none"
-                autoCorrect={false}
-                maxLength={24}
-              />
-              <Text style={styles.identHint}>2-24 caratteri. Deve essere unico.</Text>
-
-              <Text style={[styles.fieldLabelIdent, { marginTop: spacing.md }]}>NOME MOSTRATO</Text>
-              <TextInput
-                testID="identity-display-input"
-                style={styles.identInput}
-                value={editDisplay}
-                onChangeText={(t) => setEditDisplay(t.slice(0, 40))}
-                placeholder="Es. Mario Rossi (opzionale)"
-                placeholderTextColor={colors.muted}
-                maxLength={40}
-              />
-              <Text style={styles.identHint}>Visualizzato sotto al nickname. Lascia vuoto per rimuoverlo.</Text>
-
-              {identityError ? (
-                <Text style={styles.identError} testID="identity-error">{identityError}</Text>
-              ) : null}
-
-              <Pressable
-                testID="identity-save"
-                onPress={async () => {
-                  if (!user) return;
-                  const nick = editNick.trim();
-                  if (nick.length < 2 || nick.length > 24) {
-                    setIdentityError("Il nickname deve avere 2-24 caratteri");
-                    return;
-                  }
-                  if (!user.age || !user.sex || !user.region) {
-                    setIdentityError("Completa prima l'onboarding");
-                    return;
-                  }
-                  setSavingIdentity(true);
-                  setIdentityError(null);
-                  try {
-                    await api.updateProfile({
-                      age: user.age,
-                      sex: user.sex as "F" | "M" | "other" | "na",
-                      region: user.region,
-                      favorite_categories: user.favorite_categories || [],
-                      nickname: nick,
-                      display_name: editDisplay.trim(),
-                      ...(user.profession ? { profession: user.profession } : {}),
-                    });
-                    await refreshMe();
-                    setIdentityOpen(false);
-                  } catch (e: any) {
-                    setIdentityError(e?.message || e?.detail || "Impossibile salvare");
-                  } finally {
-                    setSavingIdentity(false);
-                  }
-                }}
-                disabled={savingIdentity}
-                style={styles.identSaveBtn}
-              >
-                {savingIdentity ? (
-                  <ActivityIndicator color={colors.onBrandPrimary} />
-                ) : (
-                  <Text style={styles.identSaveTxt}>SALVA</Text>
-                )}
-              </Pressable>
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
 
       <Modal
         visible={professionOpen}
