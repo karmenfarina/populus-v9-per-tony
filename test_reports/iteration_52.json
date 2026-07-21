@@ -1,0 +1,22 @@
+{
+  "summary": "Re-tested FIX A (full-chain back navigation) on Populus Expo web at http://localhost:3000, mobile viewport 390x844. All three tests PASS: (A) full-chain back — 4 navigation hops (profile→/circle/me→/user/D→/circle/D→/user/B) followed by 4 back presses correctly walk back one screen at a time and the CRITICAL 4th back from /circle/{me} now lands on /profile (previously collapsed to '/'). Verified URLs at every step: back1 /user/B→/circle/D PASS, back2 /circle/D→/user/D PASS, back3 /user/D→/circle/me PASS, back4 /circle/me→/profile PASS. (B) user-circle-toggle useFocusEffect label refresh — label flips AGGIUNGI→NELLA CERCHIA after add, and back to AGGIUNGI after removing via /circle/me and re-entering /user/C. (C) circle-remove-confirm-modal — modal shows 'Rimuovi dalla cerchia' / 'Rimuovere @nickname dalla tua cerchia?' with ANNULLA + RIMUOVI buttons; ANNULLA dismisses modal and preserves membership; RIMUOVI removes. Fix in /app/frontend/src/utils/useSmartBack.ts (Platform.OS==='web' branch now prefers caller-supplied fallback over router.back()) works exactly as intended. No regressions on B or C.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "useSmartBack.ts fix is minimal and correct: on web, when navStack is empty AND no `from` query is present, the caller-supplied fallback is now honoured before falling through to router.back() (which on Expo web collapses to '/'). Native behaviour (router.canGoBack + router.back) is preserved. The manual navStack still walks the full chain step-by-step via router.replace for backs 1→3, and the fallback only fires when the stack is fully drained — exactly the intended semantics."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (frontend-only)", "frontend": "100% (Test A 4/4 backs pass, Test B pass, Test C pass)"},
+  "seed_data_creation": "Reused existing seed users: user_2a0ff12bc193 (me), user_10f1cc7a9b78 (D), user_d46e23635f08 (B), user_38c17fc20806 (C). My circle contains {D, B}; D's circle contains {B, C}. After Test B, C was temporarily added/removed from my circle and left NOT in circle (baseline preserved as pre-test).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "FIX A verified. Login via POST /api/auth/login with test_ui_me_1ce7d6@test.it / test1234, inject token into localStorage under 'faide_token' (JSON.stringify wrapped). If further back-nav regressions occur, focus on useSmartBack.ts fallback ordering under Platform.OS==='web'.",
+  "rca_of_issue": "Previous bug (iter 51): after walking the full navStack chain via router.replace (which drops the '?from=/profile' query), the final goBack on /circle/{me} hit `router.canGoBack()===true` on Expo web, invoked `router.back()`, and browser history collapsed to '/'. Fix (iter 52): reorder the fallback chain in useSmartBack — on Platform.OS==='web', when navStack.popAndPeek() returns nothing AND `from` is empty, use caller-supplied `fallback` immediately, BEFORE testing router.canGoBack(). This ensures the developer's tab-owner hint (`/profile` for /circle/{me} when userId===self) always wins on web. Confirmed by playwright: URL correctly transitions /circle/user_2a0ff12bc193 → /profile after 4th back."
+}

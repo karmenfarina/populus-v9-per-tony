@@ -51,13 +51,20 @@ export function useSmartBack(fallback: string = "/") {
       router.replace(from as any);
       return;
     }
-    // 3. Native router.back() as a last-ditch effort when we still
-    //    have OS history (mostly relevant on native).
+    // 3. On web `router.canGoBack()` misleadingly returns true even when
+    //    the browser's real history would just land on `/`, so trust the
+    //    caller-supplied `fallback` first (it's the tab that logically
+    //    owns this screen).
+    if (Platform.OS === "web") {
+      router.replace(fallback as any);
+      return;
+    }
+    // 4. Native: honour OS history when possible.
     if (router.canGoBack()) {
       router.back();
       return;
     }
-    // 4. Home tab / caller-defined fallback.
+    // 5. Last resort.
     router.replace(fallback as any);
   }, [router, from, fallback, pathname]);
 
