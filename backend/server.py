@@ -1479,9 +1479,13 @@ async def list_hype_feuds(user: Optional[dict] = Depends(get_current_user_option
         votes = int(d.get('votes_a', 0) or 0) + int(d.get('votes_b', 0) or 0)
         cc = comment_counts.get(d['feud_id'], 0)
         rc = reply_counts.get(d['feud_id'], 0)
-        # Absolute floor: a post must have at least some interaction to be
-        # eligible for HYPE. This drops the long tail of untouched articles.
-        if (cc + rc) < 1 and votes < 3:
+        # HYPE must feel alive: a post is eligible ONLY if it has BOTH
+        # at least one real discussion signal (comment or reply) AND at
+        # least one poll vote. This kills the previous edge-case where
+        # a post with 3 votes and 0 comments would render on the rail
+        # as "0 commenti" (votes are hidden pre-vote for privacy),
+        # making it look completely dead to the visitor.
+        if (cc + rc) < 1 or votes < 1:
             continue
         score = votes + 2 * cc + rc
         d['_hype_score'] = score
