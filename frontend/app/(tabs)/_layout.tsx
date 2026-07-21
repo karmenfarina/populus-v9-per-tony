@@ -15,7 +15,7 @@ import { navStack } from "@/src/utils/navStack";
  * new browsing session (which caused the "back accidentally opens
  * Cerchia" bug).
  */
-const TAB_ROOTS = new Set(["/", "/top", "/messages", "/notifications", "/profile"]);
+const TAB_ROOTS = new Set(["/", "/top", "/messages", "/notifications", "/circle/find", "/profile"]);
 
 function NotifIcon({ color, size }: { color: string; size: number }) {
   const { unread } = useNotifications();
@@ -114,6 +114,17 @@ export default function TabsLayout() {
           tabBarIcon: ({ color, size }) => <NotifIcon color={color} size={size} />,
         }}
       />
+      {/* Dedicated "Cerca amici" tab — sits immediately to the LEFT of
+          the profile tab so it's reachable with a thumb, without hiding
+          the profile at the far edge. Uses the person-add glyph so the
+          role is unambiguous. */}
+      <Tabs.Screen
+        name="circle/find"
+        options={{
+          title: "CERCA AMICI",
+          tabBarIcon: ({ color, size }) => <Ionicons name="person-add" color={color} size={size} />,
+        }}
+      />
       <Tabs.Screen
         name="profile"
         options={{
@@ -130,12 +141,6 @@ export default function TabsLayout() {
       <Tabs.Screen name="hashtag/[key]" options={{ href: null }} />
       <Tabs.Screen name="messages/[userId]" options={{ href: null }} />
       <Tabs.Screen name="circle/[userId]" options={{ href: null }} />
-      {/* Dedicated user-search screen. MUST also be hidden from the tab
-          bar (`href: null`); otherwise Expo Router auto-registers it as
-          an unnamed tab (rendered as a blank/tofu icon at the far right)
-          and breaks navigation (`router.push` becomes a tab-switch,
-          which corrupts our manual nav stack). */}
-      <Tabs.Screen name="circle/find" options={{ href: null }} />
       <Tabs.Screen name="archive" options={{ href: null }} />
       <Tabs.Screen name="support" options={{ href: null }} />
       <Tabs.Screen name="admin" options={{ href: null }} />
