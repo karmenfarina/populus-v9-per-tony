@@ -1,0 +1,35 @@
+{
+  "summary": "Tested 4 fixes: (1) chip readability on profile & user pages ✅ PASS, (2) chain backward navigation ❌ FAIL — router.back() on Expo web jumps directly to root '/' instead of walking through each pushed step, (3) circle ordering + actions ✅ PASS (viewer-first ordering, '· TU' tag, no buttons on own row, AGGIUNGI/NELLA CERCHIA toggle persists after reload, no × for non-owner, × only for owner and no other icons), (4) logout ✅ PASS (lands on /auth, token cleared) — but browser back on web still leaves a stale /circle URL in history (native dismissAll works). Backend spot-check on GET /api/users/{owner_id}/circle ✅ PASS: is_me and in_my_circle booleans present, viewer sorted first, mutual placed before non-mutual, is_owner flag correct.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "useSmartBack / Expo Router web history", "issue": "TEST B FAIL — pushing profile → /circle/{me} → /user/{D} → /circle/{D} then tapping the circle-back button on each screen jumps straight to '/' (home) on the FIRST back press instead of walking back step-by-step. Reproduction: profile-circle-open → circle-open-profile-{D} → public-circle-open → circle-back. Expected URL: /user/{D}. Actual URL: /. Same behaviour on 2nd and 3rd back. router.canGoBack() likely returns true but router.back() on Expo Router web doesn't pop the intermediate history entries correctly (or push() replaces rather than stacks between tab/circle/user). Reference: /app/frontend/src/utils/useSmartBack.ts:29-32", "testID": "circle-back", "priority": "HIGH"},
+      {"component": "profile.tsx logout browser-back", "issue": "TEST D minor — after 'ESCI' the URL is /auth (correct) but a subsequent browser back button on web navigates to /circle/{stale_id}. Token is already cleared, so tabs shouldn't render, but the URL bar leaks a stale nested route (router.dismissAll doesn't purge the web browser history entries). Native dismissAll works; on web consider window.history.replaceState after logout. Reference: /app/frontend/app/(tabs)/profile.tsx:162-166", "testID": "profile-logout", "priority": "LOW"}
+    ],
+    "integration_issues": [
+      {"flow": "back-navigation-chain", "issue": "router.back() from a stack screen opened via router.push({pathname:'/user/[id]',...}) or {pathname:'/circle/[userId]',...}) does not preserve the full push chain on Expo web. Every back press jumps to '/'. This defeats the purpose of fix #1.", "affected_testIDs": ["circle-back", "user-back", "profile-circle-open", "circle-open-profile-<id>", "public-circle-open"]}
+    ],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_circle_ordering.py",
+    "/app/test_reports/pytest/circle_ordering.xml"
+  ],
+  "action_items": [
+    "Investigate why router.back() on Expo Router web collapses the full push history to '/'. Possible causes: pushing to a screen in the same (tabs) group doesn't add a history entry, or router.canGoBack() reports true but browser history was replaced. Consider: (a) manually pushing to `window.history` on web, (b) using expo-router Stack instead of tab-nested navigation for circle/user screens, or (c) verifying that each push creates a distinct history entry. This is the same bug the fix intended to solve — fix is not actually working on web.",
+    "OPTIONAL: after doLogout, also call window.history.replaceState({}, '', '/auth') on web so browser back doesn't leak stale nested routes.",
+    "No backend changes needed — ordering and flags are correct."
+  ],
+  "critical_code_review_comments": [
+    "useSmartBack fix relies on router.canGoBack() being accurate — verify with Expo Router 6.x on web that intermediate push()es actually create browser history entries.",
+    "In circle/[userId].tsx line 205, the icon color for 'NELLA CERCHIA' state uses onBrandSecondary (dark) on brandSecondary (yellow) — matches the readability fix (consistent with other buttons)."
+  ],
+  "updated_files": ["/app/backend/tests/test_circle_ordering.py"],
+  "success_rate": {"backend": "100%", "frontend": "75%"},
+  "seed_data_creation": "Created 4 email-verified users via signup+DB flag flip: testme1ce7d6 (user_2a0ff12bc193), testb1ce7d6 (user_d46e23635f08), testc1ce7d6 (user_38c17fc20806), testd1ce7d6 (user_10f1cc7a9b78). B's circle populated with {me,d,c}; my circle contains {d}. Passwords test1234, prefix 'test_ui_*@test.it'.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Seed users still exist (unless purged). Login token snippet expires ~week. Use POST /api/auth/login with test_ui_me_1ce7d6@test.it / test1234 to re-obtain a token, then inject via localStorage.setItem('faide_token', JSON.stringify(token)) before navigating to /profile. TestIDs: profile-circle-open, circle-back, circle-open-profile-<uid>, public-circle-open (NOT user-circle-open), circle-row-<uid>, circle-add-<uid>, circle-remove-<uid>, user-back, profile-logout.",
+  "rca_of_issue": "BUG (chain back nav): TEST B failed at first back press: expected /user/{D_ID}, got /. useSmartBack does `if (router.canGoBack()) router.back()`. On Expo Router web with router.push({pathname:'/circle/[userId]',...}) invoked from inside the (tabs) group, each push doesn't seem to append a distinct browser history state that router.back() can pop step-by-step; the first back collapses to the tab root. The fix effectively only changed native behaviour. Recommended verification: log `window.history.length` before/after each push, and check if router.back() invokes window.history.back() once or multiple times."
+}

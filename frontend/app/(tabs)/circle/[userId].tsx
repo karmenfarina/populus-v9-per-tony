@@ -26,15 +26,26 @@ type Member = {
   primary_photo_id?: string | null;
   photo_data?: string | null;
   display_name?: string | null;
+  is_me?: boolean;
+  in_my_circle?: boolean;
 };
 
 /**
  * Cerchia del Gossip — friend-circle browser.
  *
- * Usable both by the owner (with edit controls) and by other users
- * (read-only unless the owner has set the circle to private). Search
- * filters the list live; members are ordered by most-recent
- * interaction with the owner (kept in sync server-side).
+ * Row actions are intentionally minimal:
+ *   • Tapping the row opens that user's public profile (works for
+ *     the viewer's own row as well).
+ *   • When browsing someone else's circle, each row that is NOT the
+ *     viewer themselves also shows an "AGGIUNGI/NELLA CERCHIA" button.
+ *   • When browsing your OWN circle, each row shows a small × button
+ *     to remove that member.
+ *
+ * Server-side ordering:
+ *   1. The viewer themselves (if they belong to the circle) first.
+ *   2. Members that are ALSO in the viewer's own circle, most-recent
+ *      interaction first.
+ *   3. Everyone else, most-recent interaction first.
  */
 export default function CircleScreen() {
   const { userId } = useLocalSearchParams<{ userId: string }>();
@@ -48,6 +59,9 @@ export default function CircleScreen() {
   const [privateCircle, setPrivateCircle] = useState(false);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
+  // Members currently mid-flight for an add/remove call. Prevents double
+  // taps and lets us render a subtle disabled state on the button.
+  const [pending, setPending] = useState<Record<string, boolean>>({});
 
   const goBack = useSmartBack(userId === user?.user_id ? "/profile" : `/user/${userId}`);
 
@@ -86,14 +100,19 @@ export default function CircleScreen() {
     }
   };
 
+  // Owner-only: hard removal from MY circle (used only when viewing my
+  // own circle). Removes locally on success and syncs the count chip.
   const removeMember = (m: Member) => {
     const run = async () => {
+      setPending((p) => ({ ...p, [m.user_id]: true }));
       try {
         await api.circleRemove(m.user_id);
         setMembers((prev) => prev.filter((x) => x.user_id !== m.user_id));
         setCount((c) => Math.max(0, c - 1));
       } catch (e: any) {
         Alert.alert("Errore", e?.detail || "Impossibile rimuovere");
+      } finally {
+        setPending((p) => { const { [m.user_id]: _, ...rest } = p; return rest; });
       }
     };
     if (Platform.OS === "web") {
@@ -107,50 +126,92 @@ export default function CircleScreen() {
     );
   };
 
-  const renderMember = ({ item }: { item: Member }) => (
-    <View style={styles.row} testID={`circle-row-${item.user_id}`}>
-      <Pressable
-        onPress={() => router.push({ pathname: "/messages/[userId]", params: { userId: item.user_id, from: `/circle/${userId}` } })}
-        style={styles.rowLeft}
-        testID={`circle-open-chat-${item.user_id}`}
-      >
-        {item.photo_data ? (
-          <Image source={{ uri: item.photo_data }} style={styles.avatar} />
-        ) : (
-          <View style={[styles.avatar, styles.avatarFallback]}>
-            <Ionicons name="person" size={22} color={colors.muted} />
-          </View>
-        )}
-        <View style={{ flex: 1 }}>
-          <Text style={styles.nick}>@{item.nickname}</Text>
-          {item.display_name ? <Text style={styles.dispname}>{item.display_name}</Text> : null}
-        </View>
-      </Pressable>
-      <Pressable
-        onPress={() =>
-          router.push({
-            pathname: "/user/[id]",
-            params: { id: item.user_id, from: `/circle/${userId}` },
-          })
-        }
-        style={styles.iconBtn}
-        testID={`circle-open-profile-${item.user_id}`}
-        hitSlop={6}
-      >
-        <Ionicons name="person-outline" size={18} color={colors.onSurface} />
-      </Pressable>
-      {isOwner ? (
+  // Non-owner view: tap "AGGIUNGI/NELLA CERCHIA" to toggle whether the
+  // row's user belongs to MY circle. Updates the row flag optimistically
+  // and rolls back on failure.
+  const toggleInMyCircle = async (m: Member) => {
+    if (m.is_me || pending[m.user_id]) return;
+    const wasIn = !!m.in_my_circle;
+    setPending((p) => ({ ...p, [m.user_id]: true }));
+    setMembers((prev) => prev.map((x) => x.user_id === m.user_id ? { ...x, in_my_circle: !wasIn } : x));
+    try {
+      if (wasIn) await api.circleRemove(m.user_id);
+      else await api.circleAdd(m.user_id);
+    } catch (e: any) {
+      // Rollback UI on failure.
+      setMembers((prev) => prev.map((x) => x.user_id === m.user_id ? { ...x, in_my_circle: wasIn } : x));
+      Alert.alert(wasIn ? "Errore" : "Impossibile aggiungere", e?.detail || "Riprova");
+    } finally {
+      setPending((p) => { const { [m.user_id]: _, ...rest } = p; return rest; });
+    }
+  };
+
+  const renderMember = ({ item }: { item: Member }) => {
+    const showAddBtn = !isOwner && !item.is_me;
+    const busy = !!pending[item.user_id];
+    return (
+      <View style={styles.row} testID={`circle-row-${item.user_id}`}>
         <Pressable
-          onPress={() => removeMember(item)}
-          style={styles.iconBtn}
-          testID={`circle-remove-${item.user_id}`}
-          hitSlop={6}
+          onPress={() =>
+            router.push({
+              pathname: "/user/[id]",
+              params: { id: item.user_id, from: `/circle/${userId}` },
+            })
+          }
+          style={styles.rowLeft}
+          testID={`circle-open-profile-${item.user_id}`}
         >
-          <Ionicons name="close" size={20} color={colors.error} />
+          {item.photo_data ? (
+            <Image source={{ uri: item.photo_data }} style={styles.avatar} />
+          ) : (
+            <View style={[styles.avatar, styles.avatarFallback]}>
+              <Ionicons name="person" size={22} color={colors.muted} />
+            </View>
+          )}
+          <View style={{ flex: 1 }}>
+            <Text style={styles.nick}>
+              @{item.nickname}
+              {item.is_me ? <Text style={styles.meTag}>  · TU</Text> : null}
+            </Text>
+            {item.display_name ? <Text style={styles.dispname}>{item.display_name}</Text> : null}
+          </View>
         </Pressable>
-      ) : null}
-    </View>
-  );
+        {isOwner ? (
+          <Pressable
+            onPress={() => removeMember(item)}
+            disabled={busy}
+            style={[styles.iconBtn, busy ? styles.iconBtnBusy : null]}
+            testID={`circle-remove-${item.user_id}`}
+            hitSlop={6}
+          >
+            <Ionicons name="close" size={20} color={colors.error} />
+          </Pressable>
+        ) : null}
+        {showAddBtn ? (
+          <Pressable
+            onPress={() => toggleInMyCircle(item)}
+            disabled={busy}
+            style={[
+              styles.addBtn,
+              item.in_my_circle ? styles.addBtnOn : null,
+              busy ? styles.addBtnBusy : null,
+            ]}
+            testID={`circle-add-${item.user_id}`}
+            hitSlop={6}
+          >
+            <Ionicons
+              name={item.in_my_circle ? "checkmark-circle" : "person-add"}
+              size={14}
+              color={item.in_my_circle ? colors.onBrandSecondary : colors.onBrandPrimary}
+            />
+            <Text style={[styles.addBtnTxt, item.in_my_circle ? styles.addBtnTxtOn : null]}>
+              {item.in_my_circle ? "NELLA CERCHIA" : "AGGIUNGI"}
+            </Text>
+          </Pressable>
+        ) : null}
+      </View>
+    );
+  };
 
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
@@ -261,8 +322,20 @@ const styles = StyleSheet.create({
   avatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.surfaceSecondary },
   avatarFallback: { alignItems: "center", justifyContent: "center" },
   nick: { color: colors.onSurface, fontSize: font.sizes.base, fontWeight: "600" },
+  meTag: { color: colors.brandPrimary, fontSize: font.sizes.xs, fontWeight: "700", letterSpacing: 1 },
   dispname: { color: colors.muted, fontSize: font.sizes.sm, marginTop: 2 },
   iconBtn: { padding: 8 },
+  iconBtnBusy: { opacity: 0.4 },
+  addBtn: {
+    flexDirection: "row", alignItems: "center", gap: 4,
+    backgroundColor: colors.brandPrimary,
+    paddingHorizontal: 10, paddingVertical: 6,
+    borderRadius: 999,
+  },
+  addBtnOn: { backgroundColor: colors.brandSecondary },
+  addBtnBusy: { opacity: 0.55 },
+  addBtnTxt: { color: colors.onBrandPrimary, fontSize: font.sizes.xs, fontWeight: "700", letterSpacing: 0.5 },
+  addBtnTxtOn: { color: colors.onBrandSecondary },
   emptyBox: { alignItems: "center", justifyContent: "center", padding: spacing.xl, gap: spacing.sm },
   emptyTitle: { color: colors.onSurface, fontSize: font.sizes.lg, fontWeight: "600", marginTop: spacing.sm },
   emptySub: { color: colors.muted, fontSize: font.sizes.sm, textAlign: "center" },

@@ -153,6 +153,18 @@ export default function Profile() {
     } finally { setLoadingH(false); }
   }, []);
 
+  // Centralised logout. `router.dismissAll()` guarantees we escape any
+  // nested history built while browsing the tabs (e.g. Profile → Circle
+  // → back) so that pressing the hardware/software back button on the
+  // auth screen doesn't accidentally return the user into a still-
+  // mounted tab route. If dismissAll isn't available (old runtimes) we
+  // just fall through to `replace("/auth")`.
+  const doLogout = useCallback(async () => {
+    try { await logout(); } catch { /* still navigate away */ }
+    try { (router as any).dismissAll?.(); } catch { /* noop */ }
+    router.replace("/auth");
+  }, [logout, router]);
+
   useEffect(() => {
     refreshMe();
     // History is lazy-loaded when the user expands the section (see effect below).
@@ -635,14 +647,14 @@ export default function Profile() {
             Registrati con un account per sbloccare tutte le funzionalità.
           </Text>
           <Pressable
-            onPress={async () => { await logout(); router.replace("/auth"); }}
+            onPress={doLogout}
             testID="anon-register-btn"
             style={styles.anonLockCta}
           >
             <Text style={styles.anonLockCtaTxt}>REGISTRATI ORA  ›</Text>
           </Pressable>
           <Pressable
-            onPress={async () => { await logout(); router.replace("/auth"); }}
+            onPress={doLogout}
             testID="anon-logout-btn"
             style={styles.anonLockLogout}
             hitSlop={8}
@@ -707,7 +719,7 @@ export default function Profile() {
                   testID="profile-circle-open"
                   hitSlop={6}
                 >
-                  <Ionicons name="people" size={14} color={colors.onBrandPrimary} />
+                  <Ionicons name="people" size={14} color={colors.onBrandSecondary} />
                   <Text style={styles.circleChipTxt}>Cerchia del gossip</Text>
                 </Pressable>
               ) : null}
@@ -725,7 +737,7 @@ export default function Profile() {
                 Registrati con un account per personalizzare tutto.
               </Text>
               <Pressable
-                onPress={async () => { await logout(); router.replace("/auth"); }}
+                onPress={doLogout}
                 testID="anon-register-btn"
                 style={styles.anonRegisterBtn}
               >
@@ -1013,10 +1025,7 @@ export default function Profile() {
 
         <Pressable
           style={styles.logout}
-          onPress={async () => {
-            await logout();
-            router.replace("/auth");
-          }}
+          onPress={doLogout}
           testID="profile-logout"
         >
           <Text style={styles.logoutText}>ESCI</Text>
@@ -1339,7 +1348,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     backgroundColor: colors.brandSecondary,
   },
-  circleChipTxt: { color: colors.onBrandPrimary, fontSize: font.sizes.xs, fontWeight: "700", letterSpacing: 0.5 },
+  circleChipTxt: { color: colors.onBrandSecondary, fontSize: font.sizes.xs, fontWeight: "700", letterSpacing: 0.5 },
   badgeBlock: { alignItems: "center", padding: spacing.xl, borderBottomWidth: 2, borderColor: colors.border },
   badgeIcon: { width: 140, height: 140, borderWidth: 2, borderColor: colors.border, backgroundColor: colors.surfaceTertiary, alignItems: "center", justifyContent: "center" },
   badgeTitle: { fontSize: font.sizes.xxl, letterSpacing: 2, fontWeight: "500", color: colors.onSurface, marginTop: spacing.md },

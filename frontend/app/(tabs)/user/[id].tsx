@@ -321,7 +321,7 @@ export default function UserPublicScreen() {
             testID="public-circle-open"
             hitSlop={4}
           >
-            <Ionicons name="people" size={14} color={colors.onBrandPrimary} />
+            <Ionicons name="people" size={14} color={colors.onBrandSecondary} />
             <Text style={styles.circleChipTxt}>
               Cerchia · {circleCount}
             </Text>
@@ -624,7 +624,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     backgroundColor: colors.brandSecondary,
   },
-  circleChipTxt: { color: colors.onBrandPrimary, fontSize: font.sizes.xs, fontWeight: "700", letterSpacing: 0.5 },
+  circleChipTxt: { color: colors.onBrandSecondary, fontSize: font.sizes.xs, fontWeight: "700", letterSpacing: 0.5 },
   ctaRow: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.sm },
   circleCta: {
     flexDirection: "row",

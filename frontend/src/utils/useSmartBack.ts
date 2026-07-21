@@ -22,14 +22,21 @@ export function useSmartBack(fallback: string = "/") {
   const { from } = useLocalSearchParams<{ from?: string }>();
 
   const goBack = useCallback(() => {
-    if (typeof from === "string" && from.startsWith("/")) {
-      router.replace(from as any);
-      return;
-    }
+    // 1. Preserve the full navigation chain — pop the stack whenever
+    //    the router has history. Every intermediate `router.push` builds
+    //    that history, so a user going Home → Profile → Circle → Chat
+    //    can walk back all the way one screen at a time.
     if (router.canGoBack()) {
       router.back();
       return;
     }
+    // 2. Cold-start / deep link fallback: the caller declared where it
+    //    wants us to land via `?from=/some/path`.
+    if (typeof from === "string" && from.startsWith("/")) {
+      router.replace(from as any);
+      return;
+    }
+    // 3. Last-resort default (the tab that logically owns this screen).
     router.replace(fallback as any);
   }, [router, from, fallback]);
 

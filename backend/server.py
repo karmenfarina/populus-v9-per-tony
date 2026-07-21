@@ -4888,7 +4888,15 @@ async def circle_status(other_user_id: str, user: dict = Depends(get_current_use
 async def get_circle(owner_id: str, q: str = '', user: dict = Depends(get_current_user)):
     """Return the circle of `owner_id`. Respects privacy: if the owner
     made their circle private, only the owner themselves can read the
-    member list."""
+    member list.
+
+    Sort order (from the viewer's point of view):
+      1. The viewer themselves, if they are a member (own row surfaced
+         first when browsing someone else's circle).
+      2. Members that are ALSO in the viewer's own circle, ordered by
+         the viewer's most-recent interaction with them.
+      3. Everyone else, ordered by the viewer's most-recent interaction.
+    """
     me = user['user_id']
     is_owner = owner_id == me
     if not is_owner:
@@ -4902,21 +4910,46 @@ async def get_circle(owner_id: str, q: str = '', user: dict = Depends(get_curren
     uids = [r['friend_id'] for r in rows]
     users = await _hydrate_circle(uids, q.strip())
 
-    # Recency sort: most recent interaction first. For non-owners we still
-    # order by the OWNER's interactions so the "close friends first" idea
-    # is preserved regardless of who is looking.
-    pairs = []
-    for u in users:
-        ts = await _last_interaction_ts(owner_id, u['user_id'])
-        pairs.append((ts, u))
-    pairs.sort(key=lambda x: x[0], reverse=True)
+    # Which of those members are also inside the VIEWER's own circle?
+    # Single indexed lookup keeps this O(1) roundtrip regardless of size.
+    my_circle_ids: set[str] = set()
+    if uids:
+        my_rows = await db.friendships.find(
+            {'user_id': me, 'friend_id': {'$in': [u['user_id'] for u in users]}},
+            {'_id': 0, 'friend_id': 1},
+        ).to_list(len(users))
+        my_circle_ids = {r['friend_id'] for r in my_rows}
 
-    # Attach mini_user photo_data lazily so the payload stays lean when q
-    # narrows the list; still cheap for 45 members.
+    # Compute (bucket, -recency) sort keys. Bucket 0 = viewer themselves,
+    # 1 = mutual (in viewer's circle), 2 = everyone else. Recency is the
+    # last interaction between VIEWER and that member so the ordering
+    # reflects the viewer's own connections regardless of whose circle
+    # we're looking at.
+    triples = []
+    for u in users:
+        uid = u['user_id']
+        if uid == me:
+            bucket = 0
+        elif uid in my_circle_ids:
+            bucket = 1
+        else:
+            bucket = 2
+        ts = await _last_interaction_ts(me, uid)
+        triples.append((bucket, -ts.timestamp() if ts else 0, u))
+    triples.sort(key=lambda x: (x[0], x[1]))
+
+    # Attach mini_user photo_data + viewer-relative flags so the UI can
+    # render "AGGIUNGI/NELLA CERCHIA" without a per-row status call.
     hydrated = []
-    for _, u in pairs:
-        mini = await _mini_user(u['user_id'])
-        hydrated.append({**mini, 'display_name': u.get('display_name')})
+    for _, _, u in triples:
+        uid = u['user_id']
+        mini = await _mini_user(uid)
+        hydrated.append({
+            **mini,
+            'display_name': u.get('display_name'),
+            'is_me': uid == me,
+            'in_my_circle': uid in my_circle_ids,
+        })
 
     return {
         'private': False,
