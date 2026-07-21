@@ -13,6 +13,7 @@ import { api, ApiError, Comment, Feud, Reply, Sponsor } from "@/src/api";
 import { colors, spacing, font, sideColor, onSideColor } from "@/src/theme";
 import FeudMediaBlock from "@/src/components/FeudMediaBlock";
 import FeudStatsModal from "@/src/components/FeudStatsModal";
+import AiFactionSummaryModal from "@/src/components/AiFactionSummaryModal";
 import ShareSheet from "@/src/components/ShareSheet";
 import InAppShareSheet from "@/src/components/InAppShareSheet";
 import { useUIPrefs } from "@/src/ui/UIPrefs";
@@ -90,6 +91,7 @@ export default function FeudDetail() {
   const [replyText, setReplyText] = useState("");
   const [activeSide, setActiveSide] = useState<"A" | "B" | null>(null);
   const [statsOpen, setStatsOpen] = useState(false);
+  const [aiSummaryOpen, setAiSummaryOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [inAppShareOpen, setInAppShareOpen] = useState(false);
   const { sourcesExpanded, setSourcesExpanded } = useUIPrefs();
@@ -525,6 +527,17 @@ export default function FeudDetail() {
                 <Ionicons name="stats-chart" size={20} color={colors.brandPrimary} />
               </Pressable>
             )}
+            {feud.my_vote && (
+              <Pressable
+                onPress={() => setAiSummaryOpen(true)}
+                testID="ai-summary-button"
+                style={styles.statsIconBtn}
+                hitSlop={10}
+                accessibilityLabel="Sintesi AI degli argomenti delle fazioni"
+              >
+                <Ionicons name="sparkles" size={20} color={colors.brandPrimary} />
+              </Pressable>
+            )}
           </View>
 
           {error && <Text style={styles.err}>{error}</Text>}
@@ -634,6 +647,13 @@ export default function FeudDetail() {
         partyA={feud.party_a}
         partyB={feud.party_b}
         onClose={() => setStatsOpen(false)}
+      />
+      <AiFactionSummaryModal
+        visible={aiSummaryOpen}
+        feudId={feud.feud_id}
+        partyA={feud.party_a}
+        partyB={feud.party_b}
+        onClose={() => setAiSummaryOpen(false)}
       />
       <ShareSheet
         visible={shareOpen}

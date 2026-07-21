@@ -233,6 +233,15 @@ export const api = {
   // (users I have in my circle who also have me in theirs).
   updateHistoryPrivacy: (patch: { generic?: boolean; mutual?: boolean }) =>
     request('/users/me/history-privacy', { method: 'PATCH', body: JSON.stringify(patch) }),
+  // Terms & Privacy Policy — displayed on first login and any time the
+  // stored `terms_accepted_version` diverges from the server-side one.
+  getLegalTerms: () => request('/legal/terms'),
+  acceptLegalTerms: (version: string) =>
+    request('/users/me/accept-terms', { method: 'POST', body: JSON.stringify({ version }) }),
+  // AI faction summary — regenerated on every call from the latest
+  // visible comments so the synthesis sharpens as more people chime in.
+  feudAiSummary: (feudId: string) =>
+    request(`/feuds/${feudId}/ai-summary`, { method: 'POST' }),
   reportUser: (userId: string, reason: string, message_id?: string) =>
     request(`/users/${userId}/report`, { method: 'POST', body: JSON.stringify({ reason, message_id }) }),
 };
@@ -254,6 +263,9 @@ export type User = {
   push_notifications?: boolean;
   history_public_generic?: boolean;
   history_public_mutual?: boolean;
+  terms_accepted?: boolean;
+  terms_accepted_version?: string | null;
+  terms_accepted_at?: string | null;
   onboarding_completed?: boolean;
   bio?: string | null;
   social_links?: { instagram?: string; tiktok?: string; twitter?: string; youtube?: string; website?: string };

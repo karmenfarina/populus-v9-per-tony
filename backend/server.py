@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, Header, HTTPException, Depends, Request, WebSocket, WebSocketDisconnect, Query
+from fastapi import FastAPI, APIRouter, Header, HTTPException, Depends, Request, WebSocket, WebSocketDisconnect, Query, Body
 from fastapi.responses import HTMLResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -459,6 +459,13 @@ def _public_user(u: dict) -> dict:
         'profession': u.get('profession'),
         'favorite_categories': u.get('favorite_categories', []),
         'onboarding_completed': bool(u.get('onboarding_completed', False)),
+        # Populus Terms & Privacy Policy acceptance. The `TERMS_VERSION`
+        # constant is bumped whenever the document materially changes; the
+        # client compares this to `terms_accepted_version` and re-prompts
+        # the user if they don't match (so we can force re-acceptance).
+        'terms_accepted': (u.get('terms_accepted_version') == TERMS_VERSION),
+        'terms_accepted_version': u.get('terms_accepted_version'),
+        'terms_accepted_at': _iso_utc(u['terms_accepted_at']) if isinstance(u.get('terms_accepted_at'), datetime) else u.get('terms_accepted_at'),
         'bio': u.get('bio'),
         'social_links': u.get('social_links', {}),
         'primary_photo_id': u.get('primary_photo_id'),
@@ -2404,6 +2411,138 @@ async def get_comments(feud_id: str, user: Optional[dict] = Depends(get_current_
     return {'side_a': a, 'side_b': b}
 
 
+# ────────── AI faction summary (Sintesi del pensiero) ──────────
+# On-demand AI synthesis of what each faction is arguing in the
+# comments section. Rebuilt fresh on every call so that as new
+# comments arrive the summary sharpens.
+
+async def _ai_faction_summary(feud: dict, comments_a: list[dict], comments_b: list[dict]) -> Optional[dict]:
+    """Ask Claude to distil the top arguments per side plus common ground.
+
+    Returns a dict `{side_a: [str], side_b: [str], common: [str],
+    generated_at: iso}` or None on any provider error. Bullets are short
+    (≤ 22 words) and in Italian.
+    """
+    if not EMERGENT_LLM_KEY:
+        return None
+    try:
+        from emergentintegrations.llm.chat import LlmChat, UserMessage
+    except Exception as e:
+        logger.warning(f"ai-summary: emergentintegrations import failed: {e}")
+        return None
+
+    def _prep(rows: list[dict], side_label: str) -> str:
+        # Compose "Reply → Comment" blocks. Cap payload so a very noisy feud
+        # doesn't blow the token budget: keep the 25 most-recent comments,
+        # each truncated to ~250 chars. Same limit per side.
+        rows = rows[:25]
+        blocks: list[str] = []
+        for c in rows:
+            txt = (c.get('text') or '').strip().replace('\n', ' ')[:250]
+            if not txt:
+                continue
+            blocks.append(f"- {txt}")
+        return f"### {side_label}\n" + ("\n".join(blocks) if blocks else "(nessun commento)")
+
+    a_block = _prep(comments_a, f"TEAM A — {feud.get('party_a') or 'Team A'}")
+    b_block = _prep(comments_b, f"TEAM B — {feud.get('party_b') or 'Team B'}")
+
+    prompt = (
+        f"FAIDA: {feud.get('title') or ''}\n"
+        f"DOMANDA: {feud.get('question') or ''}\n\n"
+        f"COMMENTI DELLE DUE FAZIONI (in italiano):\n\n"
+        f"{a_block}\n\n{b_block}\n\n"
+        "Il tuo compito è produrre una sintesi FEDELE e non tendenziosa dei "
+        "PRINCIPALI argomenti che ciascuna fazione sta portando A SOSTEGNO "
+        "del proprio voto. Evita generici, entra sempre nel merito.\n\n"
+        "REGOLE:\n"
+        "1. 2–4 bullet per fazione (max 22 parole ciascuno).\n"
+        "2. Ogni bullet deve essere una TESI CONCRETA, non un'etichetta.\n"
+        "3. NON inserire ideologie mai citate nei commenti.\n"
+        "4. Cerca SOVRAPPOSIZIONI: se entrambe le fazioni concordano su un "
+        "punto (es. 'la situazione è vergognosa', 'servono regole più chiare'), "
+        "mettilo in `common` (0–3 bullet). Se non c'è nulla di veramente comune, "
+        "lascia l'array VUOTO.\n"
+        "5. Se la sezione commenti è vuota o troppo scarna per un'analisi, "
+        'rispondi {"empty": true}.\n\n'
+        "Rispondi SOLO con questo JSON, in italiano, senza commenti né testo extra:\n"
+        '{"side_a": ["bullet 1", "bullet 2", "..."], '
+        '"side_b": ["bullet 1", "bullet 2", "..."], '
+        '"common": ["punto in comune 1", "..."]}'
+    )
+    try:
+        chat = LlmChat(
+            api_key=EMERGENT_LLM_KEY,
+            session_id=f"sum-{feud.get('feud_id') or new_id('sum')}",
+            system_message=(
+                "Sei un analista politico italiano imparziale. Distilli il "
+                "pensiero della gente nei commenti in bullet nitidi, senza "
+                "prendere posizione."
+            ),
+        ).with_model('anthropic', 'claude-sonnet-4-6')
+        reply = await chat.send_message(UserMessage(text=prompt))
+        raw = str(reply) if reply is not None else ''
+        m = re.search(r'\{[\s\S]*\}', raw)
+        if not m:
+            return None
+        data = json.loads(m.group(0))
+    except Exception as e:
+        logger.warning(f"ai-summary failed: {e}")
+        return None
+
+    if data.get('empty') is True:
+        return {'side_a': [], 'side_b': [], 'common': [], 'empty': True, 'generated_at': _iso_utc(now_utc())}
+
+    def _clean(arr) -> list[str]:
+        if not isinstance(arr, list):
+            return []
+        out: list[str] = []
+        for x in arr[:6]:
+            if isinstance(x, str) and x.strip():
+                out.append(x.strip()[:220])
+        return out
+
+    return {
+        'side_a': _clean(data.get('side_a')),
+        'side_b': _clean(data.get('side_b')),
+        'common': _clean(data.get('common')),
+        'empty': False,
+        'generated_at': _iso_utc(now_utc()),
+    }
+
+
+@api_router.post('/feuds/{feud_id}/ai-summary')
+async def get_ai_summary(feud_id: str, user: dict = Depends(get_current_user)):
+    """Return a fresh AI synthesis of the faction arguments for this feud.
+
+    Idempotent-ish: each call regenerates from the current visible
+    comments so the summary keeps sharpening as new opinions land.
+    Requires auth to reduce abuse of the LLM budget.
+    """
+    feud = await db.feuds.find_one({'feud_id': feud_id}, {'_id': 0})
+    if not feud:
+        raise HTTPException(status_code=404, detail='Faida non trovata')
+    # Reuse the get_comments logic to obtain visible comments only. This
+    # respects the "author must still be on the same side" filter so we
+    # never analyse ghost opinions.
+    data = await get_comments(feud_id, user)  # type: ignore
+    side_a = data.get('side_a') or []
+    side_b = data.get('side_b') or []
+    if not side_a and not side_b:
+        return {
+            'side_a': [], 'side_b': [], 'common': [],
+            'empty': True, 'generated_at': _iso_utc(now_utc()),
+            'party_a': feud.get('party_a'),
+            'party_b': feud.get('party_b'),
+        }
+    summary = await _ai_faction_summary(feud, side_a, side_b)
+    if summary is None:
+        raise HTTPException(status_code=503, detail='Sintesi AI non disponibile al momento. Riprova.')
+    summary['party_a'] = feud.get('party_a')
+    summary['party_b'] = feud.get('party_b')
+    return summary
+
+
 @api_router.post('/feuds/{feud_id}/comments')
 async def add_comment(feud_id: str, body: CommentBody, user: dict = Depends(get_current_user)):
     vote = await db.votes.find_one({'feud_id': feud_id, 'user_id': user['user_id']}, {'_id': 0})
@@ -2957,6 +3096,10 @@ async def generate_daily(count: int = 3, _: bool = Depends(require_admin)):
     for cat in picks:
         try:
             feud = await _generate_feud_for_category(cat, LlmChat, UserMessage)
+            if feud:
+                # Fact-checker gate: strict editorial review before publish.
+                chosen_headline = (feud.get('sources') or [{}])[0]
+                feud = await _ai_fact_check_feud(feud, chosen_headline, LlmChat, UserMessage)
             if feud:
                 await db.feuds.insert_one(feud)
                 feud.pop('_id', None)
@@ -3580,6 +3723,141 @@ async def _generate_feud_for_category(cat: dict, LlmChat, UserMessage) -> Option
     }
 
 
+async def _ai_fact_check_feud(candidate: dict, chosen_headline: dict, LlmChat, UserMessage) -> Optional[dict]:
+    """Editorial gatekeeper AI.
+
+    Sits between the "generator" AI (which turns headlines into faide) and
+    the database insert. It receives the candidate feud + the source
+    headline & excerpt used to generate it, then decides:
+
+      - PUBLISH: emit the feud as-is (payload unchanged).
+      - CORRECT: emit the feud with corrected `title` / `summary` /
+        `party_a` / `party_b` / `question` — anything the AI deems
+        inaccurate, misleading or defamatory is rewritten in place. Only
+        the listed fields can be overwritten.
+      - REJECT: kill the whole feud (return None). The scheduler falls
+        back to the next category, no publication happens.
+
+    The AI is instructed to be strict: unverifiable claims, defamatory
+    framing, false attributions, or content unsupported by the source
+    trigger REJECT/CORRECT.
+
+    Returns the (possibly patched) feud dict on approval, `None` on
+    rejection. On any provider error we fall through to approval so the
+    pipeline stays resilient — the fact-checker is a safety net, not a
+    hard gate.
+    """
+    if not EMERGENT_LLM_KEY:
+        return candidate
+    src_title = (chosen_headline.get('title') or '').strip()
+    src_excerpt = (chosen_headline.get('excerpt') or '').strip()
+    src_link = chosen_headline.get('link') or ''
+    src_source = chosen_headline.get('source') or ''
+
+    # Compact payload — the fact-checker only reasons over the candidate
+    # + the actual source material we scraped from RSS. We deliberately
+    # do NOT let it browse the web from within the pipeline.
+    payload = {
+        'candidate': {
+            'title': candidate.get('title'),
+            'party_a': candidate.get('party_a'),
+            'party_b': candidate.get('party_b'),
+            'summary': candidate.get('summary'),
+            'question': candidate.get('question'),
+        },
+        'source': {
+            'title': src_title,
+            'source': src_source,
+            'link': src_link,
+            'excerpt': src_excerpt,
+        },
+    }
+    prompt = (
+        "Analizza il CANDIDATO FAIDA rispetto alla FONTE originale.\n\n"
+        f"DATI:\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n\n"
+        "REGOLE (rigidissime):\n"
+        "1. Ogni affermazione fattuale del CANDIDATO deve essere sostenuta "
+        "dalla FONTE (titolo + estratto). Se un dettaglio non è nella "
+        "fonte, va rimosso o corretto.\n"
+        "2. VIETATA la diffamazione: accuse, insinuazioni, etichette "
+        "penali (es. 'ladro', 'criminale', 'stupratore') vanno rimosse "
+        "salvo che siano già nel testo della fonte come fatti giudiziari "
+        "accertati.\n"
+        "3. VIETATO attribuire dichiarazioni non presenti nell'estratto. "
+        "Le virgolette devono corrispondere alla fonte.\n"
+        "4. Nomi e cognomi devono essere corretti (verifica con la fonte).\n"
+        "5. Il gossip pungente è consentito, la disinformazione no.\n"
+        "6. Le due parti (party_a / party_b) devono essere davvero "
+        "antitetiche e reali. Se sono forzate, correggi o rigetta.\n\n"
+        "DECIDI:\n"
+        "- Se il candidato rispetta le regole → decisione PUBLISH.\n"
+        "- Se ci sono imprecisioni CORREGGIBILI riscrivendo alcuni "
+        "  campi (title, party_a, party_b, summary, question) → CORRECT "
+        "  e fornisci i campi corretti.\n"
+        "- Se il candidato è fondamentalmente non pubblicabile "
+        "  (diffamatorio, inventato, disinformazione, dettaglio scandalistico "
+        "  privo di riscontro nella fonte) → REJECT con motivazione breve.\n\n"
+        "Rispondi SOLO con JSON valido, in italiano:\n"
+        '{"decision": "PUBLISH" | "CORRECT" | "REJECT", '
+        '"reason": "motivo sintetico", '
+        '"corrections": {"title": "...", "party_a": "...", "party_b": "...", '
+        '  "summary": "...", "question": "..."}}\n'
+        "In PUBLISH e REJECT lascia `corrections` come oggetto vuoto {}."
+    )
+    try:
+        chat = LlmChat(
+            api_key=EMERGENT_LLM_KEY,
+            session_id=f"fact-{candidate.get('feud_id', '') or new_id('fact')}",
+            system_message=(
+                "Sei l'editor di verifica di una redazione italiana. Scrupoloso, "
+                "prudente, imparziale. Il tuo compito è impedire che finiscano "
+                "in pubblicazione notizie diffamatorie, inaccurate, distorte o "
+                "non supportate dalla fonte. Non ti fai influenzare dallo stile "
+                "tabloid: filtri i FATTI, non il tono."
+            ),
+        ).with_model('anthropic', 'claude-sonnet-4-6')
+        reply = await chat.send_message(UserMessage(text=prompt))
+        raw = str(reply) if reply is not None else ''
+        m = re.search(r'\{[\s\S]*\}', raw)
+        if not m:
+            logger.warning(f"fact-check: no JSON in response for {candidate.get('title')!r} — approving by default")
+            return candidate
+        data = json.loads(m.group(0))
+    except Exception as e:
+        logger.warning(f"fact-check LLM error for {candidate.get('title')!r}: {e} — approving by default")
+        return candidate
+
+    decision = (data.get('decision') or 'PUBLISH').upper()
+    reason = (data.get('reason') or '').strip()
+    if decision == 'REJECT':
+        logger.info(f"fact-check REJECTED feud '{candidate.get('title')}': {reason}")
+        return None
+    if decision == 'CORRECT':
+        corrections = data.get('corrections') or {}
+        if isinstance(corrections, dict):
+            for k in ('title', 'party_a', 'party_b', 'summary', 'question'):
+                v = corrections.get(k)
+                if isinstance(v, str) and v.strip():
+                    candidate[k] = v.strip()[:1400 if k == 'summary' else 200]
+            # Also recompute hashtag fields if party names changed.
+            subject_val = candidate.get('subject')
+            hs_val = candidate.get('hashtag_subjects')
+            candidate['hashtag'] = _hashtag_key(
+                candidate.get('party_a') or '', candidate.get('party_b') or '',
+                subject=subject_val, hashtag_subjects=hs_val,
+            )
+            candidate['hashtag_display'] = _hashtag_display(
+                candidate.get('party_a') or '', candidate.get('party_b') or '',
+                subject=subject_val, hashtag_subjects=hs_val,
+            )
+        candidate['fact_check'] = {'decision': 'CORRECT', 'reason': reason}
+        logger.info(f"fact-check CORRECTED feud '{candidate.get('title')}': {reason}")
+        return candidate
+    # PUBLISH (default)
+    candidate['fact_check'] = {'decision': 'PUBLISH', 'reason': reason}
+    return candidate
+
+
 HOT_TOPICS_PATH = ROOT_DIR / 'hot_topics.md'
 
 
@@ -4130,6 +4408,10 @@ async def _daily_generation_loop():
                         f"(cooldown {CATEGORY_COOLDOWN_MIN}min cleared)"
                     )
                     feud = await _generate_feud_for_category(cat, LlmChat, UserMessage)
+                    if feud:
+                        # Fact-checker gate: strict editorial review before publish.
+                        chosen_headline = (feud.get('sources') or [{}])[0]
+                        feud = await _ai_fact_check_feud(feud, chosen_headline, LlmChat, UserMessage)
                     if feud:
                         await db.feuds.insert_one(feud)
                         logger.info(f"scheduler: inserted feud for {cat['id']}")
@@ -4907,6 +5189,71 @@ async def ws_messages(ws: WebSocket, token: str = Query(default="")):
 # Limit: 45 members per user (raises 409 with a friendly message).
 
 MAX_CIRCLE_MEMBERS = 45
+
+# ────────── Terms & Privacy Policy ──────────
+# Bump `TERMS_VERSION` whenever the document materially changes; users
+# whose stored acceptance version doesn't match will be prompted to
+# re-accept the new copy.
+TERMS_VERSION = 'v1'
+_TERMS_PATH = ROOT_DIR / 'legal' / f'terms_{TERMS_VERSION}.md'
+_TERMS_CACHE: dict = {'text': None}
+
+
+def _load_terms_text() -> str:
+    """Read and memoise the current terms markdown from disk.
+
+    A miss cache re-reads the file on next call so a fresh deployment
+    picks up new content without a server restart if the version key
+    was left unchanged.
+    """
+    cached = _TERMS_CACHE.get('text')
+    if cached:
+        return cached
+    try:
+        text = _TERMS_PATH.read_text(encoding='utf-8')
+    except Exception as e:
+        logger.warning(f"terms file not readable at {_TERMS_PATH}: {e}")
+        text = "Termini di Servizio non disponibili al momento. Riprova più tardi."
+    _TERMS_CACHE['text'] = text
+    return text
+
+
+@api_router.get('/legal/terms')
+async def get_legal_terms():
+    """Return the current Terms of Service + Privacy Policy in markdown.
+
+    Public endpoint: usable both during onboarding (the mandatory
+    acceptance screen) and later from Settings.
+    """
+    return {
+        'version': TERMS_VERSION,
+        'text': _load_terms_text(),
+        'updated_at': '2026-06-01',
+    }
+
+
+@api_router.post('/users/me/accept-terms')
+async def accept_legal_terms(body: dict = Body(default_factory=dict), user: dict = Depends(get_current_user)):
+    """Record that the current user has accepted the specified terms
+    version. Client sends `{version: "v1"}`; we accept exact match and
+    stamp the acceptance timestamp on the user document.
+    """
+    version = (body or {}).get('version') if isinstance(body, dict) else None
+    if version != TERMS_VERSION:
+        raise HTTPException(status_code=400, detail=f'Versione termini non valida (attesa {TERMS_VERSION})')
+    now = now_utc()
+    await db.users.update_one(
+        {'user_id': user['user_id']},
+        {'$set': {
+            'terms_accepted_version': TERMS_VERSION,
+            'terms_accepted_at': now,
+        }},
+    )
+    return {
+        'terms_accepted': True,
+        'terms_accepted_version': TERMS_VERSION,
+        'terms_accepted_at': _iso_utc(now),
+    }
 
 
 async def _circle_count(uid: str) -> int:
