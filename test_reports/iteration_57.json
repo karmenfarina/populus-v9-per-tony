@@ -1,0 +1,35 @@
+{
+  "summary": "Iteration 57 validated the 3 bug fixes + new 'Suggeriti' feature on /circle/find. Backend: 9/9 pytest cases PASS in /app/backend/tests/test_circle_find_iter57.py (8.76s, XML at /app/test_reports/pytest/iter57_results.xml). Coverage: (a) GET /api/circle/suggestions returns 200 with {users:[]} and correct payload shape {user_id, nickname, display_name, photo_data, reasons}; (b) self excluded from own suggestions; (c) DM contact chat_b surfaces with reasons containing 'chat' for chat_a; (d) users already in the viewer's circle are excluded (add chat_b -> disappears from suggestions -> remove -> present again); (e) anonymous user gets {users: []}; (f) GET /api/search/users matches display_name case-insensitively ('mario_rossi' and 'rossi' both hit chatUserB after temporarily setting display_name='Mario Rossi TEST'); (g) empty q returns {users: []}; (h) response payload includes user_id, nickname, display_name, photo_data. Frontend (Expo web, mobile 390x844, chat_a session injected via localStorage): T3 header PASS — find-back is 40x40 (x:12 y:8), 'CERCA AMICI' + subtitle 'Aggiungi persone alla tua Cerchia del Gossip' render; tapping directly on the title text keeps URL at /circle/find (bug 3 confirmed FIXED); tapping find-back returns to /circle/user_6e65e19525d5. T4 icon PASS — search-outline icon + placeholder 'Cerca per nickname o nome...' visible in the search bar (screenshot confirms the magnifying glass rendered on the left inside searchIconSlot width:24). T5 suggested PASS — 'SUGGERITI PER TE' section header (sparkles icon) is visible on first paint with query empty; chat_b row (find-row-user_16f709708760) is present with a 'Chat' chip; a second suggested row (@carlofarina) appears with a 'Commenti in comune' chip, confirming multi-signal ranking works end-to-end. T6 display_name search PASS — after setting chat_b's display_name to 'Mario Rossi TEST', typing 'mario' returns the chat_b row (find-row-user_16f709708760) with the display_name 'Mario Rossi TEST' rendered under the @chatUserB nickname. Cleanup: chat_b display_name restored to null; chat_a's circle left empty. One minor deprecation warning captured in console: 'props.pointerEvents is deprecated. Use style.pointerEvents' — the current implementation on find.tsx:292 uses the DOM/RN prop, which still works but should be migrated to style.pointerEvents to be future-proof. This is NOT blocking and the bug-3 behaviour is correct as-is.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "CircleFindScreen header title View", "issue": "Deprecation warning at runtime: 'props.pointerEvents is deprecated. Use style.pointerEvents'. Reference: /app/frontend/app/(tabs)/circle/find.tsx:292 (attribute pointerEvents=\"none\" on <View>). Move to style={{ pointerEvents: 'none' }} to be forward-compatible with React Native web 0.20+."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_circle_find_iter57.py",
+    "/app/test_reports/pytest/iter57_results.xml"
+  ],
+  "action_items": [
+    "OPTIONAL / non-blocking: migrate pointerEvents prop to style.pointerEvents on /app/frontend/app/(tabs)/circle/find.tsx line 292 to silence the RN deprecation warning."
+  ],
+  "critical_code_review_comments": [
+    "find.tsx:69-94 — the parallel fetch of circleGet + circleSuggestions runs only on mount (deps = [user?.user_id]). If the user opens /circle/find, adds someone, navigates elsewhere, comes back via router.back(), the suggestions ARE stale (still show the just-added user in the list with in_my_circle flipped, which is fine visually, but a fresh suggestion set won't be recomputed). Consider useFocusEffect for parity with the parent /circle/[userId].tsx.",
+    "server.py:4809 suggested_users — the co-commenter loop scans EVERY comment on my_feuds without a limit. On a hot feud with thousands of comments this can walk a huge cursor synchronously in one request. Recommend adding .limit(500) or an aggregation with $group to cap the fan-out.",
+    "server.py:4922 — the hydrate loop makes a per-user db.users.find_one + db.user_photos.find_one (2 * N queries). For limit=20 that's up to 40 sequential lookups. Batch via $in on {user_id: {$in: ranked_ids}} and one photo lookup per photo id to reduce latency.",
+    "find.tsx:139-140 — the setRows + setSuggested optimistic swap iterates BOTH lists on every toggle even though the user usually only exists in one. Not a correctness bug (idempotent), just wasted work; low priority."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_circle_find_iter57.py (new)",
+    "/app/test_reports/pytest/iter57_results.xml (new)"
+  ],
+  "success_rate": {"backend": "100% (9/9)", "frontend": "100% (T3, T4, T5, T6 all pass)"},
+  "seed_data_creation": "Temporarily set chat_b (user_16f709708760) display_name to 'Mario Rossi TEST' via PATCH /api/auth/me/profile so search-by-display_name could be exercised; restored to null at teardown. Ensured chat_a <-> chat_b DM exists by sending a TEST_ping message from chat_a in the pytest fixture. chat_a's circle left empty at end of run (chat_b was added+removed inside test_users_in_circle_excluded).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "New endpoint: GET /api/circle/suggestions?limit=N — returns {users:[{user_id, nickname, display_name, photo_data, reasons:[chat|amici_di_amici|commenti_in_comune]}]}. Excludes self / anonymous / blocked / already-in-circle users. Anonymous callers get {users:[]}. Search endpoint /api/search/users now matches display_name OR nickname; empty q returns {users:[]}. Frontend testIDs on /circle/find unchanged: find-back, find-search-input, find-clear, find-list, find-row-{uid}, find-open-profile-{uid}, find-add-{uid}, find-hint, find-empty, find-loading-suggestions. Session for web preview: localStorage.setItem('faide_token', JSON.stringify(token)). To make chat_b appear in chat_a's suggestions, ensure at least one DM has been exchanged between them.",
+  "rca_of_issue": "N/A — all 3 reported bugs (missing lens icon, no display_name match in search, title text mis-navigating back) are confirmed fixed and the new Suggeriti feature works end-to-end on first attempt. Only finding is a non-blocking React Native web deprecation warning for pointerEvents prop."
+}

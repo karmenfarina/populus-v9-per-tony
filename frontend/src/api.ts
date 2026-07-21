@@ -209,6 +209,12 @@ export const api = {
   shareSuggestions: (limit = 21) => request(`/messages/share-suggestions?limit=${limit}`),
   searchUsers: (q: string, limit = 20) =>
     request(`/search/users?q=${encodeURIComponent(q)}&limit=${limit}`),
+  // Suggested friends for the Cerchia — union of DM contacts, friends-of-
+  // friends and co-commenters, ranked by a weighted score. Returns
+  // hydrated user rows with a `reasons` string list ("chat",
+  // "amici_di_amici", "commenti_in_comune") the UI can render as chips.
+  circleSuggestions: (limit = 20) =>
+    request(`/circle/suggestions?limit=${limit}`),
   markConversationRead: (userId: string) =>
     request(`/messages/with/${userId}/read`, { method: 'POST' }),
   reactMessage: (messageId: string, emoji: string) =>

@@ -4772,9 +4772,15 @@ async def search_users(q: str, limit: int = 20, user: dict = Depends(get_current
         logger.warning(f"search_users blocks lookup failed: {e}")
 
     excluded = list(blocked_ids | {me})
+    # Match against nickname OR display_name so users can find friends
+    # by either the @handle or the real/visible name they set on their
+    # profile.
     cursor = db.users.find(
         {
-            'nickname': {'$regex': safe, '$options': 'i'},
+            '$or': [
+                {'nickname': {'$regex': safe, '$options': 'i'}},
+                {'display_name': {'$regex': safe, '$options': 'i'}},
+            ],
             'user_id': {'$nin': excluded},
             'auth_provider': {'$ne': 'anonymous'},
             'is_anonymous': {'$ne': True},
@@ -4798,6 +4804,141 @@ async def search_users(q: str, limit: int = 20, user: dict = Depends(get_current
             'photo_data': photo_data,
         })
     return {'users': results}
+
+
+@api_router.get('/circle/suggestions')
+async def suggested_users(limit: int = 20, user: dict = Depends(get_current_user)):
+    """Suggest users the viewer might want to add to their Cerchia.
+
+    Ranking pool (union, each candidate deduped and self+block-filtered):
+      1. DM contacts (users the viewer has exchanged messages with).
+      2. Friends-of-friends (members of the viewer's circle's circles).
+      3. Co-commenters (users who recently commented on the same feuds
+         the viewer commented on).
+
+    Each candidate gets a score composed of the three signals; the final
+    list is truncated to `limit`. Users already in the viewer's circle,
+    or who blocked (or were blocked by) the viewer, are excluded.
+
+    Anonymous users get an empty list — Populus' social graph is opt-in
+    and requires a real identity anyway.
+    """
+    if user.get('is_anonymous') or user.get('auth_provider') == 'anonymous':
+        return {'users': []}
+    me = user['user_id']
+    limit = max(1, min(int(limit or 20), 40))
+
+    # Exclusions: my current circle + people blocked in either direction.
+    my_circle = set()
+    async for row in db.friendships.find({'user_id': me}, {'_id': 0, 'friend_id': 1}):
+        my_circle.add(row['friend_id'])
+    blocked: set[str] = set()
+    async for b in db.user_blocks.find(
+        {'$or': [{'blocker_id': me}, {'blocked_id': me}]},
+        {'_id': 0, 'blocker_id': 1, 'blocked_id': 1},
+    ):
+        other = b.get('blocked_id') if b.get('blocker_id') == me else b.get('blocker_id')
+        if other:
+            blocked.add(other)
+    excluded = my_circle | blocked | {me}
+
+    # Weights per signal — tuneable. DM contacts are strongest because
+    # they represent explicit interaction; friends-of-friends is second
+    # because it's a graph proxy; co-commenters is the softest signal.
+    W_DM = 5.0
+    W_FOF = 3.0
+    W_COC = 1.0
+
+    scores: dict[str, float] = {}
+    reasons: dict[str, list[str]] = {}
+
+    # 1. DM contacts (union of sender/recipient counterparties). Count
+    # message exchanges (capped) so power-contacts float higher.
+    dm_counts: dict[str, int] = {}
+    async for m in db.messages.find(
+        {
+            '$or': [{'sender_id': me}, {'recipient_id': me}],
+            'deleted': {'$ne': True},
+        },
+        {'_id': 0, 'sender_id': 1, 'recipient_id': 1},
+    ):
+        other = m['recipient_id'] if m['sender_id'] == me else m['sender_id']
+        if other and other not in excluded:
+            dm_counts[other] = dm_counts.get(other, 0) + 1
+    for uid, cnt in dm_counts.items():
+        scores[uid] = scores.get(uid, 0) + W_DM * min(cnt, 20) / 20
+        reasons.setdefault(uid, []).append('chat')
+
+    # 2. Friends-of-friends. Fetch the circles of everyone in MY circle,
+    # then count how many mutual paths lead to each candidate.
+    if my_circle:
+        fof_counts: dict[str, int] = {}
+        async for row in db.friendships.find(
+            {'user_id': {'$in': list(my_circle)}},
+            {'_id': 0, 'friend_id': 1},
+        ):
+            fid = row.get('friend_id')
+            if fid and fid not in excluded:
+                fof_counts[fid] = fof_counts.get(fid, 0) + 1
+        for uid, cnt in fof_counts.items():
+            scores[uid] = scores.get(uid, 0) + W_FOF * min(cnt, 10) / 10
+            reasons.setdefault(uid, []).append('amici_di_amici')
+
+    # 3. Co-commenters on the same feuds. Look at my recent comments to
+    # find the feud ids I've engaged with, then any OTHER commenter on
+    # those feuds is a plausible ideological neighbour.
+    my_feuds: set[str] = set()
+    async for c in db.comments.find(
+        {'user_id': me}, {'_id': 0, 'feud_id': 1},
+    ).sort('created_at', -1).limit(60):
+        fid = c.get('feud_id')
+        if fid:
+            my_feuds.add(fid)
+    if my_feuds:
+        co_counts: dict[str, int] = {}
+        async for c in db.comments.find(
+            {'feud_id': {'$in': list(my_feuds)}, 'user_id': {'$ne': me}},
+            {'_id': 0, 'user_id': 1},
+        ):
+            uid = c.get('user_id')
+            if uid and uid not in excluded:
+                co_counts[uid] = co_counts.get(uid, 0) + 1
+        for uid, cnt in co_counts.items():
+            scores[uid] = scores.get(uid, 0) + W_COC * min(cnt, 20) / 20
+            reasons.setdefault(uid, []).append('commenti_in_comune')
+
+    if not scores:
+        return {'users': []}
+
+    # Sort by score desc, then hydrate mini_user info. Stop once we have
+    # `limit` non-anonymous users (we may lose some to the anonymity or
+    # existence filter).
+    ranked = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
+    hydrated: list[dict] = []
+    for uid, _score in ranked:
+        if len(hydrated) >= limit:
+            break
+        u = await db.users.find_one(
+            {'user_id': uid, 'auth_provider': {'$ne': 'anonymous'}, 'is_anonymous': {'$ne': True}},
+            {'_id': 0, 'user_id': 1, 'nickname': 1, 'display_name': 1, 'primary_photo_id': 1},
+        )
+        if not u:
+            continue
+        photo_data = None
+        if u.get('primary_photo_id'):
+            ph = await db.user_photos.find_one(
+                {'user_id': uid, 'photo_id': u['primary_photo_id']},
+                {'_id': 0, 'data': 1},
+            )
+            photo_data = (ph or {}).get('data')
+        hydrated.append({
+            'user_id': uid,
+            'nickname': u.get('nickname') or 'Utente',
+            'display_name': u.get('display_name'),
+            'photo_data': photo_data,
+            'reasons': reasons.get(uid, []),
+        })
+    return {'users': hydrated}
 
 
 @api_router.post('/feuds/{feud_id}/share')
