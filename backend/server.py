@@ -4268,17 +4268,21 @@ async def share_suggestions(limit: int = 21, user: dict = Depends(get_current_us
     except Exception as e:
         logger.warning(f"share suggestions (replies_in) failed: {e}")
 
-    # Exclude blocked pairs
+    # Exclude blocked pairs (both directions) so users we can't message
+    # never appear as "share suggestions" — otherwise tapping them would
+    # fail with 403 and the sheet would show a misleading error.
+    # The user_blocks collection stores {blocker_id, blocked_id}.
     try:
         blocks = db.user_blocks.find(
-            {'$or': [{'user_id': me}, {'blocked_user_id': me}]},
-            {'_id': 0, 'user_id': 1, 'blocked_user_id': 1},
+            {'$or': [{'blocker_id': me}, {'blocked_id': me}]},
+            {'_id': 0, 'blocker_id': 1, 'blocked_id': 1},
         )
         async for b in blocks:
-            other = b['blocked_user_id'] if b['user_id'] == me else b['user_id']
-            scores.pop(other, None)
-    except Exception:
-        pass
+            other = b.get('blocked_id') if b.get('blocker_id') == me else b.get('blocker_id')
+            if other:
+                scores.pop(other, None)
+    except Exception as e:
+        logger.warning(f"share suggestions (blocks) failed: {e}")
 
     # Rank and hydrate
     ranked = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)[:limit]
@@ -4326,10 +4330,28 @@ async def search_users(q: str, limit: int = 20, user: dict = Depends(get_current
     # '+' doesn't broaden the match.
     safe = _re.escape(q)
     limit = max(1, min(int(limit or 20), 40))
+    me = user['user_id']
+
+    # Pre-compute the set of user ids we can't message (either we blocked
+    # them or they blocked us) so search results don't surface unshareable
+    # accounts.
+    blocked_ids: set[str] = set()
+    try:
+        async for b in db.user_blocks.find(
+            {'$or': [{'blocker_id': me}, {'blocked_id': me}]},
+            {'_id': 0, 'blocker_id': 1, 'blocked_id': 1},
+        ):
+            other = b.get('blocked_id') if b.get('blocker_id') == me else b.get('blocker_id')
+            if other:
+                blocked_ids.add(other)
+    except Exception as e:
+        logger.warning(f"search_users blocks lookup failed: {e}")
+
+    excluded = list(blocked_ids | {me})
     cursor = db.users.find(
         {
             'nickname': {'$regex': safe, '$options': 'i'},
-            'user_id': {'$ne': user['user_id']},
+            'user_id': {'$nin': excluded},
             'auth_provider': {'$ne': 'anonymous'},
             'is_anonymous': {'$ne': True},
         },
