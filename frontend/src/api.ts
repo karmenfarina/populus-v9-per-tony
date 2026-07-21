@@ -194,6 +194,7 @@ export const api = {
 
   // --- Messaging ---
   messagesUnreadCount: () => request('/messages/unread-count'),
+  messagesMarkAllRead: () => request('/messages/mark-all-read', { method: 'POST' }),
   conversations: () => request('/messages/conversations'),
   messagesWith: (userId: string, before?: string, limit = 50) => {
     const p = new URLSearchParams();

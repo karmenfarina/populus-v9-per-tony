@@ -274,8 +274,8 @@ metadata:
 
 test_plan:
   current_focus:
-    - "Nickname lowercase-only (no uppercase)"
-    - "Explicit save-error messages for invalid nicknames"
+    - "Display name font slightly larger under nickname"
+    - "Messages tab badge clears when list is empty (orphan cleanup)"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"

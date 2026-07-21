@@ -1208,8 +1208,8 @@ const styles = StyleSheet.create({
   provider: { color: colors.onSurfaceInverse, fontSize: font.sizes.sm, opacity: 0.7, marginTop: spacing.xs },
   displayName: {
     color: colors.onSurfaceInverse,
-    fontSize: font.sizes.sm,
-    opacity: 0.6,
+    fontSize: font.sizes.base,
+    opacity: 0.75,
     marginTop: 2,
   },
   badgeBlock: { alignItems: "center", padding: spacing.xl, borderBottomWidth: 2, borderColor: colors.border },

@@ -4443,6 +4443,29 @@ async def send_message(body: SendMessageBody, user: dict = Depends(get_current_u
     return {'message': payload}
 
 
+@api_router.post('/messages/mark-all-read')
+async def mark_all_messages_read(user: dict = Depends(get_current_user)):
+    """Mark every unread message addressed to the current user as read.
+
+    Used as a self-healing sweep when the messages list screen finds it has
+    no conversations but the tab-badge counter still reports unread messages
+    (orphans from deleted/blocked conversations).
+    """
+    if user.get('is_anonymous') or user.get('auth_provider') == 'anonymous':
+        return {'updated': 0}
+    now = now_utc()
+    r = await db.messages.update_many(
+        {
+            'recipient_id': user['user_id'],
+            'read_at': None,
+            'deleted': {'$ne': True},
+        },
+        {'$set': {'read_at': now}},
+    )
+    return {'updated': r.modified_count}
+
+
+
 @api_router.post('/messages/with/{other_user_id}/read')
 async def mark_conversation_read(other_user_id: str, user: dict = Depends(get_current_user)):
     if user.get('is_anonymous') or user.get('auth_provider') == 'anonymous':

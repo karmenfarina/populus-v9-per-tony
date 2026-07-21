@@ -65,9 +65,27 @@ export default function MessagesListScreen() {
   useFocusEffect(
     useCallback(() => {
       if (!user || user.is_anonymous) return;
-      load();
-      refreshBadge();
-    }, [user, load, refreshBadge]),
+      let cancelled = false;
+      (async () => {
+        try {
+          const r = await api.conversations();
+          if (cancelled) return;
+          const list = r.conversations || [];
+          setConvs(list);
+          // Self-heal: if the visible list is empty but the tab badge still
+          // reports unread messages, those are orphans (deleted/blocked
+          // conversations left messages behind). Sweep them so the badge
+          // clears the moment the user reaches the messages screen.
+          if (list.length === 0) {
+            try {
+              await api.messagesMarkAllRead();
+            } catch { /* silent */ }
+          }
+        } catch { /* silent */ }
+        if (!cancelled) refreshBadge();
+      })();
+      return () => { cancelled = true; };
+    }, [user, refreshBadge]),
   );
 
   // Live updates: reload conversation list on any relevant ws event.

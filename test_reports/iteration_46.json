@@ -1,0 +1,35 @@
+{
+  "summary": "Verified both fixes end-to-end. (1) profile-display-name now renders at fontSize=14px (font.sizes.base) with opacity=0.75 (was 12px/0.6). (2) POST /api/messages/mark-all-read endpoint exists, is auth-guarded, marks orphan unreads and returns 0 for anonymous. Frontend messages/index useFocusEffect calls it when conversations=[]; badge clears and unread-count drops to 0 within ~1s. Backend pytest suite: 5/5 pass. UI reproduction confirmed with an injected orphan message + a temporarily-hidden real conversation (restored after test).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_messages_mark_all_read.py",
+    "/app/test_reports/pytest/messages_mark_all_read.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py mark_all_messages_read (line 4446-4465): clean implementation, anonymous short-circuit correct, uses read_at=None + deleted!=True filter matching /messages/unread-count semantics.",
+    "messages/index.tsx useFocusEffect (line 65-89): mark-all-read only fires when list.length===0 as spec; wrapped in try/catch, refreshes badge unconditionally. Good.",
+    "profile.tsx styles.displayName confirmed at font.sizes.base + opacity 0.75."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_messages_mark_all_read.py (new)"
+  ],
+  "success_rate": {
+    "backend": "100% (5/5 pytest cases)",
+    "frontend": "100% (display-name style + orphan-sweep end-to-end)"
+  },
+  "seed_data_creation": "chat_a's display_name was set to 'Mario Rossi' via mongo (was NULL). Not reverted — required for future visual regression of the profile display-name. Injected orphan message TEST_orphan_ui_1 for UI test and cleaned up afterwards. Real conv_user_16f709708760_user_6e65e19525d5 last_message_at was temporarily nulled to force the empty-list path in the UI test and restored to ISODate('2026-07-19T13:18:09.578Z') afterwards.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Endpoint POST /api/messages/mark-all-read is live at server.py:4446. It marks all read_at:null, deleted:!=True messages targeting the caller. Anonymous callers get {updated:0} without touching DB. api.messagesMarkAllRead exists in src/api.ts. Messages tab uses useFocusEffect to self-heal empty-list badge state. To reproduce empty-list state for testing, temporarily null the last_message_at on any existing conversation between the test user and their peer, or delete the conversation doc; restore afterwards.",
+  "rca_of_issue": "N/A – both fixes verified working."
+}
