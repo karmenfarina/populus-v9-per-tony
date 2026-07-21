@@ -121,23 +121,17 @@ export default function Profile() {
   const [loadingBlocks, setLoadingBlocks] = useState(false);
   const isAnonymous = user?.auth_provider === "anonymous";
 
-  // Cache the last blocked list so we only re-render when the data
-  // actually changes. This avoids the "blinking" caused by refreshMe()
-  // updating the `user` reference on every focus, which cascades through
-  // dependencies and re-triggers loadBlocked → setBlockedList → re-render.
-  const blockedCacheRef = useRef<string>("");
+  // Track whether we've done at least one fetch so the spinner only shows
+  // on the very first load. Subsequent focus refreshes / toggle opens are
+  // silent (no spinner flash) but ALWAYS update the list so real-time
+  // block/unblock actions from other screens propagate immediately.
+  const hasLoadedBlocksRef = useRef(false);
   const loadBlocked = useCallback(async () => {
-    // Show spinner only on the very first load — subsequent focus refreshes
-    // are silent so the list doesn't blink between fetches.
-    if (blockedCacheRef.current === "") setLoadingBlocks(true);
+    if (!hasLoadedBlocksRef.current) setLoadingBlocks(true);
     try {
       const r = await api.myBlocks();
-      const list = r?.blocked_users || [];
-      const key = list.map((u: any) => u.user_id).sort().join("|") || "empty";
-      if (key !== blockedCacheRef.current) {
-        blockedCacheRef.current = key;
-        setBlockedList(list);
-      }
+      setBlockedList(r?.blocked_users || []);
+      hasLoadedBlocksRef.current = true;
     } catch { /* silent */ }
     finally { setLoadingBlocks(false); }
   }, []);
