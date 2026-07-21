@@ -178,10 +178,13 @@ export default function HomeFeed() {
         firstFocusRef.current = false;
         return;
       }
-      // Throttle: if we already refreshed in the last 30 seconds, skip. This
-      // avoids reshuffling the feed when the user just returned from a feud
-      // detail (which would otherwise reset scroll to top on Android).
-      if (Date.now() - lastLoadAtRef.current < 30_000) {
+      // HYPE always refreshes on focus — the section is time-sensitive and
+      // must re-rank its posts each time the user returns to the tab.
+      // Other categories: 3 s throttle just to avoid rapid re-fetch during
+      // modal open/close flapping. Longer throttles previously caused stale
+      // vote-percentages on the preview after voting on a detail screen.
+      const isHype = selected === "hype";
+      if (!isHype && Date.now() - lastLoadAtRef.current < 3_000) {
         return;
       }
       let cancelled = false;

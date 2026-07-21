@@ -2221,6 +2221,35 @@ async def add_comment(feud_id: str, body: CommentBody, user: dict = Depends(get_
     return {'comment': doc}
 
 
+@api_router.delete('/comments/{comment_id}')
+async def delete_comment(comment_id: str, user: dict = Depends(get_current_user)):
+    """Delete a comment authored by the current user.
+
+    Cascades the delete to the comment's replies so orphan replies never
+    linger. Returns 403 if the caller is not the comment's author.
+    """
+    doc = await db.comments.find_one({'comment_id': comment_id}, {'_id': 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail='Commento non trovato')
+    if doc.get('user_id') != user['user_id']:
+        raise HTTPException(status_code=403, detail='Puoi eliminare solo i tuoi commenti')
+    await db.replies.delete_many({'comment_id': comment_id})
+    await db.comments.delete_one({'comment_id': comment_id})
+    return {'ok': True}
+
+
+@api_router.delete('/replies/{reply_id}')
+async def delete_reply(reply_id: str, user: dict = Depends(get_current_user)):
+    """Delete a reply authored by the current user."""
+    doc = await db.replies.find_one({'reply_id': reply_id}, {'_id': 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail='Risposta non trovata')
+    if doc.get('user_id') != user['user_id']:
+        raise HTTPException(status_code=403, detail='Puoi eliminare solo le tue risposte')
+    await db.replies.delete_one({'reply_id': reply_id})
+    return {'ok': True}
+
+
 @api_router.get('/comments/{comment_id}/replies')
 async def list_replies(comment_id: str):
     docs = await db.replies.find({'comment_id': comment_id}, {'_id': 0}).sort('created_at', 1).to_list(500)

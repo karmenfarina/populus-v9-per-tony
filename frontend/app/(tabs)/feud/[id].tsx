@@ -95,14 +95,23 @@ export default function FeudDetail() {
   const { sourcesExpanded, setSourcesExpanded } = useUIPrefs();
   const scrollRef = useRef<ScrollView>(null);
 
-  // When the route param `id` changes OR the feud finishes loading, reset the
-  // ScrollView to the top. Without this, expo-router reuses the same mounted
-  // screen when navigating between /feud/A → /feud/B, so any previous scroll
-  // offset would carry over and the user would land in the middle of the new
-  // feud's body instead of on its title.
+  // Clear all per-post state the instant the route param changes so the
+  // screen never shows the *previous* post's contents while the next one
+  // is being fetched. expo-router keeps the mounted screen around when we
+  // navigate /feud/A → /feud/B, so without an explicit reset the stale
+  // `feud`, `sideA`, `sideB`, `sponsor` would flash for a frame.
   useEffect(() => {
+    setFeud(null);
+    setSideA([]);
+    setSideB([]);
+    setSponsor(null);
+    setExpanded({});
+    setActiveSide(null);
+    setLoading(true);
+    setError(null);
+    setGone(false);
     scrollRef.current?.scrollTo({ y: 0, animated: false });
-  }, [id, feud?.feud_id]);
+  }, [id]);
 
   const loadAll = useCallback(async () => {
     const f = await api.feud(id!);
@@ -230,6 +239,50 @@ export default function FeudDetail() {
       setSideA(bump);
       setSideB(bump);
     } catch (e: any) { setError(e?.message || "Errore"); }
+  };
+
+  /**
+   * Delete a comment the current user authored. Wired to the trash icon that
+   * appears only when `c.user_id === me.user_id` (see CommentItem below).
+   * On success we optimistically drop the comment from local state and
+   * collapse any expanded reply thread.
+   */
+  const deleteOwnComment = async (commentId: string) => {
+    try {
+      await api.deleteComment(commentId);
+    } catch (e: any) {
+      setError(e?.detail || e?.message || "Impossibile eliminare");
+      return;
+    }
+    setSideA((prev) => prev.filter((x) => x.comment_id !== commentId));
+    setSideB((prev) => prev.filter((x) => x.comment_id !== commentId));
+    setExpanded((prev) => {
+      const copy = { ...prev };
+      delete copy[commentId];
+      return copy;
+    });
+  };
+
+  /**
+   * Delete a reply the current user authored. Refreshes the parent's reply
+   * count so the "N risposte" label stays accurate.
+   */
+  const deleteOwnReply = async (commentId: string, replyId: string) => {
+    try {
+      await api.deleteReply(replyId);
+    } catch (e: any) {
+      setError(e?.detail || e?.message || "Impossibile eliminare");
+      return;
+    }
+    setExpanded((prev) => {
+      const list = (prev[commentId] || []).filter((r) => r.reply_id !== replyId);
+      return { ...prev, [commentId]: list };
+    });
+    const dec = (list: Comment[]) => list.map((c) => c.comment_id === commentId
+      ? { ...c, reply_count: Math.max(0, (c.reply_count ?? 1) - 1) }
+      : c);
+    setSideA(dec);
+    setSideB(dec);
   };
 
   // Build the absolute URL used by all share targets. Falls back to
@@ -557,6 +610,7 @@ export default function FeudDetail() {
                   <CommentItem
                     key={c.comment_id}
                     c={c}
+                    meId={user?.user_id || null}
                     expanded={expanded[c.comment_id]}
                     onToggle={() => toggleReplies(c.comment_id)}
                     replyingTo={replyingTo}
@@ -565,6 +619,8 @@ export default function FeudDetail() {
                     setReplyText={setReplyText}
                     onSubmitReply={() => submitReply(c.comment_id)}
                     canReply={!!feud.my_vote}
+                    onDeleteComment={() => deleteOwnComment(c.comment_id)}
+                    onDeleteReply={(rid) => deleteOwnReply(c.comment_id, rid)}
                   />
                 ))
               )}
@@ -599,19 +655,54 @@ export default function FeudDetail() {
 }
 
 function CommentItem({
-  c, expanded, onToggle, replyingTo, setReplyingTo, replyText, setReplyText, onSubmitReply, canReply,
+  c, meId, expanded, onToggle, replyingTo, setReplyingTo, replyText, setReplyText,
+  onSubmitReply, canReply, onDeleteComment, onDeleteReply,
 }: {
-  c: Comment; expanded?: Reply[]; onToggle: () => void;
+  c: Comment; meId: string | null; expanded?: Reply[]; onToggle: () => void;
   replyingTo: string | null; setReplyingTo: (v: string | null) => void;
   replyText: string; setReplyText: (v: string) => void;
   onSubmitReply: () => void; canReply: boolean;
+  onDeleteComment: () => void;
+  onDeleteReply: (replyId: string) => void;
 }) {
   const router = useRouter();
   const isReplying = replyingTo === c.comment_id;
-  // Comment colour follows the side the comment was posted for (which matches
-  // the tab it's in). We intentionally ignore `nickname_side` (current vote)
-  // to avoid visual mismatch — e.g. a red comment appearing under the yellow tab.
+  const isMine = !!meId && meId === c.user_id;
   const accent = sideColor(c.side as "A" | "B");
+
+  const confirmDeleteComment = () => {
+    if (Platform.OS === "web") {
+      // Alert.alert on RN-Web is unreliable; use the browser confirm dialog.
+      const ok = typeof window !== "undefined" ? window.confirm("Eliminare questo commento?") : true;
+      if (ok) onDeleteComment();
+      return;
+    }
+    Alert.alert(
+      "Elimina commento",
+      "Sei sicuro? Il commento e tutte le sue risposte verranno eliminati.",
+      [
+        { text: "Annulla", style: "cancel" },
+        { text: "Elimina", style: "destructive", onPress: onDeleteComment },
+      ],
+    );
+  };
+
+  const confirmDeleteReply = (rid: string) => {
+    if (Platform.OS === "web") {
+      const ok = typeof window !== "undefined" ? window.confirm("Eliminare questa risposta?") : true;
+      if (ok) onDeleteReply(rid);
+      return;
+    }
+    Alert.alert(
+      "Elimina risposta",
+      "Sei sicuro?",
+      [
+        { text: "Annulla", style: "cancel" },
+        { text: "Elimina", style: "destructive", onPress: () => onDeleteReply(rid) },
+      ],
+    );
+  };
+
   return (
     <View style={cs.item} testID={`comment-${c.comment_id}`}>
       <View style={[cs.sideBar, { backgroundColor: accent }]} />
@@ -624,9 +715,21 @@ function CommentItem({
           >
             <Text style={[cs.nick, { color: accent }]}>@{c.nickname}</Text>
           </Pressable>
-          {c.created_at ? (
-            <Text style={cs.time} numberOfLines={1}>{formatRelative(c.created_at)}</Text>
-          ) : null}
+          <View style={cs.headRight}>
+            {c.created_at ? (
+              <Text style={cs.time} numberOfLines={1}>{formatRelative(c.created_at)}</Text>
+            ) : null}
+            {isMine ? (
+              <Pressable
+                onPress={confirmDeleteComment}
+                hitSlop={8}
+                testID={`comment-delete-${c.comment_id}`}
+                style={cs.delBtn}
+              >
+                <Ionicons name="trash-outline" size={16} color={colors.muted} />
+              </Pressable>
+            ) : null}
+          </View>
         </View>
         <Text style={cs.text}>{c.text}</Text>
         <View style={cs.actions}>
@@ -647,13 +750,25 @@ function CommentItem({
           <View style={cs.replies}>
             {expanded.map((r) => {
               const rAccent = sideColor(r.side as "A" | "B");
+              const replyMine = !!meId && meId === r.user_id;
               return (
                 <View key={r.reply_id} style={cs.reply}>
                   <View style={[cs.replySideBar, { backgroundColor: rAccent }]} />
                   <View style={{ flex: 1 }}>
-                    <Pressable onPress={() => router.push(`/user/${r.user_id}`)}>
-                      <Text style={[cs.nick, { color: rAccent, fontSize: font.sizes.xs }]}>@{r.nickname}</Text>
-                    </Pressable>
+                    <View style={cs.replyHeadRow}>
+                      <Pressable onPress={() => router.push(`/user/${r.user_id}`)}>
+                        <Text style={[cs.nick, { color: rAccent, fontSize: font.sizes.xs }]}>@{r.nickname}</Text>
+                      </Pressable>
+                      {replyMine ? (
+                        <Pressable
+                          onPress={() => confirmDeleteReply(r.reply_id)}
+                          hitSlop={8}
+                          testID={`reply-delete-${r.reply_id}`}
+                        >
+                          <Ionicons name="trash-outline" size={14} color={colors.muted} />
+                        </Pressable>
+                      ) : null}
+                    </View>
                     <Text style={[cs.text, { fontSize: font.sizes.sm, marginTop: 2 }]}>{r.text}</Text>
                   </View>
                 </View>
@@ -702,6 +817,9 @@ const cs = StyleSheet.create({
   sideBar: { width: 6 },
   body: { flex: 1, padding: spacing.md, gap: 4 },
   headRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm },
+  headRight: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
+  delBtn: { padding: 2 },
+  replyHeadRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   nick: { fontSize: font.sizes.sm, fontWeight: "500", letterSpacing: 0.5 },
   time: { fontSize: font.sizes.xs, color: colors.muted, letterSpacing: 0.5 },
   text: { fontSize: font.sizes.base, color: colors.onSurface, lineHeight: 20, marginTop: 4 },

@@ -274,8 +274,12 @@ metadata:
 
 test_plan:
   current_focus:
-    - "ShareSheet direct deep-link to Instagram/Messenger (skip OS picker)"
-    - "@ prefix on nickname (own + external profile) + display_name on external profile"
+    - "Faide tab icon (flame → scale)"
+    - "Feud detail: no stale content flicker when navigating between posts"
+    - "HYPE auto-refreshes on tab focus"
+    - "Home preview vote percentages update after voting"
+    - "Comment/reply delete (own only)"
+    - "Utenti bloccati section in profile with unblock"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"

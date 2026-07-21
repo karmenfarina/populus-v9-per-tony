@@ -115,7 +115,29 @@ export default function Profile() {
   // perceived latency in the previous flow was this synchronous encode).
   const preEncodedOriginalRef = useRef<{ uri: string; base64: string | null }>({ uri: "", base64: null });
   const [openingRecrop, setOpeningRecrop] = useState<string | null>(null);
+  // Blocked users management — loaded lazily when the user expands the panel.
+  const [blocksOpen, setBlocksOpen] = useState(false);
+  const [blockedList, setBlockedList] = useState<any[]>([]);
+  const [loadingBlocks, setLoadingBlocks] = useState(false);
   const isAnonymous = user?.auth_provider === "anonymous";
+
+  const loadBlocked = useCallback(async () => {
+    setLoadingBlocks(true);
+    try {
+      const r = await api.myBlocks();
+      setBlockedList(r?.blocked_users || []);
+    } catch { /* silent */ }
+    finally { setLoadingBlocks(false); }
+  }, []);
+
+  const unblockOne = async (uid: string) => {
+    try {
+      await api.unblockUser(uid);
+      setBlockedList((prev) => prev.filter((u) => u.user_id !== uid));
+    } catch (e: any) {
+      if (Platform.OS === "web" && typeof window !== "undefined") window.alert(e?.detail || "Impossibile sbloccare");
+    }
+  };
 
   const loadHistory = useCallback(async (f: Filter) => {
     setLoadingH(true);
@@ -773,6 +795,57 @@ export default function Profile() {
           </View>
         )}
 
+        {!isAnonymous && (
+          <View style={styles.prefsSection} testID="blocked-section">
+            <Pressable
+              onPress={async () => {
+                const willOpen = !blocksOpen;
+                setBlocksOpen(willOpen);
+                if (willOpen) await loadBlocked();
+              }}
+              testID="blocked-toggle"
+              style={styles.prefsHeadRow}
+            >
+              <Text style={styles.prefsTitle}>UTENTI BLOCCATI</Text>
+              <View style={styles.sectionHeadRight}>
+                <Text style={styles.sectionCountBadge}>{blockedList.length}</Text>
+                <Ionicons name={blocksOpen ? "chevron-up" : "chevron-down"} size={20} color={colors.onSurface} />
+              </View>
+            </Pressable>
+            {blocksOpen ? (
+              <View style={{ marginTop: spacing.sm, gap: spacing.sm }}>
+                {loadingBlocks ? (
+                  <ActivityIndicator color={colors.brandPrimary} />
+                ) : blockedList.length === 0 ? (
+                  <Text style={styles.blockedEmpty}>Non hai bloccato nessun utente.</Text>
+                ) : (
+                  blockedList.map((u) => (
+                    <View key={u.user_id} style={styles.blockedRow} testID={`blocked-row-${u.user_id}`}>
+                      <Pressable
+                        onPress={() => router.push(`/user/${u.user_id}`)}
+                        style={{ flex: 1 }}
+                        hitSlop={4}
+                      >
+                        <Text style={styles.blockedNick}>@{u.nickname || "utente"}</Text>
+                        {u.display_name ? (
+                          <Text style={styles.blockedSub}>{u.display_name}</Text>
+                        ) : null}
+                      </Pressable>
+                      <Pressable
+                        onPress={() => unblockOne(u.user_id)}
+                        testID={`blocked-unblock-${u.user_id}`}
+                        style={styles.unblockBtn}
+                      >
+                        <Text style={styles.unblockTxt}>SBLOCCA</Text>
+                      </Pressable>
+                    </View>
+                  ))
+                )}
+              </View>
+            ) : null}
+          </View>
+        )}
+
         <View style={styles.historySection} testID="history-section">
           <View style={styles.historyHeadRow}>
             <Pressable
@@ -1251,6 +1324,26 @@ const styles = StyleSheet.create({
   adminLink: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: spacing.md, marginBottom: spacing.lg },
   adminLinkTxt: { fontSize: font.sizes.xs, letterSpacing: 2, color: colors.muted, fontWeight: "500" },
   prefsSection: { padding: spacing.lg, borderBottomWidth: 2, borderColor: colors.border, gap: spacing.sm },
+  blockedEmpty: { color: colors.muted, fontSize: font.sizes.sm, fontStyle: "italic" },
+  blockedRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    gap: spacing.md,
+    backgroundColor: colors.surfaceSecondary,
+  },
+  blockedNick: { color: colors.onSurface, fontSize: font.sizes.base, fontWeight: "600" },
+  blockedSub: { color: colors.muted, fontSize: font.sizes.sm, marginTop: 2 },
+  unblockBtn: {
+    borderWidth: 2,
+    borderColor: colors.brandPrimary,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 6,
+  },
+  unblockTxt: { color: colors.brandPrimary, fontSize: font.sizes.xs, letterSpacing: 1, fontWeight: "700" },
   prefsHeadRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: spacing.xs },
   prefsBody: { gap: spacing.sm, marginTop: spacing.xs },
   prefsTitle: { fontSize: font.sizes.xxl, letterSpacing: 2, fontWeight: "500", color: colors.onSurface },

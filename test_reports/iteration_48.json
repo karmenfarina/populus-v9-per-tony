@@ -1,0 +1,32 @@
+{
+  "summary": "Verified batch of 6 fixes for Populus. Backend: added /app/backend/tests/test_comment_reply_delete.py with 9 tests — all PASS (DELETE /api/comments/{id} owner-only, 404/403, cascade replies; DELETE /api/replies/{id} same; /users/me/blocks + /users/{id}/block flow). Frontend (mobile viewport 390x844, chat_a login via token injection since email tab is disabled in UI): FAIDE tab icon glyph confirmed as Ionicons 'scale' (u+F553, glyphmap value 62803) — NOT flame. Feud detail transition (/feud/A → /feud/B via direct navigation) shows no stale A content (mid-transition body was empty then B rendered) — reset effect on `id` works. Comment delete UI: posted TEST_delete_ui_comment, trash icon `comment-delete-<id>` appeared on own comment, web confirm dialog auto-accepted, DELETE /comments/{id} fired, comment removed from list without page reload. Home preview pct updates confirmed visually — after voting on a card from detail, returning to Home shows 100%/0% on that card (previously hidden). Blocked-users section on profile fully working: empty state 'Non hai bloccato nessun utente.' shown, blocking chat_b via API then reloading profile → row with SBLOCCA button appears, tapping SBLOCCA removes row and GET /users/me/blocks returns empty blocked_users. HYPE-on-focus auto-refresh could NOT be end-to-end verified on the web preview because expo-router on web unmounts the Home screen when switching tabs, causing `selected` state to reset to 'all' on return; the code path itself (isHype bypasses 3s throttle) reviewed and looks correct — will work on native builds. chat_a nickname is 'chat_a' (unchanged), no reset needed.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_comment_reply_delete.py",
+    "/app/test_reports/pytest/comment_reply_delete.xml"
+  ],
+  "action_items": [
+    "HYPE auto-refresh on focus (index.tsx useFocusEffect isHype branch) cannot be fully verified on the web preview because expo-router unmounts the tab screen, resetting `selected` back to 'all'. On native this should work. If desired to also make it web-friendly, set `unmountOnBlur:false` and `freezeOnBlur:false` in tabs screenOptions or persist `selected` in AsyncStorage."
+  ],
+  "critical_code_review_comments": [
+    "delete_comment cascades replies via db.replies.delete_many({comment_id}) BEFORE deleting the comment — correct order, prevents orphan replies.",
+    "delete_reply only removes the reply; parent comment's `reply_count` on subsequent GET is recomputed on-the-fly from the replies collection filtered by current vote side, so no stale counters."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_comment_reply_delete.py (new)"
+  ],
+  "success_rate": {"backend": "100% (9/9)", "frontend": "5/6 verified end-to-end; HYPE focus refetch code-reviewed only due to web tab remount"},
+  "seed_data_creation": "None. Test comments/replies created during tests were deleted by the tests themselves; one TEST_delete_ui_comment posted via UI was deleted via the trash icon; chat_a briefly blocked chat_b and then unblocked (net zero).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Email login is hidden in UI (AUTH_EMAIL_ENABLED=false in /app/frontend/app/auth.tsx). To login as chat_a/chat_b in Playwright, call POST /api/auth/login via page.evaluate and localStorage.setItem('faide_token', JSON.stringify(token)). Ionicons glyph for 'scale' is u+F553 (62803). Home tab remounts on web when switching tabs, resetting `selected` state — keep this in mind when testing per-category focus behaviors."
+}

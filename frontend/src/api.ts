@@ -217,6 +217,8 @@ export const api = {
     request(`/messages/${messageId}`, { method: 'DELETE' }),
   blockUser: (userId: string) => request(`/users/${userId}/block`, { method: 'POST' }),
   unblockUser: (userId: string) => request(`/users/${userId}/block`, { method: 'DELETE' }),
+  deleteComment: (commentId: string) => request(`/comments/${commentId}`, { method: 'DELETE' }),
+  deleteReply: (replyId: string) => request(`/replies/${replyId}`, { method: 'DELETE' }),
   myBlocks: () => request('/users/me/blocks'),
   reportUser: (userId: string, reason: string, message_id?: string) =>
     request(`/users/${userId}/report`, { method: 'POST', body: JSON.stringify({ reason, message_id }) }),

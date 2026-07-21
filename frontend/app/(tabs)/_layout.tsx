@@ -62,7 +62,7 @@ export default function TabsLayout() {
         name="index"
         options={{
           title: "FAIDE",
-          tabBarIcon: ({ color, size }) => <Ionicons name="flame" color={color} size={size} />,
+          tabBarIcon: ({ color, size }) => <Ionicons name="scale" color={color} size={size} />,
         }}
       />
       <Tabs.Screen
