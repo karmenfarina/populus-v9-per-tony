@@ -159,7 +159,11 @@ export default function Profile() {
     useCallback(() => {
       refreshMe();
       if (historyExpanded) loadHistory(filter);
-    }, [refreshMe, historyExpanded, loadHistory, filter])
+      // Always refresh the blocked-users list on focus so the counter next
+      // to "UTENTI BLOCCATI" is accurate the moment the profile screen
+      // opens — no need to expand the accordion to trigger the load.
+      if (user && !user.is_anonymous) loadBlocked();
+    }, [refreshMe, historyExpanded, loadHistory, filter, loadBlocked, user])
   );
 
   useEffect(() => {
