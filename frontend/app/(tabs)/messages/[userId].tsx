@@ -12,9 +12,10 @@ import {
   Platform,
   Modal,
   Alert,
+  BackHandler,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import * as FileSystem from "expo-file-system/legacy";
@@ -118,6 +119,26 @@ export default function ChatScreen() {
   const { user } = useAuth();
   const { subscribe, refresh: refreshBadge } = useMessaging();
 
+  // Route back to the messages LIST — used by header button, hardware back
+  // and error paths. Never falls back to browser/router history so the
+  // user always lands where they expect.
+  const goBackToMessagesList = useCallback(() => {
+    router.replace("/messages");
+  }, [router]);
+
+  // Android hardware back button — override so it also goes to the
+  // messages list instead of popping to Home.
+  useFocusEffect(
+    useCallback(() => {
+      if (Platform.OS !== "android") return;
+      const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+        goBackToMessagesList();
+        return true; // consume the event
+      });
+      return () => sub.remove();
+    }, [goBackToMessagesList]),
+  );
+
   const [otherUser, setOtherUser] = useState<MiniUser | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
@@ -186,9 +207,9 @@ export default function ChatScreen() {
       }
     } catch (e: any) {
       Alert.alert("Errore", e?.detail || "Impossibile aprire la chat");
-      router.back();
+      goBackToMessagesList();
     }
-  }, [userId, refreshBadge, router]);
+  }, [userId, refreshBadge, goBackToMessagesList]);
 
   useEffect(() => {
     if (!user || user.is_anonymous || !userId) return;
@@ -542,16 +563,7 @@ export default function ChatScreen() {
     <SafeAreaView style={styles.safe} edges={["top"]} testID="chat-screen">
       <View style={styles.header}>
         <Pressable
-          onPress={() => {
-            // Prefer the browser/back stack when there IS one so any
-            // deep-nested screens (e.g. arriving via a shared-feud link)
-            // pop naturally. If we opened the chat directly (push
-            // notification, deep link) `canGoBack` is false — fall back
-            // to the messages list explicitly so the user never lands on
-            // the Home tab by accident.
-            if (router.canGoBack()) router.back();
-            else router.replace("/messages");
-          }}
+          onPress={goBackToMessagesList}
           style={styles.backBtn}
           testID="chat-back"
         >
