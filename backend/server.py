@@ -1292,12 +1292,8 @@ async def list_hype_feuds(user: Optional[dict] = Depends(get_current_user_option
         votes = int(d.get('votes_a', 0) or 0) + int(d.get('votes_b', 0) or 0)
         cc = comment_counts.get(d['feud_id'], 0)
         rc = reply_counts.get(d['feud_id'], 0)
-        # HYPE inclusion rules — a post must have MEANINGFUL, visible
-        # discussion. A single hidden vote (votes remain masked until the
-        # current user votes) is not enough for the user to feel the rail
-        # is "hype". We require EITHER:
-        #   - at least one comment or reply (visible discussion), OR
-        #   - at least three total votes (substantial voting mass).
+        # Absolute floor: a post must have at least some interaction to be
+        # eligible for HYPE. This drops the long tail of untouched articles.
         if (cc + rc) < 1 and votes < 3:
             continue
         score = votes + 2 * cc + rc
@@ -1306,15 +1302,21 @@ async def list_hype_feuds(user: Optional[dict] = Depends(get_current_user_option
         d['_replies'] = rc
         scored.append(d)
 
-    # Sort strictly by recency (newest first). Engagement is only used as
-    # the filter (score <= 0 → excluded above); it no longer drives ordering.
-    # This matches the user's expectation: HYPE reads like a news timeline
-    # — most recent controversies at the top, older ones below.
+    # HYPE selection algorithm (per user spec):
+    #   1) Rank ALL eligible posts by engagement score DESC.
+    #   2) Cut the leaderboard at the top-N (HYPE_TOP_N most interacted).
+    #   3) Re-sort those N chronologically (newest first) so the rail reads
+    #      like a news feed: "1 h ago → 3 h ago → 1 d ago → …".
+    HYPE_TOP_N = 25
+    scored.sort(
+        key=lambda d: (d['_hype_score'], d.get('created_at') or datetime.min.replace(tzinfo=timezone.utc)),
+        reverse=True,
+    )
+    scored = scored[:HYPE_TOP_N]
     scored.sort(
         key=lambda d: d.get('created_at') or datetime.min.replace(tzinfo=timezone.utc),
         reverse=True,
     )
-    scored = scored[:80]
 
     voted_map: dict = {}
     if user and scored:
