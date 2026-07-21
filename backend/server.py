@@ -1302,12 +1302,12 @@ async def list_hype_feuds(user: Optional[dict] = Depends(get_current_user_option
         d['_replies'] = rc
         scored.append(d)
 
-    # Primary: engagement DESC. Secondary: newer wins ties. Both rules
-    # satisfy the user's "più votati / commentati" priority while still
-    # keeping fresh voted posts near the top when their scores match older
-    # ones (very common when only 1-2 people have interacted so far).
+    # Sort strictly by recency (newest first). Engagement is only used as
+    # the filter (score <= 0 → excluded above); it no longer drives ordering.
+    # This matches the user's expectation: HYPE reads like a news timeline
+    # — most recent controversies at the top, older ones below.
     scored.sort(
-        key=lambda d: (d['_hype_score'], d.get('created_at') or ''),
+        key=lambda d: d.get('created_at') or datetime.min.replace(tzinfo=timezone.utc),
         reverse=True,
     )
     scored = scored[:80]
