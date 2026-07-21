@@ -121,11 +121,23 @@ export default function Profile() {
   const [loadingBlocks, setLoadingBlocks] = useState(false);
   const isAnonymous = user?.auth_provider === "anonymous";
 
+  // Cache the last blocked list so we only re-render when the data
+  // actually changes. This avoids the "blinking" caused by refreshMe()
+  // updating the `user` reference on every focus, which cascades through
+  // dependencies and re-triggers loadBlocked → setBlockedList → re-render.
+  const blockedCacheRef = useRef<string>("");
   const loadBlocked = useCallback(async () => {
-    setLoadingBlocks(true);
+    // Show spinner only on the very first load — subsequent focus refreshes
+    // are silent so the list doesn't blink between fetches.
+    if (blockedCacheRef.current === "") setLoadingBlocks(true);
     try {
       const r = await api.myBlocks();
-      setBlockedList(r?.blocked_users || []);
+      const list = r?.blocked_users || [];
+      const key = list.map((u: any) => u.user_id).sort().join("|") || "empty";
+      if (key !== blockedCacheRef.current) {
+        blockedCacheRef.current = key;
+        setBlockedList(list);
+      }
     } catch { /* silent */ }
     finally { setLoadingBlocks(false); }
   }, []);
@@ -155,15 +167,22 @@ export default function Profile() {
   // Refresh user data (total_votes/majority/minority + badge) and expanded
   // voting history each time the profile tab regains focus — this keeps stats
   // in sync after actions taken elsewhere (voting on a feud, etc.).
+  // Isolate the blocked-list refresh into its own focus effect so the
+  // `user` reference churn from refreshMe() above doesn't retrigger the
+  // main effect. We depend only on stable primitives (uid + anon flag).
+  const uid = user?.user_id;
+  const isAnon = !!user?.is_anonymous;
+  useFocusEffect(
+    useCallback(() => {
+      if (uid && !isAnon) loadBlocked();
+    }, [uid, isAnon, loadBlocked])
+  );
+
   useFocusEffect(
     useCallback(() => {
       refreshMe();
       if (historyExpanded) loadHistory(filter);
-      // Always refresh the blocked-users list on focus so the counter next
-      // to "UTENTI BLOCCATI" is accurate the moment the profile screen
-      // opens — no need to expand the accordion to trigger the load.
-      if (user && !user.is_anonymous) loadBlocked();
-    }, [refreshMe, historyExpanded, loadHistory, filter, loadBlocked, user])
+    }, [refreshMe, historyExpanded, loadHistory, filter])
   );
 
   useEffect(() => {
