@@ -743,7 +743,9 @@ export default function Profile() {
               </Pressable>
             )}
             <View style={{ flex: 1 }}>
-              <Text style={styles.nickname} testID="profile-nickname">@{user.nickname}</Text>
+              <Text style={styles.nickname} testID="profile-nickname" numberOfLines={1} ellipsizeMode="tail">
+                @{(user.nickname || "").replace(/\s+/g, "")}
+              </Text>
               {user.display_name ? (
                 <Text style={styles.displayName} testID="profile-display-name">
                   {user.display_name}

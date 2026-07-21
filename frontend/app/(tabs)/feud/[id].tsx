@@ -517,26 +517,26 @@ export default function FeudDetail() {
               </Text>
             )}
             {feud.my_vote && (
-              <Pressable
-                onPress={() => setStatsOpen(true)}
-                testID="stats-button"
-                style={styles.statsIconBtn}
-                hitSlop={10}
-                accessibilityLabel="Vedi statistiche dettagliate"
-              >
-                <Ionicons name="stats-chart" size={20} color={colors.brandPrimary} />
-              </Pressable>
-            )}
-            {feud.my_vote && (
-              <Pressable
-                onPress={() => setAiSummaryOpen(true)}
-                testID="ai-summary-button"
-                style={styles.statsIconBtn}
-                hitSlop={10}
-                accessibilityLabel="Sintesi AI degli argomenti delle fazioni"
-              >
-                <Ionicons name="sparkles" size={20} color={colors.brandPrimary} />
-              </Pressable>
+              <View style={styles.actionBtnRow}>
+                <Pressable
+                  onPress={() => setStatsOpen(true)}
+                  testID="stats-button"
+                  style={styles.statsIconBtn}
+                  hitSlop={10}
+                  accessibilityLabel="Vedi statistiche dettagliate"
+                >
+                  <Ionicons name="stats-chart" size={20} color={colors.brandPrimary} />
+                </Pressable>
+                <Pressable
+                  onPress={() => setAiSummaryOpen(true)}
+                  testID="ai-summary-button"
+                  style={styles.statsIconBtn}
+                  hitSlop={10}
+                  accessibilityLabel="Sintesi AI degli argomenti delle fazioni"
+                >
+                  <Ionicons name="sparkles" size={20} color={colors.brandPrimary} />
+                </Pressable>
+              </View>
             )}
           </View>
 
@@ -914,12 +914,18 @@ const styles = StyleSheet.create({
   statsIconBtn: {
     // Discreet round icon button placed alongside the poll section. Big
     // enough hit target (36×36 + hitSlop) without visual weight.
-    alignSelf: "center",
-    marginTop: spacing.md,
     width: 40, height: 40, borderRadius: 20,
     borderWidth: 2, borderColor: colors.brandPrimary,
     backgroundColor: colors.surface,
     alignItems: "center", justifyContent: "center",
+  },
+  actionBtnRow: {
+    // Horizontal container that holds the stats + AI-summary icon buttons
+    // side-by-side, centered under the poll options.
+    flexDirection: "row",
+    alignSelf: "center",
+    marginTop: spacing.md,
+    gap: spacing.md,
   },
   err: { color: colors.error, padding: spacing.md, borderWidth: 2, borderColor: colors.error, margin: spacing.lg },
   commentInputWrap: { padding: spacing.md, borderBottomWidth: 2, borderColor: colors.border, backgroundColor: colors.surface, gap: spacing.sm },
