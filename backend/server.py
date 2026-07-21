@@ -240,22 +240,25 @@ async def require_admin(x_admin_key: Optional[str] = Header(None, alias='X-Admin
 
 
 # Nickname validation — Instagram-style handle. Allowed characters are
-# lowercase/uppercase letters, digits, underscore and period. No spaces,
-# no punctuation, no emoji. Length is enforced at Pydantic level (2..24).
-# We normalize by trimming + stripping any leading '@' the user may type.
-NICKNAME_ALLOWED_RE = _re.compile(r'^[A-Za-z0-9._]+$')
+# lowercase letters, digits, underscore and period. Nickname is stored
+# lowercased (Instagram behaviour). Length is 2..24.
+NICKNAME_ALLOWED_RE = _re.compile(r'^[a-z0-9._]+$')
 
 
 def _normalize_and_validate_nickname(raw: Optional[str]) -> str:
     if not raw:
         raise HTTPException(status_code=400, detail='Nickname mancante')
-    n = raw.strip().lstrip('@')
-    if len(n) < 2 or len(n) > 24:
-        raise HTTPException(status_code=400, detail='Il nickname deve avere 2-24 caratteri')
+    # Trim, strip leading '@', force lowercase — the frontend already does this
+    # but the backend is the source of truth.
+    n = raw.strip().lstrip('@').lower()
+    if len(n) < 2:
+        raise HTTPException(status_code=400, detail='Il nickname deve avere almeno 2 caratteri')
+    if len(n) > 24:
+        raise HTTPException(status_code=400, detail='Il nickname deve avere al massimo 24 caratteri')
     if not NICKNAME_ALLOWED_RE.match(n):
         raise HTTPException(
             status_code=400,
-            detail='Il nickname può contenere solo lettere, numeri, punti e underscore (nessuno spazio)',
+            detail='Il nickname può contenere solo lettere minuscole, numeri, punti e underscore (nessuno spazio)',
         )
     return n
 

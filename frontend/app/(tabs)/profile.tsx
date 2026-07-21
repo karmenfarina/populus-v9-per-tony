@@ -221,7 +221,9 @@ export default function Profile() {
   const openProfileEdit = () => {
     setDetailsError(null);
     setBio(user?.bio || "");
-    setEditNick(user?.nickname || "");
+    // Normalize the initial nickname to lowercase so a legacy uppercase
+    // value doesn't count as "changed" on first save.
+    setEditNick(sanitizeNicknameInput(user?.nickname || ""));
     setEditDisplay(user?.display_name || "");
     const sl = user?.social_links || {};
     setSocials({
@@ -462,16 +464,19 @@ export default function Profile() {
       // the age / sex / region trio to have been completed at onboarding.
       const nick = sanitizeNicknameInput(editNick).trim();
       const displayName = editDisplay.trim();
-      const nickChanged = user && nick !== (user.nickname || "");
+      // Compare lowercased forms so a legacy uppercase nickname in the DB
+      // doesn't get flagged as changed when the user just re-saves.
+      const nickChanged = user && nick !== (user.nickname || "").toLowerCase();
       const displayChanged = user && displayName !== (user.display_name || "");
 
-      if (nickChanged) {
-        const nickErr = validateNickname(nick);
-        if (nickErr) {
-          setDetailsError(nickErr);
-          setSavingDetails(false);
-          return;
-        }
+      // Validate nickname explicitly whenever the user touched the field so
+      // that "SALVA" always produces actionable feedback instead of silently
+      // proceeding.
+      const nickErr = nickChanged ? validateNickname(editNick) : null;
+      if (nickErr) {
+        setDetailsError(nickErr);
+        setSavingDetails(false);
+        return;
       }
 
       // 1) Persist bio + social handles (both always writable).
@@ -482,23 +487,27 @@ export default function Profile() {
       //    never regress age/sex/region/favorite_categories/profession.
       if (user && (nickChanged || displayChanged)) {
         if (!user.age || !user.sex || !user.region) {
-          setDetailsError("Completa prima l'onboarding");
-        } else {
-          await api.updateProfile({
-            age: user.age,
-            sex: user.sex as "F" | "M" | "other" | "na",
-            region: user.region,
-            favorite_categories: user.favorite_categories || [],
-            ...(nickChanged ? { nickname: nick } : {}),
-            ...(displayChanged ? { display_name: displayName } : {}),
-            ...(user.profession ? { profession: user.profession } : {}),
-          });
+          setDetailsError("Completa prima l'onboarding per modificare il nickname.");
+          setSavingDetails(false);
+          return;
         }
+        await api.updateProfile({
+          age: user.age,
+          sex: user.sex as "F" | "M" | "other" | "na",
+          region: user.region,
+          favorite_categories: user.favorite_categories || [],
+          ...(nickChanged ? { nickname: nick } : {}),
+          ...(displayChanged ? { display_name: displayName } : {}),
+          ...(user.profession ? { profession: user.profession } : {}),
+        });
       }
       await refreshMe();
       setProfileOpen(false);
     } catch (e: any) {
-      setDetailsError(e?.message || e?.detail || "Errore salvataggio");
+      // Backend errors bubble up as { detail: "…" }. Prefer that message so the
+      // user sees exactly why the save failed (e.g. "nickname già in uso").
+      const detail = e?.detail || e?.response?.data?.detail;
+      setDetailsError(detail || e?.message || "Impossibile salvare le modifiche. Riprova.");
     }
     finally { setSavingDetails(false); }
   };
@@ -1087,6 +1096,12 @@ export default function Profile() {
 
                 {detailsError && <Text style={styles.prefsErr} testID="details-error">{detailsError}</Text>}
               </ScrollView>
+              {detailsError ? (
+                <View style={styles.saveErrorBar} testID="details-error-bar">
+                  <Ionicons name="alert-circle" size={16} color="#FFFFFF" />
+                  <Text style={styles.saveErrorTxt} numberOfLines={2}>{detailsError}</Text>
+                </View>
+              ) : null}
               <Pressable onPress={saveDetails} disabled={savingDetails} testID="profile-edit-save" style={styles.prefsSaveBtn}>
                 {savingDetails ? <ActivityIndicator color={colors.onBrandPrimary} /> : <Text style={styles.prefsSaveTxt}>SALVA</Text>}
               </Pressable>
@@ -1260,6 +1275,15 @@ const styles = StyleSheet.create({
   prefsCatTxt: { fontSize: font.sizes.base, color: colors.onSurface, fontWeight: "500" },
   prefsCatTxtOn: { color: colors.onBrandPrimary },
   prefsErr: { color: colors.error, borderWidth: 2, borderColor: colors.error, padding: spacing.sm, fontSize: font.sizes.base },
+  saveErrorBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: colors.error,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+  },
+  saveErrorTxt: { flex: 1, color: "#FFFFFF", fontSize: font.sizes.sm, fontWeight: "600" },
   prefsSaveBtn: { backgroundColor: colors.brandPrimary, borderTopWidth: 2, borderColor: colors.border, paddingVertical: spacing.lg, alignItems: "center" },
   prefsSaveTxt: { color: colors.onBrandPrimary, fontSize: font.sizes.xl, letterSpacing: 2, fontWeight: "500" },
   // Profession row

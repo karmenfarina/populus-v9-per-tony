@@ -274,8 +274,8 @@ metadata:
 
 test_plan:
   current_focus:
-    - "Nickname Instagram-style validation (signup, anonymous, profile edit)"
-    - "ShareSheet uses OS native Share.share() for Instagram/Messenger"
+    - "Nickname lowercase-only (no uppercase)"
+    - "Explicit save-error messages for invalid nicknames"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"

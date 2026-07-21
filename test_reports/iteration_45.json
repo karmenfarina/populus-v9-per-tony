@@ -1,0 +1,35 @@
+{
+  "summary": "Verified nickname lowercase-only fixes for both backend and frontend. Backend: 7/7 pytest tests PASS (auto-lowercase of 'UpperCase' -> 'uppercase', space rejection with 'solo lettere minuscole' message, valid 'good.nick_1' persisted, PATCH /auth/me/profile lowercases NEW_NICK -> new_nick and reset to chat_a works). Frontend: All 6 flows PASS (auth-anon-nickname-input strips 'Hello World' -> 'helloworld'; edit-nickname-input sanitizes 'HELLO_World' -> 'hello_world'; details-error-bar surfaces 'Inserisci un nickname.' for empty and 'Il nickname è troppo corto (minimo 2 caratteri).' for 'a'; saving chat_a closes the modal cleanly with no error). chat_a nickname is confirmed back to 'chat_a' post-test. Minor spec deviation: /api/auth/anonymous with 1-char and 27-char nicknames returns 422 (Pydantic string_too_short/string_too_long in English) instead of 400 with the Italian 'almeno/al massimo N caratteri' messages requested. Same for PATCH /auth/me/profile with empty nickname (422). Practical UX is unaffected because the frontend validates locally and never lets those payloads reach the backend, but the review spec asked for 400+Italian messages.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/auth/anonymous", "issue": "Nickname length outside 2..24 returns 422 with English Pydantic detail (string_too_short/string_too_long) because AnonymousBody.nickname still has Field(min_length=2, max_length=24). Spec expected 400 with 'Il nickname deve avere almeno 2 caratteri' / 'al massimo 24 caratteri'. To surface the helper's Italian messages, remove min_length/max_length from the Pydantic Field so _normalize_and_validate_nickname handles length errors."},
+      {"endpoint": "PATCH /api/auth/me/profile", "issue": "Empty nickname triggers Pydantic 422 (string_too_short) instead of the expected 400 with 'Il nickname deve avere almeno 2 caratteri' or 'Nickname mancante'. ProfileBody.nickname is Optional[str] = Field(default=None, min_length=2, max_length=24) — either drop those constraints or coerce empty string to None before pydantic validation."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_nickname_lowercase.py",
+    "/app/test_reports/pytest/nickname_lowercase.xml"
+  ],
+  "action_items": [
+    "OPTIONAL (spec-adherence): In backend/server.py drop `min_length`/`max_length` from `AnonymousBody.nickname` (line ~278) and `ProfileBody.nickname` (line ~295) so `_normalize_and_validate_nickname` is always reached and returns the Italian 400 messages the spec asks for. Current behavior returns 422 Pydantic errors on length violations, which the frontend never surfaces because it validates the same rules locally. No user-visible bug, but the backend contract diverges from the review spec (points 3, 4, 7)."
+  ],
+  "critical_code_review_comments": [
+    "AnonymousBody / ProfileBody Pydantic Field constraints (min_length/max_length) shadow the shared _normalize_and_validate_nickname helper, defeating the point of centralising the Italian error messages. Consider using constr(strip_whitespace=True) + custom validator, or drop the length constraints and let the helper own all nickname rules."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_nickname_lowercase.py (new)"
+  ],
+  "success_rate": {"backend": "100% (7/7)", "frontend": "100% (6/6 flows)"},
+  "seed_data_creation": "3 anonymous test users created via /api/auth/anonymous ('uppercase' -> lowercased, 'good.nick_1' — plus one deleted-nothing case). chat_a nickname was temporarily changed to 'new_nick' and restored to 'chat_a' at the end of the test run. Verified via GET /auth/me.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Env var name is EXPO_PUBLIC_BACKEND_URL (not EXPO_BACKEND_URL). Frontend /auth screen has AUTH_EMAIL_ENABLED=false so email login is hidden — for authenticated UI flows, log in via `fetch('/api/auth/login',...)` inside page.evaluate and stash the token as JSON.stringify(token) under localStorage key 'faide_token' (AsyncStorage on web is backed by localStorage). Tab bar uses testID 'tab-profile' but on some entry paths it isn't yet rendered; navigating directly to '/profile' works. Profile edit modal testIDs: profile-edit-button, edit-nickname-input, edit-display-input, profile-edit-save, details-error-bar (red bar above SALVA), details-error (legacy inline text).",
+  "rca_of_issue": "N/A — no functional bugs found. The only deviation from the review spec is that /api/auth/anonymous and PATCH /auth/me/profile return Pydantic 422 (English) for length violations instead of the helper's Italian 400 messages, because Field(min_length=2, max_length=24) runs before _normalize_and_validate_nickname. Fix: drop those Pydantic length constraints on the two request models."
+}
