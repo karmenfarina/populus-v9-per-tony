@@ -274,8 +274,8 @@ metadata:
 
 test_plan:
   current_focus:
-    - "Display name font slightly larger under nickname"
-    - "Messages tab badge clears when list is empty (orphan cleanup)"
+    - "ShareSheet direct deep-link to Instagram/Messenger (skip OS picker)"
+    - "@ prefix on nickname (own + external profile) + display_name on external profile"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"

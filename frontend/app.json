@@ -13,7 +13,16 @@
       "bundleIdentifier": "com.emergent.teampick.bfsfcz",
       "infoPlist": {
         "NSCameraUsageDescription": "Scatta foto per il tuo profilo",
-        "NSPhotoLibraryUsageDescription": "Carica foto per il tuo profilo"
+        "NSPhotoLibraryUsageDescription": "Carica foto per il tuo profilo",
+        "LSApplicationQueriesSchemes": [
+          "instagram",
+          "instagram-stories",
+          "fb-messenger",
+          "fb",
+          "whatsapp",
+          "tg",
+          "twitter"
+        ]
       }
     },
     "android": {

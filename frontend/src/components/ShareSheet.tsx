@@ -8,7 +8,6 @@ import {
   ScrollView,
   Platform,
   Linking,
-  Share,
 } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import { Ionicons } from "@expo/vector-icons";
@@ -77,50 +76,25 @@ async function openUrl(target: string): Promise<boolean> {
 }
 
 /**
- * Use the OS-level share sheet. On iOS/Android this pops the NATIVE picker
- * containing every app that supports share intents (Instagram, Messenger,
- * WhatsApp, Telegram, Signal, Mail, AirDrop, …) plus the OS' contact picker.
- * Users pick the app AND the recipient in one step — same UX as any native
- * app's "share" button.
- *
- * On modern mobile browsers Web Share API (`navigator.share`) is available
- * and behaves identically. On desktop browsers it usually isn't — we then
- * fall back to a paste guide overlay so the user can copy+paste.
+ * Try to open a native deep-link scheme (e.g. `fb-messenger://…`).
+ * Returns true if the OS accepted the link (meaning the target app is
+ * installed), false otherwise. On web this is always considered a failure
+ * because deep-link schemes cannot be honoured by a browser.
  */
-async function shareNative(payload: { message: string; url: string; title: string }): Promise<"ok" | "unsupported" | "cancelled" | "error"> {
-  // Web: prefer the Web Share API when the browser supports it (Safari iOS,
-  // Chrome mobile, Edge mobile). If it's missing we fall back to `unsupported`
-  // so the caller can show a paste-guide overlay.
-  if (Platform.OS === "web") {
-    const anyNav = typeof navigator !== "undefined" ? (navigator as any) : null;
-    if (anyNav && typeof anyNav.share === "function") {
-      try {
-        await anyNav.share({ title: payload.title, text: payload.message, url: payload.url });
-        return "ok";
-      } catch (e: any) {
-        // AbortError = user cancelled the share picker — don't treat as failure
-        if (e?.name === "AbortError") return "cancelled";
-        return "error";
-      }
-    }
-    return "unsupported";
-  }
-
-  // Native (iOS / Android): React Native's Share.share always exists.
+async function tryDeepLink(scheme: string): Promise<boolean> {
+  if (Platform.OS === "web") return false;
   try {
-    const res = await Share.share(
-      { message: `${payload.message}\n${payload.url}`, url: payload.url, title: payload.title },
-      { dialogTitle: payload.title },
-    );
-    if (res.action === Share.dismissedAction) return "cancelled";
-    return "ok";
+    const supported = await Linking.canOpenURL(scheme);
+    if (!supported) return false;
+    await Linking.openURL(scheme);
+    return true;
   } catch {
-    return "error";
+    return false;
   }
 }
 
-// Copy-and-paste guidance shown when the destination has no URL share API
-// AND the OS-level share sheet is not available (e.g. desktop web).
+// Paste-guide overlay shown as a last-resort on desktop web (no way to open
+// Instagram/Messenger). On mobile we always deep-link.
 type PasteGuide = {
   key: "instagram" | "messenger";
   appLabel: string;
@@ -138,7 +112,7 @@ const PASTE_GUIDES: Record<"instagram" | "messenger", PasteGuide> = {
     icon: "logo-instagram",
     webUrl: "https://www.instagram.com/",
     instructions:
-      "Il tuo browser non supporta la condivisione diretta verso Instagram. Il link è stato copiato: apri Instagram, entra in un DM o crea una Storia, tieni premuto sul campo di testo e tocca «Incolla».",
+      "Il link è stato copiato. Apri Instagram, entra in un DM o crea una Storia, tieni premuto e tocca «Incolla».",
   },
   messenger: {
     key: "messenger",
@@ -147,7 +121,7 @@ const PASTE_GUIDES: Record<"instagram" | "messenger", PasteGuide> = {
     icon: "chatbubbles",
     webUrl: "https://www.messenger.com/",
     instructions:
-      "Il tuo browser non supporta la condivisione diretta verso Messenger. Il link è stato copiato: apri Messenger, entra in una chat, tieni premuto sul campo di testo e tocca «Incolla».",
+      "Il link è stato copiato. Apri Messenger, entra in una chat, tieni premuto e tocca «Incolla».",
   },
 };
 
@@ -155,27 +129,44 @@ export default function ShareSheet({ visible, onClose, url, title, message, onCo
   const [pasteGuide, setPasteGuide] = useState<PasteGuide | null>(null);
 
   /**
-   * Instagram / Messenger tap:
-   * 1. Try the NATIVE OS share sheet first — on real devices this opens the
-   *    picker with Instagram, Messenger, contact list and a "send" button
-   *    pre-filled with the link. Exactly what the user asked for.
-   * 2. If the OS refuses (desktop browsers without Web Share API), copy the
-   *    link to the clipboard and show a paste-guide overlay explaining what
-   *    to do next.
+   * Direct-open Instagram / Messenger apps.
+   * - Messenger has a first-class share deep link (`fb-messenger://share`) which
+   *   opens the app with the link ready to send to any contact. We use it.
+   * - Instagram does NOT expose a DM/Story share deep link — the only way to
+   *   place content in Instagram is via the OS-level share sheet. We instead
+   *   copy the link and open the Instagram app directly so the user can paste
+   *   it into a DM or Story with a single tap.
+   * - On web (no schemes available) we fall back to a paste-guide overlay.
    */
-  const openNativeOrGuide = async (key: "instagram" | "messenger") => {
-    const result = await shareNative({ message, url, title });
-    if (result === "ok") {
-      onClose();
-      return;
-    }
-    if (result === "cancelled") {
-      // User dismissed the native picker — leave everything as-is.
-      return;
-    }
-    // Fallback (desktop web, or an unexpected error): copy + guide.
+  const openDirect = async (key: "instagram" | "messenger") => {
+    // Always copy the link first — worst-case the user can paste it manually.
     await copyToClipboard(url);
-    setPasteGuide(PASTE_GUIDES[key]);
+
+    if (key === "messenger") {
+      const messengerShare = `fb-messenger://share/?link=${encodeURIComponent(url)}`;
+      if (await tryDeepLink(messengerShare)) { onClose(); return; }
+      // Fallbacks: try the plain messenger scheme, then web.
+      if (await tryDeepLink("fb-messenger://")) { onClose(); return; }
+      if (Platform.OS !== "web") {
+        // On native but Messenger not installed → try the mobile web version.
+        if (await openUrl("https://www.messenger.com/")) { onClose(); return; }
+      }
+      // Web / everything failed → show paste guide.
+      setPasteGuide(PASTE_GUIDES.messenger);
+      return;
+    }
+
+    // Instagram — no DM share scheme, so we open the app directly. The link
+    // is already in the clipboard so the user can paste with one tap.
+    // Prefer the DM inbox scheme when present, then camera, then plain.
+    if (await tryDeepLink("instagram://direct/inbox")) { onClose(); return; }
+    if (await tryDeepLink("instagram://camera"))       { onClose(); return; }
+    if (await tryDeepLink("instagram://app"))          { onClose(); return; }
+    if (await tryDeepLink("instagram://"))             { onClose(); return; }
+    if (Platform.OS !== "web") {
+      if (await openUrl("https://www.instagram.com/")) { onClose(); return; }
+    }
+    setPasteGuide(PASTE_GUIDES.instagram);
   };
 
   const openTargetAppFromGuide = async () => {
@@ -187,7 +178,7 @@ export default function ShareSheet({ visible, onClose, url, title, message, onCo
 
   const shareVia = async (key: OptionKey) => {
     if (key === "instagram" || key === "messenger") {
-      await openNativeOrGuide(key);
+      await openDirect(key);
       return;
     }
 
@@ -261,9 +252,8 @@ export default function ShareSheet({ visible, onClose, url, title, message, onCo
         </Pressable>
       </Pressable>
 
-      {/* Fallback paste-guide overlay: shown ONLY on desktop browsers where
-          the OS share sheet is not available. On mobile the native picker
-          handles everything (Instagram, Messenger, WhatsApp, contact list…). */}
+      {/* Paste-guide overlay: only shown on desktop web where no app scheme
+          can be opened. On mobile the deep links do the job. */}
       <Modal
         animationType="fade"
         transparent

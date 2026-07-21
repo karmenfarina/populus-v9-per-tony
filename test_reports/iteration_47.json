@@ -1,0 +1,49 @@
+{
+  "summary": "Frontend-only verification of (1) ShareSheet Instagram/Messenger direct deep-link path with paste-guide fallback on desktop web, and (2) '@' prefix on nickname + display_name rendering on own and external profiles. All static checks and interactive Playwright checks PASSED. No regressions observed.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "verifications": {
+    "change_1_sharesheet": {
+      "no_Share_import": "PASS — /app/frontend/src/components/ShareSheet.tsx imports only View/Text/StyleSheet/Modal/Pressable/ScrollView/Platform/Linking from react-native; Share.share() is gone.",
+      "tryDeepLink_helper": "PASS — tryDeepLink(scheme) uses Linking.canOpenURL + Linking.openURL (lines 84-94).",
+      "messenger_share_scheme": "PASS — openDirect('messenger') calls fb-messenger://share/?link=<encoded url> first, then fb-messenger:// fallback (lines 145-149).",
+      "instagram_copy_before_deeplink": "PASS — copyToClipboard(url) called first (line 143), then instagram://direct/inbox, instagram://camera, instagram://app, instagram:// (lines 162-165).",
+      "paste_guide_web_only": "PASS — paste-guide overlay only rendered when native deep-link fails (Platform.OS==='web' or scheme unsupported).",
+      "app_json_LSApplicationQueriesSchemes": "PASS — /app/frontend/app.json contains instagram, instagram-stories, fb-messenger, fb, whatsapp, tg, twitter (7 schemes).",
+      "playwright_web_instagram": "PASS — tapping [data-testid='share-instagram'] on desktop web opens paste-guide overlay with testIDs paste-guide-open + paste-guide-cancel and title 'LINK COPIATO — APRI INSTAGRAM'.",
+      "playwright_web_messenger": "PASS — tapping [data-testid='share-messenger'] on desktop web opens paste-guide overlay 'LINK COPIATO — APRI MESSENGER'.",
+      "other_share_options": "PASS — share-whatsapp, share-telegram, share-twitter, share-facebook, share-email all present and still open URL (openUrl branch)."
+    },
+    "change_2_nickname_at_prefix_and_display_name": {
+      "own_profile_nickname": "PASS — profile-nickname renders '@chat_a' for logged-in user chat_a@test.it (verified via Playwright).",
+      "own_profile_display_name": "PASS — profile-display-name renders 'Mario Rossi' beneath the nickname (chat_a already has this display_name from iteration_46).",
+      "external_profile_top_nick": "PASS — top bar renders '@chatUserB' (visible in screenshot) for user_16f709708760.",
+      "external_profile_public_nickname": "PASS — [data-testid='public-nickname'] text '@chatUserB'.",
+      "external_profile_public_display_name_conditional": "PASS — chatUserB has no display_name set → [data-testid='public-display-name'] is NOT rendered (count=0), matching the conditional render logic.",
+      "display_name_style": "PASS — styles.displayName uses fontSize: font.sizes.base (=14), opacity: 0.75.",
+      "anonymous_branch_at_prefix": "STATIC — anonymous topbar (line 187) and anonSubtitle (line 194) both use '@{profile.nickname}'. No anonymous target available to test at runtime."
+    }
+  },
+  "test_report_links": [
+    "Playwright interactive test executed in this iteration (not saved as file; console output captured in run logs)"
+  ],
+  "action_items": [
+    "None — both changes verified as-implemented. Deep-link behavior on real iOS/Android devices can only be validated via native build; source and Info.plist declarations are correct."
+  ],
+  "critical_code_review_comments": [
+    "ShareSheet: excellent structure — openDirect is well-documented, tryDeepLink returns false on web to force paste-guide fallback, clipboard write happens before any deep-link attempt so users are never left without the URL.",
+    "app.json: consider adding 'fb' scheme note in a comment — already present in whitelist, good.",
+    "user/[id].tsx: public-display-name is correctly conditional on profile.display_name being truthy — will not render an empty <Text> when unset."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (skipped per request)", "frontend": "100%"},
+  "seed_data_creation": "None. Reused existing pre-verified users chat_a (id user_6e65e19525d5, display_name 'Mario Rossi') and chat_b (id user_16f709708760, no display_name).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Auth email/password UI is hidden (AUTH_EMAIL_ENABLED=false in /app/frontend/app/auth.tsx). To login as chat_a/chat_b on desktop web preview, POST /api/auth/login to obtain a JWT and inject into localStorage as key 'faide_token' with the token JSON.stringify-encoded, then navigate. Feud detail external share is opened via [data-testid='share-button'] (opens InAppShareSheet) → [data-testid='share-open-external'] (opens ShareSheet)."
+}

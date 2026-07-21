@@ -184,14 +184,14 @@ export default function UserPublicScreen() {
             <Ionicons name="chevron-back" size={22} color={colors.onSurfaceInverse} />
             <Text style={styles.backTxt}>INDIETRO</Text>
           </Pressable>
-          <Text style={styles.topNick}>{profile.nickname}</Text>
+          <Text style={styles.topNick}>@{profile.nickname}</Text>
         </View>
         <View style={styles.anonBox} testID="public-anonymous">
           <View style={styles.anonAvatar}>
             <Ionicons name="glasses-outline" size={80} color={colors.brandSecondary} />
           </View>
           <Text style={styles.anonTitle}>UTENTE ANONIMO</Text>
-          <Text style={styles.anonSubtitle}>{profile.nickname}</Text>
+          <Text style={styles.anonSubtitle}>@{profile.nickname}</Text>
           <Text style={styles.anonHint}>
             Gli utenti anonimi non condividono foto, storico voti, spille o profilo pubblico.
           </Text>
@@ -211,7 +211,7 @@ export default function UserPublicScreen() {
           <Ionicons name="chevron-back" size={22} color={colors.onSurfaceInverse} />
           <Text style={styles.backTxt}>INDIETRO</Text>
         </Pressable>
-        <Text style={styles.topNick}>{profile.nickname}</Text>
+        <Text style={styles.topNick}>@{profile.nickname}</Text>
         {canMessage ? (
           <Pressable onPress={() => setMenuOpen(true)} testID="user-menu" style={styles.menuBtn}>
             <Ionicons name="ellipsis-vertical" size={20} color={colors.onSurfaceInverse} />
@@ -263,7 +263,12 @@ export default function UserPublicScreen() {
         </View>
 
         <View style={styles.body}>
-          <Text style={styles.nick}>{profile.nickname}</Text>
+          <Text style={styles.nick} testID="public-nickname">@{profile.nickname}</Text>
+          {profile.display_name ? (
+            <Text style={styles.displayName} testID="public-display-name">
+              {profile.display_name}
+            </Text>
+          ) : null}
           <Text style={styles.stat}>
             {profile.total_votes} voti · {profile.majority_votes} maggioranza · {profile.minority_votes} minoranza
           </Text>
@@ -594,6 +599,7 @@ const styles = StyleSheet.create({
   dotOn: { backgroundColor: colors.brandPrimary },
   body: { padding: spacing.lg, gap: spacing.md },
   nick: { fontSize: font.sizes.xxxl, fontWeight: "500", letterSpacing: 1, color: colors.onSurface },
+  displayName: { fontSize: font.sizes.base, color: colors.onSurface, opacity: 0.75, marginTop: 2 },
   badge: { alignSelf: "flex-start", paddingHorizontal: spacing.sm, paddingVertical: 4, borderWidth: 2, borderColor: colors.border, fontSize: font.sizes.xs, letterSpacing: 2, fontWeight: "500" },
   badgeRed: { backgroundColor: colors.brandPrimary, color: colors.onBrandPrimary },
   badgeYellow: { backgroundColor: colors.brandSecondary, color: colors.onBrandSecondary },
