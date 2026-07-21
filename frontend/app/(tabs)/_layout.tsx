@@ -62,7 +62,12 @@ export default function TabsLayout() {
         name="index"
         options={{
           title: "FAIDE",
-          tabBarIcon: ({ color, size }) => <MaterialCommunityIcons name="scale-balance" color={color} size={size} />,
+          tabBarIcon: ({ color, size }) => (
+            // MaterialCommunityIcons render smaller than Ionicons at the same
+            // nominal size, so bump the scale-balance glyph by ~18 % to match
+            // the visual weight of the other tab icons (bookmark, chatbubbles, …).
+            <MaterialCommunityIcons name="scale-balance" color={color} size={Math.round(size * 1.18)} />
+          ),
         }}
       />
       <Tabs.Screen
