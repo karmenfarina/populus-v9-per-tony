@@ -428,20 +428,21 @@ export default function UserPublicScreen() {
             </Pressable>
           )}
 
-          {/* When the profile owner hasn't unlocked the alignment badge
-              yet, offer a discreet CTA so viewers can still access the
-              full 27-badge collection page. */}
-          {!badgeUnlocked && (
-            <Pressable
-              style={styles.viewBadgesFallback}
-              onPress={() => setBadgesOpen(true)}
-              testID="public-badges-view-all"
-            >
-              <Ionicons name="ribbon-outline" size={16} color={colors.brandPrimary} />
-              <Text style={styles.viewBadgesFallbackTxt}>VEDI LE SPILLE</Text>
-              <Ionicons name="chevron-forward" size={16} color={colors.brandPrimary} />
-            </Pressable>
-          )}
+          {/* Persistent CTA into the full 9×3 badge collection modal.
+              Rendered ALWAYS (not just when the alignment badge is
+              locked) so viewers have an unambiguous, discoverable
+              entry point regardless of the profile owner's alignment
+              status. The fancy badge card above is also tappable, but
+              the pill guarantees the affordance is never hidden. */}
+          <Pressable
+            style={styles.viewBadgesFallback}
+            onPress={() => setBadgesOpen(true)}
+            testID="public-badges-view-all"
+          >
+            <Ionicons name="ribbon-outline" size={16} color={colors.brandPrimary} />
+            <Text style={styles.viewBadgesFallbackTxt}>VEDI TUTTE LE SPILLE</Text>
+            <Ionicons name="chevron-forward" size={16} color={colors.brandPrimary} />
+          </Pressable>
 
           {profile.bio ? (
             <View style={styles.section}>

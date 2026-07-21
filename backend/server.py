@@ -390,9 +390,9 @@ CATEGORY_BADGES: dict = {
         'color': '#B03A2E',
         'icon': 'megaphone',
         'tiers': [
-            {'name': 'Trombato di Provincia', 'emoji': '🎗️'},
-            {'name': 'Giampiero Mughini',      'emoji': '🎙️'},
-            {'name': 'Silvio Berlusconi',      'emoji': '🇮🇹'},
+            {'name': 'Peone di Corridoio', 'emoji': '🎗️'},
+            {'name': 'Giampiero Mughini',  'emoji': '🎙️'},
+            {'name': 'Silvio Berlusconi',  'emoji': '🇮🇹'},
         ],
     },
     'tv': {
@@ -496,22 +496,40 @@ async def _compute_category_comment_counts(user_id: str) -> dict:
     return out
 
 
-def _build_category_badge_payload(counts: dict) -> list:
+def _build_category_badge_payload(counts: dict, granted: Optional[list] = None) -> list:
     """Turn raw {category: count} into the wire-format list the client
-    consumes. Ordering is stable (matches CATEGORY_BADGES insertion)."""
+    consumes. Ordering is stable (matches CATEGORY_BADGES insertion).
+
+    `granted` is an optional list of `{category, tier}` overrides read
+    from the user document (`granted_category_badges` field). It lets
+    admins force-unlock individual badges without needing the user to
+    actually reach the comment threshold. When a tier is granted, its
+    `unlocked` flag becomes True regardless of the comment count.
+    """
+    # Fast lookup: {category: {tier1_int, tier2_int, ...}}
+    grant_index: dict = {}
+    for g in (granted or []):
+        cat = g.get('category') if isinstance(g, dict) else None
+        tier = g.get('tier') if isinstance(g, dict) else None
+        if cat in CATEGORY_BADGES and tier in (1, 2, 3):
+            grant_index.setdefault(cat, set()).add(int(tier))
     out = []
     for cat_id, meta in CATEGORY_BADGES.items():
         count = int(counts.get(cat_id, 0))
         tiers = []
         for i, tmeta in enumerate(meta['tiers']):
             threshold = CATEGORY_BADGE_THRESHOLDS[i]
-            unlocked = count >= threshold
+            tier_num = i + 1
+            unlocked_by_count = count >= threshold
+            unlocked_by_grant = tier_num in grant_index.get(cat_id, set())
+            unlocked = unlocked_by_count or unlocked_by_grant
             tiers.append({
-                'tier': i + 1,
+                'tier': tier_num,
                 'name': tmeta['name'],
                 'emoji': tmeta['emoji'],
                 'threshold': threshold,
                 'unlocked': unlocked,
+                'granted': unlocked_by_grant and not unlocked_by_count,
             })
         out.append({
             'category_id': cat_id,
@@ -1372,15 +1390,21 @@ async def user_category_badges(user_id: str):
     can't accumulate stats). For every other user, this returns the
     full 9-category × 3-tier grid with the unlocked/locked state.
     """
-    u = await db.users.find_one({'user_id': user_id}, {'_id': 0, 'auth_provider': 1, 'is_anonymous': 1})
+    u = await db.users.find_one(
+        {'user_id': user_id},
+        {'_id': 0, 'auth_provider': 1, 'is_anonymous': 1, 'granted_category_badges': 1},
+    )
     if not u:
         raise HTTPException(status_code=404, detail='Utente non trovato')
+    granted = u.get('granted_category_badges') or []
     if u.get('auth_provider') == 'anonymous' or u.get('is_anonymous'):
         # Return the shape but with 0 counts everywhere so the UI can
-        # still render an "all locked" grid consistently.
-        return {'user_id': user_id, 'badges': _build_category_badge_payload({})}
+        # still render an "all locked" grid consistently. Granted
+        # overrides are still applied — an admin might have manually
+        # gifted a badge to an anonymous user.
+        return {'user_id': user_id, 'badges': _build_category_badge_payload({}, granted)}
     counts = await _compute_category_comment_counts(user_id)
-    return {'user_id': user_id, 'badges': _build_category_badge_payload(counts)}
+    return {'user_id': user_id, 'badges': _build_category_badge_payload(counts, granted)}
 
 
 CATEGORIES = [
