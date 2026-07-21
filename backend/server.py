@@ -1292,11 +1292,15 @@ async def list_hype_feuds(user: Optional[dict] = Depends(get_current_user_option
         votes = int(d.get('votes_a', 0) or 0) + int(d.get('votes_b', 0) or 0)
         cc = comment_counts.get(d['feud_id'], 0)
         rc = reply_counts.get(d['feud_id'], 0)
-        score = votes + 2 * cc + rc
-        # Drop untouched posts entirely — HYPE is for what's being talked
-        # about, not for filler.
-        if score <= 0:
+        # HYPE inclusion rules — a post must have MEANINGFUL, visible
+        # discussion. A single hidden vote (votes remain masked until the
+        # current user votes) is not enough for the user to feel the rail
+        # is "hype". We require EITHER:
+        #   - at least one comment or reply (visible discussion), OR
+        #   - at least three total votes (substantial voting mass).
+        if (cc + rc) < 1 and votes < 3:
             continue
+        score = votes + 2 * cc + rc
         d['_hype_score'] = score
         d['_comments'] = cc
         d['_replies'] = rc

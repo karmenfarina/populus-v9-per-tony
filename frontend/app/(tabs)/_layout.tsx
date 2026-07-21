@@ -1,5 +1,5 @@
 import { Tabs } from "expo-router";
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { View, Text, StyleSheet } from "react-native";
 import { colors } from "@/src/theme";
@@ -62,7 +62,7 @@ export default function TabsLayout() {
         name="index"
         options={{
           title: "FAIDE",
-          tabBarIcon: ({ color, size }) => <Ionicons name="scale" color={color} size={size} />,
+          tabBarIcon: ({ color, size }) => <MaterialCommunityIcons name="scale-balance" color={color} size={size} />,
         }}
       />
       <Tabs.Screen
