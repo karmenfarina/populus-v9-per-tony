@@ -15,7 +15,6 @@ import { Ionicons } from "@expo/vector-icons";
 import { api } from "@/src/api";
 import { useAuth } from "@/src/auth/AuthContext";
 import { navStack } from "@/src/utils/navStack";
-import { useHardwareBack } from "@/src/utils/useHardwareBack";
 import { colors, font, spacing } from "@/src/theme";
 
 /**
@@ -69,10 +68,6 @@ export default function CircleFindScreen() {
     } catch { /* noop */ }
     router.replace("/profile");
   }, [router]);
-
-  // Android hardware back mirrors the on-screen chevron-back — same
-  // callback, no drift possible.
-  useHardwareBack(goBack);
 
   const [q, setQ] = useState("");
   const [rows, setRows] = useState<Row[]>([]);

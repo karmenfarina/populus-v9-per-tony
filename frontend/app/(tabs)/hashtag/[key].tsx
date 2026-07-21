@@ -6,7 +6,6 @@ import { Ionicons } from "@expo/vector-icons";
 import { api, Feud } from "@/src/api";
 import { colors, spacing, font } from "@/src/theme";
 import FeudCard from "@/src/components/FeudCard";
-import { useHardwareBack } from "@/src/utils/useHardwareBack";
 
 export default function HashtagSearch() {
   const router = useRouter();
@@ -14,11 +13,6 @@ export default function HashtagSearch() {
   const [feuds, setFeuds] = useState<Feud[]>([]);
   const [display, setDisplay] = useState<string>("");
   const [loading, setLoading] = useState(true);
-
-  // Bind the Android hardware back button to the exact same callback
-  // used by the on-screen "chevron-back" button — no divergence.
-  const onBack = useCallback(() => router.back(), [router]);
-  useHardwareBack(onBack);
 
   const load = useCallback(async () => {
     if (!key) return;
@@ -37,7 +31,7 @@ export default function HashtagSearch() {
     <SafeAreaView style={styles.safe} edges={["top"]} testID="hashtag-screen">
       <View style={styles.header}>
         <View style={styles.headerTop}>
-          <Pressable onPress={onBack} testID="hashtag-back" style={styles.backBtn}>
+          <Pressable onPress={() => router.back()} testID="hashtag-back" style={styles.backBtn}>
             <Ionicons name="chevron-back" size={22} color={colors.brandSecondary} />
           </Pressable>
           <View style={{ flex: 1 }}>
