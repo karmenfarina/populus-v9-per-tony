@@ -222,7 +222,23 @@ export default function CircleScreen() {
           <Ionicons name="chevron-back" size={22} color={colors.onSurfaceInverse} />
         </Pressable>
         <Text style={styles.title}>CERCHIA</Text>
-        <View style={styles.backBtn} />
+        {/* Owner-only shortcut to the dedicated user-search screen where
+            new friends can be discovered and added to the circle. Rendered
+            in the header's right slot so it stays reachable regardless of
+            list scroll position. */}
+        {isOwner ? (
+          <Pressable
+            onPress={() => router.push({ pathname: "/circle/find", params: { from: `/circle/${userId}` } })}
+            style={styles.backBtn}
+            testID="circle-find-open"
+            hitSlop={8}
+            accessibilityLabel="Cerca amici da aggiungere alla Cerchia"
+          >
+            <Ionicons name="person-add" size={22} color={colors.onSurfaceInverse} />
+          </Pressable>
+        ) : (
+          <View style={styles.backBtn} />
+        )}
       </View>
 
       <View style={styles.subhead}>

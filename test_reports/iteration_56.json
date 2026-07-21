@@ -1,0 +1,32 @@
+{
+  "summary": "Iteration 56 tested the NEW 'Cerca Amici' feature end-to-end. Backend: 5/5 pytest cases PASS in /app/backend/tests/test_search_users_display_name.py (1.5s, XML at /app/test_reports/pytest/search_display_name.xml). GET /api/search/users now returns each result with the required keys user_id, nickname, display_name (nullable), photo_data; self is excluded from own results; empty-query for non-matching string returns {users: []}; unauthenticated request returns 401/403. Frontend (Expo web, mobile viewport 390x844, chat_a@test.it): T1 PASS — circle-find-open button (person-add icon) is present in header top-right on OWN circle (/circle/user_6e65e19525d5) and is NOT rendered when viewing another user's circle (/circle/user_16f709708760). T2 PASS — tapping circle-find-open navigates to /circle/find?from=%2Fcircle%2Fuser_6e65e19525d5; header 'CERCA AMICI' + subtitle 'Aggiungi persone alla tua Cerchia del Gossip' render; find-hint empty state is visible before typing; typing 'chat' triggers the debounced search (~260ms) and renders find-row-user_16f709708760 with an AGGIUNGI (red) button; self is not shown (backend excludes). T3 PASS — tapping find-add-user_16f709708760 flips the button to NELLA CERCHIA (yellow, checkmark) immediately (optimistic); tapping find-back returns to /circle/user_6e65e19525d5 where the newly added user now appears in the list (useFocusEffect refreshes correctly); reopening /circle/find and re-searching 'chat' shows the same row already in NELLA CERCHIA state (myCircleIds prefetch works); tapping NELLA CERCHIA rolls it back to AGGIUNGI; returning to own circle confirms removal. T4 PASS — searching 'zzzxxxqqq123' shows find-empty ('Nessun risultato') and hides find-hint; find-clear icon appears when text is present and, when tapped, resets to find-hint. T5 PASS (backend spot-check): GET /api/search/users?q=chat with chat_a's Bearer token returns [{user_id:'user_16f709708760', nickname:'chatUserB', display_name:null, primary_photo_id:null, photo_data:null}] — display_name key present as required. No React Native red-screen errors observed. No deprecated Expo packages (expo-av / expo-barcode-scanner / expo-background-fetch) detected in package.json. Design: touch targets meet 44px minimum (avatar 44x44, buttons use hitSlop:6-8), 8pt spacing grid observed, contrast OK (red brandPrimary on white, yellow brandSecondary on white).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_search_users_display_name.py",
+    "/app/test_reports/pytest/search_display_name.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "find.tsx:57-69 — circleGet is called on mount to prefetch myCircleIds; a subsequent add/remove made from ANOTHER surface (e.g. profile screen) won't invalidate this cache since useFocusEffect isn't used here. Because the user always enters this screen fresh from a fixed entrypoint (circle-find-open), the impact is minimal, but consider migrating the effect to useFocusEffect to guarantee freshness when the screen is re-focused via router history.",
+    "find.tsx:75-99 — debounced effect depends on [q, user?.user_id, myCircleIds]; every change to myCircleIds (e.g. after add/remove) triggers a re-search with the current q, which re-emits an unnecessary GET /api/search/users. Because the row's in_my_circle is already updated optimistically via setRows, the re-search is redundant. Consider dropping myCircleIds from the dependency array and only recomputing the in_my_circle flag from the latest set inside a memo.",
+    "find.tsx:125 — the `_` rest destructure eats an ESLint no-unused-vars if strict mode is on; harmless functionally but flags as warning on some configs.",
+    "server.py:4782 — the projection includes primary_photo_id in the response even though the frontend only needs photo_data; low-impact but adds ~40 bytes per row. Consider dropping if bandwidth ever matters.",
+    "circle/[userId].tsx:229-241 — the empty <View style={styles.backBtn} /> spacer used to balance the header when isOwner is false is fine, but the accessibilityLabel 'Cerca amici da aggiungere alla Cerchia' is only set on the owner branch — non-owners get no announcement (correctly, since the button is absent). Good."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_search_users_display_name.py (new)",
+    "/app/test_reports/pytest/search_display_name.xml (new)"
+  ],
+  "success_rate": {"backend": "100% (5/5)", "frontend": "100% (T1+T2+T3+T4 all pass)"},
+  "seed_data_creation": "None. Reused pre-seeded chat_a@test.it (user_6e65e19525d5) and chat_b@test.it (user_16f709708760) from /app/memory/test_credentials.md. Cleaned baseline by calling DELETE /api/circle/user_16f709708760 as chat_a before running the flow so T3.1 starts from AGGIUNGI. End-of-test state: chatUserB is NOT in chat_a's circle (removed in T3.4), so the fixture is left clean for future runs.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "AsyncStorage on Expo web stores the auth token in localStorage under key 'faide_token' as a JSON-encoded string (include the outer quotes: localStorage.setItem('faide_token', JSON.stringify(token))). The email/password login screen is enabled server-side; you can also inject the token directly. Route /circle/find requires a valid session — otherwise redirects to /auth. New testIDs introduced this iteration: circle-find-open (in circle header, owner-only), find-back, find-search-input, find-clear, find-list, find-row-{uid}, find-open-profile-{uid}, find-add-{uid}, find-hint, find-empty. Backend endpoint POST /api/circle/{friend_id} adds, DELETE /api/circle/{friend_id} removes; GET /api/users/{owner_id}/circle returns {count, max, is_owner, private, members[]}.",
+  "rca_of_issue": "N/A — all tests pass on first attempt. Findings above are code-review nits, not defects."
+}

@@ -4779,7 +4779,7 @@ async def search_users(q: str, limit: int = 20, user: dict = Depends(get_current
             'auth_provider': {'$ne': 'anonymous'},
             'is_anonymous': {'$ne': True},
         },
-        {'_id': 0, 'user_id': 1, 'nickname': 1, 'primary_photo_id': 1},
+        {'_id': 0, 'user_id': 1, 'nickname': 1, 'primary_photo_id': 1, 'display_name': 1},
     ).limit(limit)
     results: List[dict] = []
     async for u in cursor:
@@ -4793,6 +4793,7 @@ async def search_users(q: str, limit: int = 20, user: dict = Depends(get_current
         results.append({
             'user_id': u['user_id'],
             'nickname': u.get('nickname') or 'Utente',
+            'display_name': u.get('display_name'),
             'primary_photo_id': u.get('primary_photo_id'),
             'photo_data': photo_data,
         })
