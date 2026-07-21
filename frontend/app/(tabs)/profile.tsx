@@ -166,11 +166,21 @@ export default function Profile() {
   // main effect. We depend only on stable primitives (uid + anon flag).
   const uid = user?.user_id;
   const isAnon = !!user?.is_anonymous;
+  // Focus-based refresh: fires every time the Profile tab regains focus so
+  // block/unblock actions performed on other screens propagate back.
   useFocusEffect(
     useCallback(() => {
       if (uid && !isAnon) loadBlocked();
     }, [uid, isAnon, loadBlocked])
   );
+
+  // Mount / auth-ready refresh: if the user was still loading when the
+  // profile mounted, useFocusEffect above never fired with a valid uid.
+  // This useEffect covers that first-load edge case so the blocked-list
+  // is available the moment auth resolves.
+  useEffect(() => {
+    if (uid && !isAnon) loadBlocked();
+  }, [uid, isAnon, loadBlocked]);
 
   useFocusEffect(
     useCallback(() => {
