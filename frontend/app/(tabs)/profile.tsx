@@ -695,6 +695,17 @@ export default function Profile() {
                   {user.display_name}
                 </Text>
               ) : null}
+              {!isAnonymous ? (
+                <Pressable
+                  onPress={() => router.push(`/circle/${user.user_id}`)}
+                  style={styles.circleChip}
+                  testID="profile-circle-open"
+                  hitSlop={6}
+                >
+                  <Ionicons name="people" size={14} color={colors.onBrandPrimary} />
+                  <Text style={styles.circleChipTxt}>Cerchia del gossip</Text>
+                </Pressable>
+              ) : null}
             </View>
           </View>
           {!isAnonymous && user.bio ? <Text style={styles.headerBio} testID="profile-bio">{user.bio}</Text> : null}
@@ -1312,6 +1323,18 @@ const styles = StyleSheet.create({
     opacity: 0.75,
     marginTop: 2,
   },
+  circleChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    alignSelf: "flex-start",
+    marginTop: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+    backgroundColor: colors.brandSecondary,
+  },
+  circleChipTxt: { color: colors.onBrandPrimary, fontSize: font.sizes.xs, fontWeight: "700", letterSpacing: 0.5 },
   badgeBlock: { alignItems: "center", padding: spacing.xl, borderBottomWidth: 2, borderColor: colors.border },
   badgeIcon: { width: 140, height: 140, borderWidth: 2, borderColor: colors.border, backgroundColor: colors.surfaceTertiary, alignItems: "center", justifyContent: "center" },
   badgeTitle: { fontSize: font.sizes.xxl, letterSpacing: 2, fontWeight: "500", color: colors.onSurface, marginTop: spacing.md },

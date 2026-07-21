@@ -4759,6 +4759,176 @@ async def ws_messages(ws: WebSocket, token: str = Query(default="")):
         WS_CLIENTS.get(uid, set()).discard(ws)
 
 
+# ────────── Cerchia del Gossip (friend circle) ──────────
+#
+# One-way "circle" à la Google+ / Instagram-following. When user A adds
+# user B to their circle, that pairing is stored as a single directional
+# `friendships` doc. Users can toggle the whole circle to private so
+# visitors see a "cerchia privata" state instead of the member list.
+# Limit: 45 members per user (raises 409 with a friendly message).
+
+MAX_CIRCLE_MEMBERS = 45
+
+
+async def _circle_count(uid: str) -> int:
+    return await db.friendships.count_documents({'user_id': uid})
+
+
+async def _circle_is_private(uid: str) -> bool:
+    u = await db.users.find_one({'user_id': uid}, {'_id': 0, 'circle_private': 1})
+    return bool(u and u.get('circle_private'))
+
+
+async def _last_interaction_ts(a: str, b: str) -> datetime:
+    """Best-effort recency signal for ordering circle members.
+
+    Uses the most-recent private message exchanged in either direction.
+    Falls back to the friendship creation timestamp when there is no
+    message history yet.
+    """
+    m = await db.messages.find_one(
+        {
+            '$or': [
+                {'sender_id': a, 'recipient_id': b},
+                {'sender_id': b, 'recipient_id': a},
+            ],
+            'deleted': {'$ne': True},
+        },
+        sort=[('created_at', -1)],
+        projection={'_id': 0, 'created_at': 1},
+    )
+    if m and m.get('created_at'):
+        return m['created_at']
+    fr = await db.friendships.find_one(
+        {'user_id': a, 'friend_id': b},
+        {'_id': 0, 'created_at': 1},
+    )
+    return (fr or {}).get('created_at') or datetime.min.replace(tzinfo=timezone.utc)
+
+
+async def _hydrate_circle(uids: list[str], q: str = '') -> list[dict]:
+    """Turn a list of user_ids into circle rows sorted by recency.
+
+    Applies the optional case-insensitive nickname filter `q` BEFORE the
+    recency sort so ordering stays deterministic within a search result.
+    """
+    if not uids:
+        return []
+    users = await db.users.find(
+        {'user_id': {'$in': uids}},
+        {'_id': 0, 'user_id': 1, 'nickname': 1, 'display_name': 1, 'primary_photo_id': 1, 'auth_provider': 1, 'is_anonymous': 1},
+    ).to_list(len(uids))
+    if q:
+        needle = q.lower()
+        users = [u for u in users if needle in (u.get('nickname') or '').lower() or needle in (u.get('display_name') or '').lower()]
+    return users
+
+
+@api_router.post('/circle/{friend_id}')
+async def circle_add(friend_id: str, user: dict = Depends(get_current_user)):
+    if user.get('is_anonymous') or user.get('auth_provider') == 'anonymous':
+        raise HTTPException(status_code=403, detail='Gli account anonimi non possono usare la cerchia')
+    me = user['user_id']
+    if friend_id == me:
+        raise HTTPException(status_code=400, detail='Non puoi aggiungere te stesso')
+    target = await db.users.find_one({'user_id': friend_id}, {'_id': 0, 'user_id': 1, 'is_anonymous': 1, 'auth_provider': 1})
+    if not target:
+        raise HTTPException(status_code=404, detail='Utente non trovato')
+    if target.get('is_anonymous') or target.get('auth_provider') == 'anonymous':
+        raise HTTPException(status_code=400, detail='Non puoi aggiungere un utente anonimo')
+    # Block guard both directions.
+    b1 = await db.user_blocks.count_documents({'blocker_id': me, 'blocked_id': friend_id})
+    b2 = await db.user_blocks.count_documents({'blocker_id': friend_id, 'blocked_id': me})
+    if b1 or b2:
+        raise HTTPException(status_code=403, detail='Impossibile aggiungere questo utente')
+    existing = await db.friendships.find_one({'user_id': me, 'friend_id': friend_id})
+    if existing:
+        return {'ok': True, 'in_circle': True, 'already': True, 'count': await _circle_count(me)}
+    current = await _circle_count(me)
+    if current >= MAX_CIRCLE_MEMBERS:
+        raise HTTPException(
+            status_code=409,
+            detail=f'La tua cerchia è piena ({MAX_CIRCLE_MEMBERS} amici). Rimuovi qualcuno prima di aggiungerne altri.',
+        )
+    await db.friendships.insert_one({
+        'friendship_id': new_id('fri'),
+        'user_id': me,
+        'friend_id': friend_id,
+        'created_at': now_utc(),
+    })
+    return {'ok': True, 'in_circle': True, 'count': current + 1}
+
+
+@api_router.delete('/circle/{friend_id}')
+async def circle_remove(friend_id: str, user: dict = Depends(get_current_user)):
+    me = user['user_id']
+    r = await db.friendships.delete_one({'user_id': me, 'friend_id': friend_id})
+    return {'ok': True, 'in_circle': False, 'removed': r.deleted_count, 'count': await _circle_count(me)}
+
+
+@api_router.patch('/circle/me/privacy')
+async def circle_set_privacy(body: dict, user: dict = Depends(get_current_user)):
+    if user.get('is_anonymous') or user.get('auth_provider') == 'anonymous':
+        raise HTTPException(status_code=403, detail='Non disponibile per account anonimi')
+    private = bool(body.get('private', False))
+    await db.users.update_one({'user_id': user['user_id']}, {'$set': {'circle_private': private}})
+    return {'ok': True, 'private': private}
+
+
+@api_router.get('/circle/me/status/{other_user_id}')
+async def circle_status(other_user_id: str, user: dict = Depends(get_current_user)):
+    """Returns whether the target user is already in my circle. Cheap check
+    used by the "Aggiungi/Rimuovi" toggle on the external-profile screen."""
+    me = user['user_id']
+    in_circle = await db.friendships.count_documents({'user_id': me, 'friend_id': other_user_id}) > 0
+    return {'in_circle': in_circle, 'count': await _circle_count(me), 'max': MAX_CIRCLE_MEMBERS}
+
+
+@api_router.get('/users/{owner_id}/circle')
+async def get_circle(owner_id: str, q: str = '', user: dict = Depends(get_current_user)):
+    """Return the circle of `owner_id`. Respects privacy: if the owner
+    made their circle private, only the owner themselves can read the
+    member list."""
+    me = user['user_id']
+    is_owner = owner_id == me
+    if not is_owner:
+        # Non-owner: check privacy + basic user exists.
+        target = await db.users.find_one({'user_id': owner_id}, {'_id': 0, 'user_id': 1, 'circle_private': 1})
+        if not target:
+            raise HTTPException(status_code=404, detail='Utente non trovato')
+        if target.get('circle_private'):
+            return {'private': True, 'count': await _circle_count(owner_id), 'max': MAX_CIRCLE_MEMBERS, 'members': [], 'is_owner': False}
+    rows = await db.friendships.find({'user_id': owner_id}, {'_id': 0, 'friend_id': 1, 'created_at': 1}).to_list(200)
+    uids = [r['friend_id'] for r in rows]
+    users = await _hydrate_circle(uids, q.strip())
+
+    # Recency sort: most recent interaction first. For non-owners we still
+    # order by the OWNER's interactions so the "close friends first" idea
+    # is preserved regardless of who is looking.
+    pairs = []
+    for u in users:
+        ts = await _last_interaction_ts(owner_id, u['user_id'])
+        pairs.append((ts, u))
+    pairs.sort(key=lambda x: x[0], reverse=True)
+
+    # Attach mini_user photo_data lazily so the payload stays lean when q
+    # narrows the list; still cheap for 45 members.
+    hydrated = []
+    for _, u in pairs:
+        mini = await _mini_user(u['user_id'])
+        hydrated.append({**mini, 'display_name': u.get('display_name')})
+
+    return {
+        'private': False,
+        'is_owner': is_owner,
+        'count': len(rows),
+        'max': MAX_CIRCLE_MEMBERS,
+        'members': hydrated,
+    }
+
+
+
+
 app.include_router(api_router)
 
 app.add_middleware(

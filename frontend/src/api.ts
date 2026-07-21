@@ -219,6 +219,14 @@ export const api = {
   unblockUser: (userId: string) => request(`/users/${userId}/block`, { method: 'DELETE' }),
   deleteComment: (commentId: string) => request(`/comments/${commentId}`, { method: 'DELETE' }),
   deleteReply: (replyId: string) => request(`/replies/${replyId}`, { method: 'DELETE' }),
+  // Cerchia del Gossip (friend circle)
+  circleAdd: (friendId: string) => request(`/circle/${friendId}`, { method: 'POST' }),
+  circleRemove: (friendId: string) => request(`/circle/${friendId}`, { method: 'DELETE' }),
+  circleStatus: (otherUserId: string) => request(`/circle/me/status/${otherUserId}`),
+  circleSetPrivacy: (isPrivate: boolean) =>
+    request('/circle/me/privacy', { method: 'PATCH', body: JSON.stringify({ private: isPrivate }) }),
+  circleGet: (ownerId: string, q?: string) =>
+    request(`/users/${ownerId}/circle${q ? `?q=${encodeURIComponent(q)}` : ''}`),
   myBlocks: () => request('/users/me/blocks'),
   reportUser: (userId: string, reason: string, message_id?: string) =>
     request(`/users/${userId}/report`, { method: 'POST', body: JSON.stringify({ reason, message_id }) }),

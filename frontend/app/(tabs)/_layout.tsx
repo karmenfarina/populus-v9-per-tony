@@ -106,6 +106,7 @@ export default function TabsLayout() {
       <Tabs.Screen name="user/[id]" options={{ href: null }} />
       <Tabs.Screen name="hashtag/[key]" options={{ href: null }} />
       <Tabs.Screen name="messages/[userId]" options={{ href: null }} />
+      <Tabs.Screen name="circle/[userId]" options={{ href: null }} />
       <Tabs.Screen name="archive" options={{ href: null }} />
       <Tabs.Screen name="support" options={{ href: null }} />
       <Tabs.Screen name="admin" options={{ href: null }} />

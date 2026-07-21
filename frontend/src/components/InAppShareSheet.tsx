@@ -6,6 +6,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { colors, spacing, font } from "@/src/theme";
 import { api } from "@/src/api";
+import { useAuth } from "@/src/auth/AuthContext";
 
 /**
  * Instagram-style share-to-user sheet.
@@ -36,6 +37,7 @@ type Props = {
 };
 
 export default function InAppShareSheet({ visible, feudId, feudTitle, onClose, onOpenExternal }: Props) {
+  const { user } = useAuth();
   const [suggestions, setSuggestions] = useState<Suggested[]>([]);
   const [loadingSug, setLoadingSug] = useState(false);
   const [query, setQuery] = useState("");
@@ -45,6 +47,11 @@ export default function InAppShareSheet({ visible, feudId, feudTitle, onClose, o
   const [caption, setCaption] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Circle mode: when active the sheet shows the user's own circle (up to
+  // 45 friends) instead of the interaction-based suggestions.
+  const [circleMode, setCircleMode] = useState(false);
+  const [circleList, setCircleList] = useState<Suggested[]>([]);
+  const [circleLoaded, setCircleLoaded] = useState(false);
   const searchDebounceRef = useRef<any>(null);
 
   useEffect(() => {
@@ -54,6 +61,7 @@ export default function InAppShareSheet({ visible, feudId, feudTitle, onClose, o
       setSelected({});
       setCaption("");
       setError(null);
+      setCircleMode(false);
       return;
     }
     (async () => {
@@ -93,7 +101,30 @@ export default function InAppShareSheet({ visible, feudId, feudTitle, onClose, o
     return () => { if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current); };
   }, [query]);
 
-  const activeList = query.trim().length > 0 ? results : suggestions;
+  // Lazy-load the user's own circle the first time they toggle to it.
+  useEffect(() => {
+    if (!visible || !circleMode || circleLoaded || !user?.user_id) return;
+    (async () => {
+      try {
+        const r = await api.circleGet(user.user_id);
+        const list = (r?.members || []).map((m: any) => ({
+          user_id: m.user_id,
+          nickname: m.nickname,
+          primary_photo_id: m.primary_photo_id,
+          photo_data: m.photo_data,
+        }));
+        setCircleList(list);
+        setCircleLoaded(true);
+      } catch { /* silent */ }
+    })();
+  }, [visible, circleMode, circleLoaded, user?.user_id]);
+
+  // Which list is shown: circle > search results > interaction suggestions.
+  const activeList = circleMode
+    ? (query.trim().length > 0
+        ? circleList.filter((u) => u.nickname.toLowerCase().includes(query.trim().toLowerCase()))
+        : circleList)
+    : (query.trim().length > 0 ? results : suggestions);
   const selectedCount = Object.keys(selected).length;
 
   const toggle = useCallback((u: Suggested) => {
@@ -174,12 +205,34 @@ export default function InAppShareSheet({ visible, feudId, feudTitle, onClose, o
           >
             <View style={styles.handleWrap}><View style={styles.handle} /></View>
 
+            {/* Mode switch: interaction-based suggestions ↔ my circle. */}
+            {user && !user.is_anonymous ? (
+              <View style={styles.modeRow}>
+                <Pressable
+                  onPress={() => { setCircleMode(false); setQuery(""); }}
+                  style={[styles.modeChip, !circleMode ? styles.modeChipOn : null]}
+                  testID="share-mode-suggested"
+                >
+                  <Ionicons name="sparkles" size={14} color={!circleMode ? colors.onBrandPrimary : colors.onSurface} />
+                  <Text style={[styles.modeChipTxt, !circleMode ? styles.modeChipTxtOn : null]}>Suggeriti</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => { setCircleMode(true); setQuery(""); }}
+                  style={[styles.modeChip, circleMode ? styles.modeChipOn : null]}
+                  testID="share-mode-circle"
+                >
+                  <Ionicons name="people" size={14} color={circleMode ? colors.onBrandPrimary : colors.onSurface} />
+                  <Text style={[styles.modeChipTxt, circleMode ? styles.modeChipTxtOn : null]}>Cerchia</Text>
+                </Pressable>
+              </View>
+            ) : null}
+
             {/* Search bar */}
             <View style={styles.searchRow}>
               <Ionicons name="search" size={20} color={colors.muted} style={{ marginRight: 8 }} />
               <TextInput
                 testID="share-search-input"
-                placeholder="Cerca un utente"
+                placeholder={circleMode ? "Cerca nella tua cerchia" : "Cerca un utente"}
                 placeholderTextColor={colors.muted}
                 value={query}
                 onChangeText={setQuery}
@@ -201,8 +254,11 @@ export default function InAppShareSheet({ visible, feudId, feudTitle, onClose, o
             </View>
 
             {/* Section label */}
-            {query.trim().length === 0 && suggestions.length > 0 && (
+            {query.trim().length === 0 && !circleMode && suggestions.length > 0 && (
               <Text style={styles.sectionLabel}>SUGGERITI</Text>
+            )}
+            {query.trim().length === 0 && circleMode && circleList.length > 0 && (
+              <Text style={styles.sectionLabel}>CERCHIA DEL GOSSIP · {circleList.length}</Text>
             )}
 
             {/* Grid */}
@@ -299,6 +355,27 @@ const styles = StyleSheet.create({
   },
   handleWrap: { alignItems: "center", paddingVertical: spacing.xs },
   handle: { width: 44, height: 4, borderRadius: 2, backgroundColor: colors.border },
+  modeRow: {
+    flexDirection: "row",
+    gap: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    marginBottom: spacing.xs,
+  },
+  modeChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: colors.surfaceSecondary,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  modeChipOn: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
+  modeChipTxt: { color: colors.onSurface, fontSize: font.sizes.sm, fontWeight: "600" },
+  modeChipTxtOn: { color: colors.onBrandPrimary },
   searchRow: {
     flexDirection: "row",
     alignItems: "center",

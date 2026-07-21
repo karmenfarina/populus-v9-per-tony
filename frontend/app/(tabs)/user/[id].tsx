@@ -44,6 +44,9 @@ export default function UserPublicScreen() {
   const [reportOpen, setReportOpen] = useState(false);
   const [reportText, setReportText] = useState("");
   const [isBlocked, setIsBlocked] = useState(false);
+  const [inCircle, setInCircle] = useState(false);
+  const [circleCount, setCircleCount] = useState(0);
+  const [circleWorking, setCircleWorking] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -70,6 +73,42 @@ export default function UserPublicScreen() {
       } catch { /* silent */ }
     })();
   }, [id, me]);
+
+  // Circle status — whether target is in MY circle, plus the target's own
+  // circle count (shown as a chip whether or not I'm the owner).
+  useEffect(() => {
+    if (!id) return;
+    (async () => {
+      // Target's circle count (for the chip label). We can always ask; the
+      // endpoint honours privacy but still returns count.
+      try {
+        const c = await api.circleGet(id);
+        setCircleCount(c?.count ?? 0);
+      } catch { /* silent */ }
+      if (me && !me.is_anonymous && me.user_id !== id) {
+        try {
+          const s = await api.circleStatus(id);
+          setInCircle(!!s?.in_circle);
+        } catch { /* silent */ }
+      }
+    })();
+  }, [id, me]);
+
+  const toggleCircle = async () => {
+    if (!id || circleWorking) return;
+    setCircleWorking(true);
+    try {
+      if (inCircle) {
+        await api.circleRemove(id);
+        setInCircle(false);
+      } else {
+        await api.circleAdd(id);
+        setInCircle(true);
+      }
+    } catch (e: any) {
+      Alert.alert(inCircle ? "Errore" : "Impossibile aggiungere", e?.detail || "Riprova");
+    } finally { setCircleWorking(false); }
+  };
 
   const canMessage = !!me && !me.is_anonymous && me.user_id !== id && !profile?.is_anonymous;
 
@@ -269,15 +308,43 @@ export default function UserPublicScreen() {
               {profile.display_name}
             </Text>
           ) : null}
+          <Pressable
+            onPress={() => router.push(`/circle/${id}`)}
+            style={styles.circleChip}
+            testID="public-circle-open"
+            hitSlop={4}
+          >
+            <Ionicons name="people" size={14} color={colors.onBrandPrimary} />
+            <Text style={styles.circleChipTxt}>
+              Cerchia · {circleCount}
+            </Text>
+          </Pressable>
           <Text style={styles.stat}>
             {profile.total_votes} voti · {profile.majority_votes} maggioranza · {profile.minority_votes} minoranza
           </Text>
 
           {canMessage && !isBlocked && (
-            <Pressable onPress={openChat} style={styles.msgCta} testID="user-send-message">
-              <Ionicons name="chatbubble-ellipses" size={18} color={colors.onBrandPrimary} />
-              <Text style={styles.msgCtaTxt}>INVIA MESSAGGIO</Text>
-            </Pressable>
+            <View style={styles.ctaRow}>
+              <Pressable onPress={openChat} style={[styles.msgCta, { flex: 1 }]} testID="user-send-message">
+                <Ionicons name="chatbubble-ellipses" size={18} color={colors.onBrandPrimary} />
+                <Text style={styles.msgCtaTxt}>MESSAGGIO</Text>
+              </Pressable>
+              <Pressable
+                onPress={toggleCircle}
+                disabled={circleWorking}
+                style={[styles.circleCta, inCircle ? styles.circleCtaOn : null]}
+                testID="user-circle-toggle"
+              >
+                <Ionicons
+                  name={inCircle ? "checkmark-circle" : "person-add"}
+                  size={18}
+                  color={inCircle ? colors.onBrandSecondary : colors.onBrandPrimary}
+                />
+                <Text style={[styles.msgCtaTxt, inCircle ? { color: colors.onBrandSecondary } : null]}>
+                  {inCircle ? "NELLA CERCHIA" : "AGGIUNGI"}
+                </Text>
+              </Pressable>
+            </View>
           )}
           {canMessage && isBlocked && (
             <View style={styles.blockedNotice}>
@@ -538,6 +605,33 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   msgCtaTxt: { color: colors.onBrandPrimary, fontSize: font.sizes.base, letterSpacing: 2, fontWeight: "500" },
+  circleChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    alignSelf: "flex-start",
+    marginTop: 8,
+    marginBottom: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+    backgroundColor: colors.brandSecondary,
+  },
+  circleChipTxt: { color: colors.onBrandPrimary, fontSize: font.sizes.xs, fontWeight: "700", letterSpacing: 0.5 },
+  ctaRow: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.sm },
+  circleCta: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.sm,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: colors.border,
+    backgroundColor: colors.brandPrimary,
+  },
+  circleCtaOn: { backgroundColor: colors.brandSecondary },
   blockedNotice: {
     flexDirection: "row",
     alignItems: "center",
