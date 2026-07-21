@@ -10,6 +10,7 @@ import { useAuth } from "@/src/auth/AuthContext";
 import { api, HistoryItem, UserPhoto } from "@/src/api";
 import { colors, spacing, font, sideColor } from "@/src/theme";
 import PhotoCropper from "@/src/components/PhotoCropper";
+import CategoryBadgesModal from "@/src/components/CategoryBadgesModal";
 import { sanitizeNicknameInput, validateNickname, NICKNAME_HINT, NICKNAME_MAX } from "@/src/utils/nickname";
 
 /**
@@ -86,6 +87,9 @@ export default function Profile() {
   const [prefsError, setPrefsError] = useState<string | null>(null);
   // Profile customization
   const [profileOpen, setProfileOpen] = useState(false);
+  // Category badges collection modal — opens when the user taps the
+  // main alignment badge (or its label) on the profile.
+  const [badgesOpen, setBadgesOpen] = useState(false);
   const [photos, setPhotos] = useState<UserPhoto[]>([]);
   const [loadingPhotos, setLoadingPhotos] = useState(false);
   const [bio, setBio] = useState<string>("");
@@ -796,7 +800,13 @@ export default function Profile() {
           )}
         </View>
 
-        <View style={styles.badgeBlock} testID="profile-badge">
+        <Pressable
+          style={styles.badgeBlock}
+          testID="profile-badge"
+          onPress={() => setBadgesOpen(true)}
+          accessibilityRole="button"
+          accessibilityLabel="Apri la collezione spille"
+        >
           <View style={[
             styles.badgeIcon,
             badgeUnlocked && badgeType === "bastian_contrario" && { backgroundColor: colors.brandPrimary },
@@ -818,7 +828,15 @@ export default function Profile() {
               ? `Maggioranza ${badge?.majority ?? 0} · Minoranza ${badge?.minority ?? 0}`
               : `Progresso ${badge?.progress ?? 0}/${badge?.target ?? 5} voti`}
           </Text>
-        </View>
+          {/* Small affordance hint so users know the block is tappable
+              and leads to the full collection. Kept intentionally low-key
+              so it doesn't compete with the main badge visual. */}
+          <View style={styles.badgeMoreHint}>
+            <Ionicons name="ribbon-outline" size={14} color={colors.brandPrimary} />
+            <Text style={styles.badgeMoreHintTxt}>VEDI TUTTE LE SPILLE</Text>
+            <Ionicons name="chevron-forward" size={14} color={colors.brandPrimary} />
+          </View>
+        </Pressable>
 
         <View style={styles.statsRow}>
           <View style={styles.statBox}>
@@ -1354,6 +1372,17 @@ export default function Profile() {
           </View>
         </View>
       </Modal>
+
+      {/* Category badges collection — full-screen shelf reachable by
+          tapping the primary alignment badge above. Rendered here so
+          it can overlay the whole profile scroll view regardless of
+          which modal (photo cropper, prefs, edit) is currently open. */}
+      <CategoryBadgesModal
+        visible={badgesOpen}
+        userId={user.user_id}
+        displayName={user.display_name || user.nickname || undefined}
+        onClose={() => setBadgesOpen(false)}
+      />
     </SafeAreaView>
   );
 }
@@ -1422,6 +1451,23 @@ const styles = StyleSheet.create({
   badgeIcon: { width: 140, height: 140, borderWidth: 2, borderColor: colors.border, backgroundColor: colors.surfaceTertiary, alignItems: "center", justifyContent: "center" },
   badgeTitle: { fontSize: font.sizes.xxl, letterSpacing: 2, fontWeight: "500", color: colors.onSurface, marginTop: spacing.md },
   badgeSubtitle: { fontSize: font.sizes.base, color: colors.muted, marginTop: spacing.xs },
+  badgeMoreHint: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginTop: spacing.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: colors.brandPrimary,
+    borderRadius: 999,
+  },
+  badgeMoreHintTxt: {
+    color: colors.brandPrimary,
+    fontSize: font.sizes.xs,
+    fontWeight: "700",
+    letterSpacing: 1.5,
+  },
   statsRow: { flexDirection: "row", borderBottomWidth: 2, borderColor: colors.border },
   statBox: { flex: 1, padding: spacing.md, alignItems: "center", borderColor: colors.border, backgroundColor: colors.surfaceSecondary },
   statValue: { fontSize: font.sizes.xxxl, fontWeight: "500", color: colors.onSurface },

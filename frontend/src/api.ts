@@ -178,6 +178,7 @@ export const api = {
   publicUser: (id: string) => request(`/users/${id}`),
   publicUserHistory: (id: string, filter: 'all' | 'majority' | 'minority' = 'all') =>
     request(`/users/${id}/history?filter=${filter}`),
+  categoryBadges: (id: string) => request(`/users/${id}/category_badges`),
   archiveDates: (category?: string) =>
     request(`/feuds/archive/dates${category && category !== 'all' ? `?category=${category}` : ''}`),
   archiveFeuds: (date: string, category?: string) => {

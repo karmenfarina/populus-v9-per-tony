@@ -367,6 +367,162 @@ BADGE_META: dict = {
 }
 
 
+# ────────────────────────────────────────────────────────────────
+#  CATEGORY BADGES — 3 tiers per macro-category, unlocked based on
+#  the number of comments the user posted on feuds of that category.
+#
+#  Naming mixes goofy Italian appellatives on tier-1, a mid-tier
+#  celebrity on tier-2, and a heavyweight icon on tier-3 so the
+#  higher rungs feel meaningfully rarer.
+#
+#  Thresholds are FIXED product decisions:
+#     tier 1 →  100 comments
+#     tier 2 →  250 comments
+#     tier 3 →  500 comments
+#
+#  Colors are the "unlocked" hex — the frontend renders locked
+#  variants with 22 % opacity + grayscale.
+# ────────────────────────────────────────────────────────────────
+CATEGORY_BADGE_THRESHOLDS = [100, 250, 500]
+
+CATEGORY_BADGES: dict = {
+    'politica': {
+        'color': '#B03A2E',
+        'icon': 'megaphone',
+        'tiers': [
+            {'name': 'Trombato di Provincia', 'emoji': '🎗️'},
+            {'name': 'Giampiero Mughini',      'emoji': '🎙️'},
+            {'name': 'Silvio Berlusconi',      'emoji': '🇮🇹'},
+        ],
+    },
+    'tv': {
+        'color': '#E67E22',
+        'icon': 'tv',
+        'tiers': [
+            {'name': 'Telecomando Ninja', 'emoji': '📺'},
+            {'name': "Barbara D'Urso",    'emoji': '💋'},
+            {'name': 'Maria De Filippi',  'emoji': '👑'},
+        ],
+    },
+    'musica': {
+        'color': '#8E44AD',
+        'icon': 'musical-notes',
+        'tiers': [
+            {'name': 'Karaoke Warrior', 'emoji': '🎤'},
+            {'name': 'Al Bano',         'emoji': '🍇'},
+            {'name': 'Vasco Rossi',     'emoji': '🎸'},
+        ],
+    },
+    'sport': {
+        'color': '#27AE60',
+        'icon': 'football',
+        'tiers': [
+            {'name': 'Tifoso da Bar',      'emoji': '🍺'},
+            {'name': 'Antonio Cassano',    'emoji': '⚽'},
+            {'name': 'Diego Armando',      'emoji': '🏆'},
+        ],
+    },
+    'cinema': {
+        'color': '#D4AC0D',
+        'icon': 'film',
+        'tiers': [
+            {'name': 'Popcorner Seriale',  'emoji': '🍿'},
+            {'name': 'Boldi & De Sica',    'emoji': '🎬'},
+            {'name': 'Federico Fellini',   'emoji': '🎥'},
+        ],
+    },
+    'social': {
+        'color': '#E91E63',
+        'icon': 'heart',
+        'tiers': [
+            {'name': 'Scroller Compulsivo', 'emoji': '📱'},
+            {'name': 'Chiara Ferragni',     'emoji': '💅'},
+            {'name': 'Fedez',               'emoji': '🎧'},
+        ],
+    },
+    'gossip': {
+        'color': '#FF4081',
+        'icon': 'mic',
+        'tiers': [
+            {'name': 'Vrenzola Napoletana', 'emoji': '💅'},
+            {'name': 'Alfonso Signorini',   'emoji': '🗞️'},
+            {'name': 'Fabrizio Corona',     'emoji': '👑'},
+        ],
+    },
+    'cronaca': {
+        'color': '#2C3E50',
+        'icon': 'newspaper',
+        'tiers': [
+            {'name': 'Cronista da Balcone', 'emoji': '📰'},
+            {'name': 'Bruno Vespa',         'emoji': '🎤'},
+            {'name': 'Enzo Biagi',          'emoji': '🖋️'},
+        ],
+    },
+    'tech': {
+        'color': '#00BCD4',
+        'icon': 'hardware-chip',
+        'tiers': [
+            {'name': 'Smanettone',   'emoji': '💻'},
+            {'name': 'Tecnocrate',   'emoji': '🤖'},
+            {'name': 'Elon Musk',    'emoji': '🚀'},
+        ],
+    },
+}
+
+
+async def _compute_category_comment_counts(user_id: str) -> dict:
+    """Aggregate comments count per feud category for the given user.
+
+    Joins the `comments` collection with `feuds` on `feud_id` so we can
+    group by category. Returns {category_id: count}. Missing categories
+    are simply absent from the result (frontend treats them as 0).
+    """
+    pipeline = [
+        {'$match': {'user_id': user_id}},
+        {'$lookup': {
+            'from': 'feuds',
+            'localField': 'feud_id',
+            'foreignField': 'feud_id',
+            'as': 'feud',
+        }},
+        {'$unwind': '$feud'},
+        {'$group': {'_id': '$feud.category', 'count': {'$sum': 1}}},
+    ]
+    out: dict = {}
+    async for doc in db.comments.aggregate(pipeline):
+        cat = doc.get('_id')
+        if cat and cat in CATEGORY_BADGES:
+            out[cat] = int(doc.get('count') or 0)
+    return out
+
+
+def _build_category_badge_payload(counts: dict) -> list:
+    """Turn raw {category: count} into the wire-format list the client
+    consumes. Ordering is stable (matches CATEGORY_BADGES insertion)."""
+    out = []
+    for cat_id, meta in CATEGORY_BADGES.items():
+        count = int(counts.get(cat_id, 0))
+        tiers = []
+        for i, tmeta in enumerate(meta['tiers']):
+            threshold = CATEGORY_BADGE_THRESHOLDS[i]
+            unlocked = count >= threshold
+            tiers.append({
+                'tier': i + 1,
+                'name': tmeta['name'],
+                'emoji': tmeta['emoji'],
+                'threshold': threshold,
+                'unlocked': unlocked,
+            })
+        out.append({
+            'category_id': cat_id,
+            'color': meta['color'],
+            'icon': meta['icon'],
+            'count': count,
+            'tiers': tiers,
+        })
+    return out
+
+
 def _badge_group(badge_type: Optional[str]) -> Optional[str]:
     if not badge_type:
         return None
@@ -1206,6 +1362,25 @@ async def logout(authorization: Optional[str] = Header(None)):
         token = authorization.split(' ', 1)[1]
         await db.user_sessions.delete_one({'session_token': token})
     return {'ok': True}
+
+
+@api_router.get('/users/{user_id}/category_badges')
+async def user_category_badges(user_id: str):
+    """Public endpoint — anyone can inspect anyone else's badge shelf.
+
+    Anonymous accounts have empty badge collections by design (they
+    can't accumulate stats). For every other user, this returns the
+    full 9-category × 3-tier grid with the unlocked/locked state.
+    """
+    u = await db.users.find_one({'user_id': user_id}, {'_id': 0, 'auth_provider': 1, 'is_anonymous': 1})
+    if not u:
+        raise HTTPException(status_code=404, detail='Utente non trovato')
+    if u.get('auth_provider') == 'anonymous' or u.get('is_anonymous'):
+        # Return the shape but with 0 counts everywhere so the UI can
+        # still render an "all locked" grid consistently.
+        return {'user_id': user_id, 'badges': _build_category_badge_payload({})}
+    counts = await _compute_category_comment_counts(user_id)
+    return {'user_id': user_id, 'badges': _build_category_badge_payload(counts)}
 
 
 CATEGORIES = [

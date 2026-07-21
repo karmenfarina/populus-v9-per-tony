@@ -10,6 +10,7 @@ import { useAuth } from "@/src/auth/AuthContext";
 import { colors, spacing, font, sideColor } from "@/src/theme";
 import { useSmartBack } from "@/src/utils/useSmartBack";
 import { PhotoGalleryViewer } from "@/src/components/PhotoGalleryViewer";
+import CategoryBadgesModal from "@/src/components/CategoryBadgesModal";
 
 const SOCIAL_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
   instagram: "logo-instagram",
@@ -49,6 +50,9 @@ export default function UserPublicScreen() {
   const [inCircle, setInCircle] = useState(false);
   const [circleCount, setCircleCount] = useState(0);
   const [circleWorking, setCircleWorking] = useState(false);
+  // Category badges collection modal — shared with the owner's own
+  // profile screen so third parties see exactly the same shelf.
+  const [badgesOpen, setBadgesOpen] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -376,12 +380,14 @@ export default function UserPublicScreen() {
           )}
 
           {badgeUnlocked && badgeType && (
-            <View
+            <Pressable
               style={[
                 styles.badgeCard,
                 badgeType === "bastian_contrario" ? styles.badgeCardRed : styles.badgeCardYellow,
               ]}
               testID={`public-badge-${badgeType}`}
+              onPress={() => setBadgesOpen(true)}
+              accessibilityLabel="Vedi la collezione completa delle spille"
             >
               <View
                 style={[
@@ -396,7 +402,7 @@ export default function UserPublicScreen() {
                 />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.badgeKicker}>SPILLA</Text>
+                <Text style={styles.badgeKicker}>SPILLA · TOCCA PER LE ALTRE</Text>
                 <Text
                   style={[
                     styles.badgeTitle,
@@ -414,7 +420,27 @@ export default function UserPublicScreen() {
                   {badge?.majority ?? 0} maggioranza · {badge?.minority ?? 0} minoranza
                 </Text>
               </View>
-            </View>
+              <Ionicons
+                name="chevron-forward"
+                size={18}
+                color={badgeType === "bastian_contrario" ? colors.onBrandPrimary : colors.onBrandSecondary}
+              />
+            </Pressable>
+          )}
+
+          {/* When the profile owner hasn't unlocked the alignment badge
+              yet, offer a discreet CTA so viewers can still access the
+              full 27-badge collection page. */}
+          {!badgeUnlocked && (
+            <Pressable
+              style={styles.viewBadgesFallback}
+              onPress={() => setBadgesOpen(true)}
+              testID="public-badges-view-all"
+            >
+              <Ionicons name="ribbon-outline" size={16} color={colors.brandPrimary} />
+              <Text style={styles.viewBadgesFallbackTxt}>VEDI LE SPILLE</Text>
+              <Ionicons name="chevron-forward" size={16} color={colors.brandPrimary} />
+            </Pressable>
           )}
 
           {profile.bio ? (
@@ -622,6 +648,15 @@ export default function UserPublicScreen() {
         initialIndex={idx}
         onClose={() => setViewerOpen(false)}
       />
+      {/* Category badges collection — third-party view. Same modal
+          component used on the owner's own profile screen so the
+          experience is identical from either side. */}
+      <CategoryBadgesModal
+        visible={badgesOpen}
+        userId={String(id)}
+        displayName={profile.display_name || profile.nickname || undefined}
+        onClose={() => setBadgesOpen(false)}
+      />
     </SafeAreaView>
   );
 }
@@ -749,6 +784,24 @@ const styles = StyleSheet.create({
   badgeKicker: { fontSize: font.sizes.xs, letterSpacing: 2, opacity: 0.7, color: colors.onBrandPrimary },
   badgeTitle: { fontSize: font.sizes.lg, fontWeight: "500", letterSpacing: 1.5, marginTop: 2 },
   badgeSubtitle: { fontSize: font.sizes.xs, letterSpacing: 1, opacity: 0.8, marginTop: 2 },
+  viewBadgesFallback: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.md,
+    paddingVertical: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.brandPrimary,
+    borderRadius: 999,
+  },
+  viewBadgesFallbackTxt: {
+    color: colors.brandPrimary,
+    fontSize: font.sizes.xs,
+    fontWeight: "700",
+    letterSpacing: 1.5,
+  },
   anonBox: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.xxl, gap: spacing.sm },
   anonAvatar: { width: 140, height: 140, borderRadius: 70, borderWidth: 0, alignItems: "center", justifyContent: "center", backgroundColor: colors.surfaceInverse, marginBottom: spacing.md, overflow: "hidden" },
   anonTitle: { fontSize: font.sizes.xxl, letterSpacing: 2.5, fontWeight: "500", color: colors.onSurface },
