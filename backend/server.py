@@ -269,6 +269,9 @@ class ProfileBody(BaseModel):
     # user can choose their own handle instead of inheriting the Google name.
     # Optional to keep backwards compatibility with existing onboarding calls.
     nickname: Optional[str] = Field(default=None, min_length=2, max_length=24)
+    # Optional public "display name" shown in grey under the nickname on the
+    # profile. Free-form, doesn't need to be unique.
+    display_name: Optional[str] = Field(default=None, max_length=40)
 
 
 class DetailsBody(BaseModel):
@@ -416,6 +419,7 @@ def _public_user(u: dict) -> dict:
         'user_id': u['user_id'],
         'email': u.get('email'),
         'nickname': u.get('nickname'),
+        'display_name': u.get('display_name'),
         'auth_provider': u.get('auth_provider'),
         'is_anonymous': bool(u.get('is_anonymous')) or (u.get('auth_provider') == 'anonymous'),
         'picture': u.get('picture'),
@@ -863,7 +867,23 @@ async def update_profile(body: ProfileBody, user: dict = Depends(get_current_use
         nick = body.nickname.strip().lstrip('@')
         if len(nick) < 2 or len(nick) > 24:
             raise HTTPException(status_code=400, detail='Il nickname deve avere 2-24 caratteri')
+        # Uniqueness (case-insensitive). We match on the lowercased form so
+        # "ChatA" and "chata" collide — but the caller's original casing is
+        # preserved in storage.
+        clash = await db.users.find_one(
+            {
+                'user_id': {'$ne': user['user_id']},
+                'nickname': {'$regex': f'^{_re.escape(nick)}$', '$options': 'i'},
+            },
+            {'_id': 0, 'user_id': 1},
+        )
+        if clash:
+            raise HTTPException(status_code=409, detail='Questo nickname è già in uso')
         updates['nickname'] = nick
+    if body.display_name is not None:
+        dn = body.display_name.strip()
+        # Allow explicit clearing with an empty string.
+        updates['display_name'] = dn or None
     await db.users.update_one({'user_id': user['user_id']}, {'$set': updates})
     updated = await db.users.find_one({'user_id': user['user_id']}, {'_id': 0})
     return {'user': _public_user(updated)}
@@ -1124,6 +1144,7 @@ async def public_user(user_id: str):
     return {
         'user_id': u['user_id'],
         'nickname': u.get('nickname'),
+        'display_name': u.get('display_name'),
         'auth_provider': u.get('auth_provider'),
         'is_anonymous': False,
         'bio': u.get('bio'),

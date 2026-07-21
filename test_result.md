@@ -274,10 +274,37 @@ metadata:
 
 test_plan:
   current_focus:
-    - "Photo cropper with pan+zoom for profile picture uploads"
+    - "Profile Identity Editor (nickname + display_name)"
+    - "ShareSheet Instagram/Messenger behavior"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
+
+backend_new_tests:
+  - task: "PATCH /api/auth/me/profile enforces unique nickname + display_name"
+    file: "/app/backend/server.py"
+    endpoint: "PATCH /api/auth/me/profile"
+    needs_retesting: true
+    scenarios:
+      - "Same-user re-save with own nickname => 200 (no self-clash)"
+      - "Set display_name to non-empty then '' => stored as null"
+      - "Try to set nickname that another user already owns (case-insensitive) => 409"
+
+frontend_new_tests:
+  - task: "Identity editor modal (nickname + display_name)"
+    file: "/app/frontend/app/(tabs)/profile.tsx"
+    needs_retesting: true
+    scenarios:
+      - "Tap 'MODIFICA IDENTITÀ' row => modal opens with current values"
+      - "Edit nickname and save => header nickname updates"
+      - "Clear display_name and save => grey subtitle disappears"
+  - task: "ShareSheet Instagram/Messenger UX"
+    file: "/app/frontend/src/components/ShareSheet.tsx"
+    needs_retesting: true
+    scenarios:
+      - "Tap Instagram: link copied to clipboard, Instagram tab opened, green banner shown"
+      - "Tap Messenger: link copied, messenger.com opened, green banner shown"
+      - "Other providers (whatsapp, telegram, twitter, facebook, email) still build correct URL and close sheet"
 
 agent_communication:
   - agent: "main"

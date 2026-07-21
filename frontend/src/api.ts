@@ -156,7 +156,7 @@ export const api = {
     request(`/users/me/history?filter=${filter}`),
   search: (q: string) => request(`/search?q=${encodeURIComponent(q)}`),
   share: (id: string) => request(`/share/${id}`),
-  updateProfile: (body: { age: number; sex: 'F'|'M'|'other'|'na'; region: string; favorite_categories: string[]; profession?: string; nickname?: string }) =>
+  updateProfile: (body: { age: number; sex: 'F'|'M'|'other'|'na'; region: string; favorite_categories: string[]; profession?: string; nickname?: string; display_name?: string }) =>
     request('/auth/me/profile', { method: 'PATCH', body: JSON.stringify(body) }),
   professions: () => request('/professions'),
   updateDetails: (body: { bio?: string; social_links?: Record<string, string> }) =>
@@ -233,6 +233,7 @@ export type User = {
   sex?: 'F' | 'M' | 'other' | 'na' | null;
   region?: string | null;
   profession?: string | null;
+  display_name?: string | null;
   favorite_categories?: string[];
   push_notifications?: boolean;
   onboarding_completed?: boolean;
@@ -267,6 +268,7 @@ export type PublicUser = {
   minority_votes: number;
   badge: User['badge'];
   profession?: string | null;
+  display_name?: string | null;
   region?: string | null;
 };
 

@@ -78,6 +78,11 @@ export default function Profile() {
   const [professionsList, setProfessionsList] = useState<string[]>([]);
   const [professionOpen, setProfessionOpen] = useState(false);
   const [savingProfession, setSavingProfession] = useState(false);
+  const [identityOpen, setIdentityOpen] = useState(false);
+  const [editNick, setEditNick] = useState("");
+  const [editDisplay, setEditDisplay] = useState("");
+  const [savingIdentity, setSavingIdentity] = useState(false);
+  const [identityError, setIdentityError] = useState<string | null>(null);
   const [editSel, setEditSel] = useState<Set<string>>(new Set());
   const [savingPrefs, setSavingPrefs] = useState(false);
   const [prefsError, setPrefsError] = useState<string | null>(null);
@@ -589,9 +594,11 @@ export default function Profile() {
             )}
             <View style={{ flex: 1 }}>
               <Text style={styles.nickname} testID="profile-nickname">{user.nickname}</Text>
-              <Text style={styles.provider}>
-                {user.auth_provider === "email" ? "Email" : user.auth_provider === "google" ? "Google" : "Anonimo"}
-              </Text>
+              {user.display_name ? (
+                <Text style={styles.displayName} testID="profile-display-name">
+                  {user.display_name}
+                </Text>
+              ) : null}
             </View>
           </View>
           {!isAnonymous && user.bio ? <Text style={styles.headerBio} testID="profile-bio">{user.bio}</Text> : null}
@@ -695,6 +702,24 @@ export default function Profile() {
                 </Pressable>
               </View>
             )}
+          </View>
+        )}
+
+        {!isAnonymous && (
+          <View style={styles.prefsSection} testID="identity-section">
+            <Pressable
+              onPress={() => {
+                setEditNick(user.nickname || "");
+                setEditDisplay(user.display_name || "");
+                setIdentityError(null);
+                setIdentityOpen(true);
+              }}
+              testID="identity-open"
+              style={styles.prefsHeadRow}
+            >
+              <Text style={styles.prefsTitle}>MODIFICA IDENTITÀ</Text>
+              <Ionicons name="chevron-forward" size={20} color={colors.onSurface} />
+            </Pressable>
           </View>
         )}
 
@@ -1034,6 +1059,98 @@ export default function Profile() {
       />
 
       <Modal
+        visible={identityOpen}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setIdentityOpen(false)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalSheet} testID="identity-modal">
+            <View style={styles.modalHead}>
+              <Text style={styles.modalTitle}>MODIFICA IDENTITÀ</Text>
+              <Pressable onPress={() => setIdentityOpen(false)} testID="identity-modal-close" hitSlop={10}>
+                <Ionicons name="close" size={26} color={colors.onSurfaceInverse} />
+              </Pressable>
+            </View>
+            <ScrollView contentContainerStyle={{ padding: spacing.lg, gap: spacing.md }}>
+              <Text style={styles.fieldLabelIdent}>NICKNAME</Text>
+              <TextInput
+                testID="identity-nickname-input"
+                style={styles.identInput}
+                value={editNick}
+                onChangeText={(t) => setEditNick(t.replace(/^@+/, "").slice(0, 24))}
+                placeholder="es. gossip_queen"
+                placeholderTextColor={colors.muted}
+                autoCapitalize="none"
+                autoCorrect={false}
+                maxLength={24}
+              />
+              <Text style={styles.identHint}>2-24 caratteri. Deve essere unico.</Text>
+
+              <Text style={[styles.fieldLabelIdent, { marginTop: spacing.md }]}>NOME MOSTRATO</Text>
+              <TextInput
+                testID="identity-display-input"
+                style={styles.identInput}
+                value={editDisplay}
+                onChangeText={(t) => setEditDisplay(t.slice(0, 40))}
+                placeholder="Es. Mario Rossi (opzionale)"
+                placeholderTextColor={colors.muted}
+                maxLength={40}
+              />
+              <Text style={styles.identHint}>Visualizzato sotto al nickname. Lascia vuoto per rimuoverlo.</Text>
+
+              {identityError ? (
+                <Text style={styles.identError} testID="identity-error">{identityError}</Text>
+              ) : null}
+
+              <Pressable
+                testID="identity-save"
+                onPress={async () => {
+                  if (!user) return;
+                  const nick = editNick.trim();
+                  if (nick.length < 2 || nick.length > 24) {
+                    setIdentityError("Il nickname deve avere 2-24 caratteri");
+                    return;
+                  }
+                  if (!user.age || !user.sex || !user.region) {
+                    setIdentityError("Completa prima l'onboarding");
+                    return;
+                  }
+                  setSavingIdentity(true);
+                  setIdentityError(null);
+                  try {
+                    await api.updateProfile({
+                      age: user.age,
+                      sex: user.sex as "F" | "M" | "other" | "na",
+                      region: user.region,
+                      favorite_categories: user.favorite_categories || [],
+                      nickname: nick,
+                      display_name: editDisplay.trim(),
+                      ...(user.profession ? { profession: user.profession } : {}),
+                    });
+                    await refreshMe();
+                    setIdentityOpen(false);
+                  } catch (e: any) {
+                    setIdentityError(e?.message || e?.detail || "Impossibile salvare");
+                  } finally {
+                    setSavingIdentity(false);
+                  }
+                }}
+                disabled={savingIdentity}
+                style={styles.identSaveBtn}
+              >
+                {savingIdentity ? (
+                  <ActivityIndicator color={colors.onBrandPrimary} />
+                ) : (
+                  <Text style={styles.identSaveTxt}>SALVA</Text>
+                )}
+              </Pressable>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
         visible={professionOpen}
         animationType="slide"
         transparent
@@ -1120,6 +1237,12 @@ const styles = StyleSheet.create({
   brand: { color: colors.onSurfaceInverse, fontSize: font.sizes.xxxl, letterSpacing: 2, fontWeight: "500" },
   nickname: { color: colors.brandSecondary, fontSize: font.sizes.xxl, fontWeight: "500" },
   provider: { color: colors.onSurfaceInverse, fontSize: font.sizes.sm, opacity: 0.7, marginTop: spacing.xs },
+  displayName: {
+    color: colors.onSurfaceInverse,
+    fontSize: font.sizes.sm,
+    opacity: 0.6,
+    marginTop: 2,
+  },
   badgeBlock: { alignItems: "center", padding: spacing.xl, borderBottomWidth: 2, borderColor: colors.border },
   badgeIcon: { width: 140, height: 140, borderWidth: 2, borderColor: colors.border, backgroundColor: colors.surfaceTertiary, alignItems: "center", justifyContent: "center" },
   badgeTitle: { fontSize: font.sizes.xxl, letterSpacing: 2, fontWeight: "500", color: colors.onSurface, marginTop: spacing.md },

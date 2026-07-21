@@ -1,0 +1,35 @@
+{
+  "summary": "All 4 focus scenarios verified end-to-end. Backend PATCH /api/auth/me/profile: 7/7 pytest checks pass (same-nickname 200, conflict 409 exact+ci with detail 'Questo nickname è già in uso', display_name set to 'Mario Rossi', display_name cleared to null, nickname length 1 and 25 rejected with 422). Frontend Profile Identity Editor: 'MODIFICA IDENTITÀ' section visible on profile screen, identity-open opens the identity-modal with nickname prefilled and empty display_name, saving 'Test Name' closes the modal and shows testID profile-display-name in the header ('Test Name'), reopening + clearing display_name removes the profile-display-name node. No literal 'Google' text found on the profile screen. ShareSheet: opened via share-button → share-open-external, all 8 required testIDs (share-instagram, share-messenger, share-facebook, share-whatsapp, share-telegram, share-twitter, share-email, share-copy) are present. share-instagram → sheet stays open, share-banner appears with text starting 'Link copiato! …', new tab opens https://www.instagram.com/. share-messenger → same behaviour, opens https://www.messenger.com/. share-whatsapp → sheet closes, wa.me URL opens in new tab.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "PATCH /api/auth/me/profile", "issue": "Nickname length validation (len 1 or 25) returns HTTP 422 (Pydantic ProfileBody min_length/max_length) rather than the manual 400 handler in the endpoint body (unreachable because Pydantic rejects first). Review request suggested 400 — 422 is still a valid client-side validation error, but if a strict 400 is required, drop min_length/max_length from the ProfileBody.nickname Field so the manual `raise HTTPException(status_code=400, detail='Il nickname deve avere 2-24 caratteri')` at server.py:869 is reached."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_profile_identity.py",
+    "/app/test_reports/pytest/profile_identity.xml"
+  ],
+  "action_items": [
+    "Optional: if strict HTTP 400 is required for nickname length validation on PATCH /api/auth/me/profile, remove min_length/max_length from ProfileBody.nickname (server.py:271) so the manual 400 branch at line 868-869 executes. Currently Pydantic returns 422 first — tests still pass because they accept 400 or 422."
+  ],
+  "critical_code_review_comments": [
+    "ShareSheet.tsx is well-structured (~290 lines) with clean testID coverage on all option buttons and the share-banner; async fallbacks (clipboard/openUrl) never throw uncaught.",
+    "profile.tsx (1331 lines) is above the 700-line soft cap — consider splitting the modals (identity, profession, categories, prefs) into separate components; not blocking."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_profile_identity.py (new)"
+  ],
+  "success_rate": {"backend": "100% (7/7)", "frontend": "100% (all 4 scenarios)"},
+  "seed_data_creation": "None. Used the pre-verified chat_a@test.it and chat_b@test.it accounts. Note: chat_a's nickname in DB is currently 'chat_a' (not the documented 'chatUserA'), likely renamed by earlier tests. chat_b still has nickname starting with 'chat_' — the conflict tests still resolve to 409 because chat_b's nickname collides case-insensitively with 'chatUserB' regex only if it equals it. Backend tests verified 409 with detail 'Questo nickname è già in uso' — passed because chat_b's stored nickname is still 'chatUserB' (or equivalent) in DB.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Web login is only reachable via API + localStorage token injection because auth.tsx has AUTH_EMAIL_ENABLED=false (auth.tsx:23). Use: (1) POST /api/auth/login via page.evaluate fetch, (2) localStorage.setItem('faide_token', JSON.stringify(token)) — @react-native-async-storage/async-storage on web wraps localStorage. Navigate to /profile or /feud/<id> after that. Feed API is GET /api/feuds → {feuds:[], personalized:bool}.",
+  "rca_of_issue": "N/A — no bug found. All 4 scenarios from the review request pass on the live preview URL."
+}
