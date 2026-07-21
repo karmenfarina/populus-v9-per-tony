@@ -14,7 +14,7 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "@/src/api";
 import { useAuth } from "@/src/auth/AuthContext";
-import { useSmartBack } from "@/src/utils/useSmartBack";
+import { navStack } from "@/src/utils/navStack";
 import { colors, font, spacing } from "@/src/theme";
 
 /**
@@ -48,7 +48,21 @@ const DEBOUNCE_MS = 260;
 export default function CircleFindScreen() {
   const router = useRouter();
   const { user } = useAuth();
-  const goBack = useSmartBack(user ? `/circle/${user.user_id}` : "/profile");
+  // Custom back: go DIRECTLY to the profile (not to the Cerchia) so
+  // the user doesn't have to walk through the intermediate Cerchia
+  // screen every time they close the search sheet. The "+" button
+  // that opens this screen lives on the Cerchia header, but from a
+  // UX perspective this feels like a modal — closing it should return
+  // to the tab root.
+  const goBack = useCallback(() => {
+    // Also purge our custom nav-stack entry for this screen so a
+    // subsequent Profile → Cerchia navigation doesn't accidentally
+    // return here via chain-back.
+    try {
+      navStack.popAndPeek();
+    } catch { /* noop */ }
+    router.replace("/profile");
+  }, [router]);
 
   const [q, setQ] = useState("");
   const [rows, setRows] = useState<Row[]>([]);
