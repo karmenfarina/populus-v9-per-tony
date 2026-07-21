@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import {
   View, Text, StyleSheet, Pressable, ActivityIndicator, ScrollView, Image, Linking, Modal, TextInput, Alert,
 } from "react-native";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { api, PublicUser, HistoryItem } from "@/src/api";
@@ -78,23 +78,28 @@ export default function UserPublicScreen() {
 
   // Circle status — whether target is in MY circle, plus the target's own
   // circle count (shown as a chip whether or not I'm the owner).
-  useEffect(() => {
-    if (!id) return;
-    (async () => {
-      // Target's circle count (for the chip label). We can always ask; the
-      // endpoint honours privacy but still returns count.
-      try {
-        const c = await api.circleGet(id);
-        setCircleCount(c?.count ?? 0);
-      } catch { /* silent */ }
-      if (me && !me.is_anonymous && me.user_id !== id) {
+  // Wrapped in useFocusEffect so returning to this screen after removing
+  // the target elsewhere (own circle, someone else's circle) always
+  // refreshes the "AGGIUNGI/NELLA CERCHIA" toggle to the correct state.
+  useFocusEffect(
+    useCallback(() => {
+      if (!id) return;
+      let cancelled = false;
+      (async () => {
         try {
-          const s = await api.circleStatus(id);
-          setInCircle(!!s?.in_circle);
+          const c = await api.circleGet(id);
+          if (!cancelled) setCircleCount(c?.count ?? 0);
         } catch { /* silent */ }
-      }
-    })();
-  }, [id, me]);
+        if (me && !me.is_anonymous && me.user_id !== id) {
+          try {
+            const s = await api.circleStatus(id);
+            if (!cancelled) setInCircle(!!s?.in_circle);
+          } catch { /* silent */ }
+        }
+      })();
+      return () => { cancelled = true; };
+    }, [id, me]),
+  );
 
   const toggleCircle = async () => {
     if (!id || circleWorking) return;

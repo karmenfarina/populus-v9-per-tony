@@ -161,6 +161,11 @@ export default function Profile() {
   // just fall through to `replace("/auth")`.
   const doLogout = useCallback(async () => {
     try { await logout(); } catch { /* still navigate away */ }
+    // Reset the custom nav stack so a re-login starts from a clean slate.
+    try {
+      const { navStack } = await import("@/src/utils/navStack");
+      navStack.clear();
+    } catch { /* noop */ }
     try { (router as any).dismissAll?.(); } catch { /* noop */ }
     router.replace("/auth");
   }, [logout, router]);

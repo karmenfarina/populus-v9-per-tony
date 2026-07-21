@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
   Switch,
   Alert,
+  Modal,
   Platform,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -100,30 +101,31 @@ export default function CircleScreen() {
     }
   };
 
+  // Confirmation dialog state — used to remove someone from MY circle.
+  // A custom in-app modal is preferred over `window.confirm()` on web
+  // because the browser dialog surfaces the site URL in its header,
+  // which leaks the app hostname and looks unpolished.
+  const [confirmRemove, setConfirmRemove] = useState<Member | null>(null);
+
   // Owner-only: hard removal from MY circle (used only when viewing my
   // own circle). Removes locally on success and syncs the count chip.
-  const removeMember = (m: Member) => {
-    const run = async () => {
-      setPending((p) => ({ ...p, [m.user_id]: true }));
-      try {
-        await api.circleRemove(m.user_id);
-        setMembers((prev) => prev.filter((x) => x.user_id !== m.user_id));
-        setCount((c) => Math.max(0, c - 1));
-      } catch (e: any) {
-        Alert.alert("Errore", e?.detail || "Impossibile rimuovere");
-      } finally {
-        setPending((p) => { const { [m.user_id]: _, ...rest } = p; return rest; });
-      }
-    };
-    if (Platform.OS === "web") {
-      if (typeof window !== "undefined" && window.confirm(`Rimuovere @${m.nickname} dalla tua cerchia?`)) run();
-      return;
+  const runRemove = async (m: Member) => {
+    setPending((p) => ({ ...p, [m.user_id]: true }));
+    try {
+      await api.circleRemove(m.user_id);
+      setMembers((prev) => prev.filter((x) => x.user_id !== m.user_id));
+      setCount((c) => Math.max(0, c - 1));
+    } catch (e: any) {
+      Alert.alert("Errore", e?.detail || "Impossibile rimuovere");
+    } finally {
+      setPending((p) => { const { [m.user_id]: _, ...rest } = p; return rest; });
     }
-    Alert.alert(
-      "Rimuovi dalla cerchia",
-      `Rimuovere @${m.nickname}?`,
-      [{ text: "Annulla", style: "cancel" }, { text: "Rimuovi", style: "destructive", onPress: run }],
-    );
+  };
+
+  const removeMember = (m: Member) => {
+    // Uniform in-app modal on both web and native so the confirmation
+    // is minimal and chrome-free (no site URL, no OS-alert header).
+    setConfirmRemove(m);
   };
 
   // Non-owner view: tap "AGGIUNGI/NELLA CERCHIA" to toggle whether the
@@ -283,6 +285,48 @@ export default function CircleScreen() {
           testID="circle-list"
         />
       )}
+
+      {/* Minimal in-app confirmation modal — no browser chrome, no
+          site URL header, just the question and two actions. */}
+      <Modal
+        transparent
+        animationType="fade"
+        visible={!!confirmRemove}
+        onRequestClose={() => setConfirmRemove(null)}
+        testID="circle-remove-confirm-modal"
+      >
+        <Pressable
+          style={styles.confirmBackdrop}
+          onPress={() => setConfirmRemove(null)}
+        >
+          <Pressable style={styles.confirmCard} onPress={() => { /* swallow */ }}>
+            <Text style={styles.confirmTitle}>Rimuovi dalla cerchia</Text>
+            <Text style={styles.confirmBody}>
+              Rimuovere <Text style={styles.confirmNick}>@{confirmRemove?.nickname}</Text> dalla tua cerchia?
+            </Text>
+            <View style={styles.confirmBtnRow}>
+              <Pressable
+                onPress={() => setConfirmRemove(null)}
+                style={[styles.confirmBtn, styles.confirmBtnGhost]}
+                testID="circle-remove-cancel"
+              >
+                <Text style={styles.confirmBtnGhostTxt}>ANNULLA</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => {
+                  const m = confirmRemove;
+                  setConfirmRemove(null);
+                  if (m) runRemove(m);
+                }}
+                style={[styles.confirmBtn, styles.confirmBtnDanger]}
+                testID="circle-remove-confirm"
+              >
+                <Text style={styles.confirmBtnDangerTxt}>RIMUOVI</Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -339,4 +383,68 @@ const styles = StyleSheet.create({
   emptyBox: { alignItems: "center", justifyContent: "center", padding: spacing.xl, gap: spacing.sm },
   emptyTitle: { color: colors.onSurface, fontSize: font.sizes.lg, fontWeight: "600", marginTop: spacing.sm },
   emptySub: { color: colors.muted, fontSize: font.sizes.sm, textAlign: "center" },
+  // In-app confirmation modal (used for the "remove from circle" action).
+  confirmBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: spacing.xl,
+  },
+  confirmCard: {
+    width: "100%",
+    maxWidth: 340,
+    backgroundColor: colors.surface,
+    borderWidth: 2,
+    borderColor: colors.border,
+    padding: spacing.lg,
+    gap: spacing.md,
+  },
+  confirmTitle: {
+    color: colors.onSurface,
+    fontSize: font.sizes.lg,
+    fontWeight: "700",
+    letterSpacing: 1,
+  },
+  confirmBody: {
+    color: colors.onSurface,
+    fontSize: font.sizes.base,
+    lineHeight: 20,
+  },
+  confirmNick: {
+    fontWeight: "700",
+    color: colors.brandPrimary,
+  },
+  confirmBtnRow: {
+    flexDirection: "row",
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+    justifyContent: "flex-end",
+  },
+  confirmBtn: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    minWidth: 96,
+    alignItems: "center",
+  },
+  confirmBtnGhost: {
+    borderWidth: 2,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  confirmBtnGhostTxt: {
+    color: colors.onSurface,
+    fontWeight: "700",
+    fontSize: font.sizes.sm,
+    letterSpacing: 1,
+  },
+  confirmBtnDanger: {
+    backgroundColor: colors.error,
+  },
+  confirmBtnDangerTxt: {
+    color: "#FFFFFF",
+    fontWeight: "700",
+    fontSize: font.sizes.sm,
+    letterSpacing: 1,
+  },
 });
