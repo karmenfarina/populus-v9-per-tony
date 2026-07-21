@@ -11,6 +11,7 @@ import { api, Feud } from "@/src/api";
 import { useAuth } from "@/src/auth/AuthContext";
 import { colors, spacing, font } from "@/src/theme";
 import FeudCard from "@/src/components/FeudCard";
+import StoriesBar from "@/src/components/StoriesBar";
 
 const ALL_CAT = { id: "all", label: "Tutte" };
 const HYPE_CAT = { id: "hype", label: "🔥 Hype" };
@@ -252,6 +253,11 @@ export default function HomeFeed() {
           </View>
         )}
       </View>
+
+      {/* Instagram-style stories strip — placed directly below the
+          header and above the category chips. Renders empty for
+          anonymous accounts. */}
+      <StoriesBar />
 
       <View style={styles.chipRowWrap}>
         <ScrollView

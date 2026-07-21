@@ -156,6 +156,8 @@ export default function TabsLayout() {
       <Tabs.Screen name="archive" options={{ href: null }} />
       <Tabs.Screen name="support" options={{ href: null }} />
       <Tabs.Screen name="admin" options={{ href: null }} />
+      <Tabs.Screen name="stories/viewer/[userId]" options={{ href: null }} />
+      <Tabs.Screen name="stories/hidden_viewers" options={{ href: null }} />
     </Tabs>
   );
 }

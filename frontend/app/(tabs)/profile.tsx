@@ -929,8 +929,7 @@ export default function Profile() {
                 <Ionicons name={blocksOpen ? "chevron-up" : "chevron-down"} size={20} color={colors.onSurface} />
               </View>
             </Pressable>
-            {blocksOpen ? (
-              <View style={{ marginTop: spacing.sm, gap: spacing.sm }}>
+            {blocksOpen ? (<View style={{ marginTop: spacing.sm, gap: spacing.sm }}>
                 {loadingBlocks ? (
                   <ActivityIndicator color={colors.brandPrimary} />
                 ) : blockedList.length === 0 ? (
@@ -961,6 +960,26 @@ export default function Profile() {
               </View>
             ) : null}
           </View>
+        )}
+
+        {/* Story privacy shortcut — takes the user to the dynamic
+            audience roster where they can silence individual followers.
+            Hidden for anonymous accounts (they can't publish stories). */}
+        {!isAnonymous && (
+          <Pressable
+            style={styles.storyPrivacyRow}
+            onPress={() => router.push("/stories/hidden_viewers" as any)}
+            testID="stories-privacy-open"
+          >
+            <View style={styles.storyPrivacyIcon}>
+              <Ionicons name="eye-off-outline" size={20} color={colors.brandPrimary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.storyPrivacyTitle}>CHI VEDE LE MIE STORIE</Text>
+              <Text style={styles.storyPrivacySub}>Gestisci chi può vedere ciò che pubblichi</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={colors.muted} />
+          </Pressable>
         )}
 
         <View style={styles.historySection} testID="history-section">
@@ -1520,6 +1539,37 @@ const styles = StyleSheet.create({
   adminLinkTxt: { fontSize: font.sizes.xs, letterSpacing: 2, color: colors.muted, fontWeight: "500" },
   prefsSection: { padding: spacing.lg, borderBottomWidth: 2, borderColor: colors.border, gap: spacing.sm },
   blockedEmpty: { color: colors.muted, fontSize: font.sizes.sm, fontStyle: "italic" },
+  storyPrivacyRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    borderBottomWidth: 2,
+    borderBottomColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  storyPrivacyIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.surfaceSecondary,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  storyPrivacyTitle: {
+    color: colors.onSurface,
+    fontSize: font.sizes.sm,
+    fontWeight: "700",
+    letterSpacing: 1.2,
+  },
+  storyPrivacySub: {
+    color: colors.muted,
+    fontSize: font.sizes.xs,
+    marginTop: 2,
+  },
   blockedRow: {
     flexDirection: "row",
     alignItems: "center",

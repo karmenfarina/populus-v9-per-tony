@@ -7,6 +7,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { colors, spacing, font } from "@/src/theme";
 import { api } from "@/src/api";
 import { useAuth } from "@/src/auth/AuthContext";
+import StoryComposerModal from "@/src/components/StoryComposerModal";
 
 /**
  * Instagram-style share-to-user sheet.
@@ -32,11 +33,21 @@ type Props = {
   visible: boolean;
   feudId: string;
   feudTitle?: string;
+  // Compact info used by the story composer preview card. Optional
+  // so existing callers that don't have the full snapshot handy stay
+  // compatible.
+  feudCategoryLabel?: string;
+  feudPartyA?: string;
+  feudPartyB?: string;
+  feudImageUrl?: string;
   onClose: () => void;
   onOpenExternal?: () => void;
 };
 
-export default function InAppShareSheet({ visible, feudId, feudTitle, onClose, onOpenExternal }: Props) {
+export default function InAppShareSheet({
+  visible, feudId, feudTitle, feudCategoryLabel, feudPartyA, feudPartyB, feudImageUrl,
+  onClose, onOpenExternal,
+}: Props) {
   const { user } = useAuth();
   const [suggestions, setSuggestions] = useState<Suggested[]>([]);
   const [loadingSug, setLoadingSug] = useState(false);
@@ -47,6 +58,10 @@ export default function InAppShareSheet({ visible, feudId, feudTitle, onClose, o
   const [caption, setCaption] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Story composer overlay — invoked from the pinned "Aggiungi alla
+  // tua storia" CTA at the top of the sheet.
+  const [storyOpen, setStoryOpen] = useState(false);
+  const canPostStory = !!user && !user.is_anonymous && (user as any)?.auth_provider !== "anonymous";
   // Circle mode: when active the sheet shows the user's own circle (up to
   // 45 friends) instead of the interaction-based suggestions.
   const [circleMode, setCircleMode] = useState(false);
@@ -205,6 +220,26 @@ export default function InAppShareSheet({ visible, feudId, feudTitle, onClose, o
           >
             <View style={styles.handleWrap}><View style={styles.handle} /></View>
 
+            {/* Prominent CTA — post the current feud as a 24 h story
+                visible to the user's Cerchia. Hidden entirely for
+                anonymous accounts (they can't publish stories). */}
+            {canPostStory ? (
+              <Pressable
+                onPress={() => setStoryOpen(true)}
+                style={styles.storyCta}
+                testID="in-app-add-to-story"
+              >
+                <View style={styles.storyCtaIcon}>
+                  <Ionicons name="add" size={20} color="#fff" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.storyCtaTitle}>Aggiungi alla tua storia</Text>
+                  <Text style={styles.storyCtaSub}>Visibile alla tua Cerchia per 24 ore</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color={colors.muted} />
+              </Pressable>
+            ) : null}
+
             {/* Mode switch: interaction-based suggestions ↔ my circle. */}
             {user && !user.is_anonymous ? (
               <View style={styles.modeRow}>
@@ -337,12 +372,60 @@ export default function InAppShareSheet({ visible, feudId, feudTitle, onClose, o
           </KeyboardAvoidingView>
         </Pressable>
       </Pressable>
+      {/* Story composer overlay — a separate Modal so it sits ABOVE
+          the share sheet in the z-stack and can be dismissed
+          independently. Publishing closes both sheets. */}
+      <StoryComposerModal
+        visible={storyOpen}
+        feud={feudId ? {
+          feud_id: feudId,
+          title: feudTitle,
+          category_label: feudCategoryLabel,
+          party_a: feudPartyA,
+          party_b: feudPartyB,
+          image_url: feudImageUrl,
+        } : null}
+        onClose={() => setStoryOpen(false)}
+        onPublished={() => { setStoryOpen(false); onClose(); }}
+      />
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
   backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "flex-end" },
+  storyCta: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    marginHorizontal: spacing.xs,
+    marginTop: spacing.xs,
+    marginBottom: spacing.sm,
+    backgroundColor: colors.surfaceSecondary,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+  },
+  storyCtaIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.brandPrimary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  storyCtaTitle: {
+    color: colors.onSurface,
+    fontSize: font.sizes.sm,
+    fontWeight: "700",
+  },
+  storyCtaSub: {
+    color: colors.muted,
+    fontSize: font.sizes.xs,
+    marginTop: 2,
+  },
   sheet: {
     backgroundColor: colors.surface,
     borderTopLeftRadius: 20,

@@ -5794,6 +5794,429 @@ async def get_circle(owner_id: str, q: str = '', user: dict = Depends(get_curren
     }
 
 
+# ═════════════════════════════════════════════════════════════════════
+#   STORIES  —  Instagram-style, 24 h ephemeral, feud-only content.
+#
+#   A "story" is a lightweight share primitive: the author picks a feud
+#   they want to broadcast to their reachable audience (i.e. anyone who
+#   has them in their circle) and optionally attaches a short comment
+#   with their take on it. Stories auto-expire after 24 h — the read
+#   endpoint filters by `expires_at > now()` so no cron job is needed.
+#
+#   Visibility rules (very intentional):
+#     • You SEE the stories of anyone YOU have added to your circle
+#       (one-way relationship, matches user's mental model of "these
+#       are the people I follow").
+#     • The story AUTHOR can hide specific viewers via a per-user
+#       blocklist stored on the users doc as `story_hidden_viewers`.
+#       This is applied when computing whether a story is visible.
+#     • Anonymous accounts CANNOT publish stories (product decision —
+#       same rule as Cerchia). They can still VIEW others' stories if
+#       they have friends in their (empty) circle → impossible, so
+#       effectively anons see nothing.
+#
+#   Quota: 20 stories / rolling 24 h per author.
+# ═════════════════════════════════════════════════════════════════════
+
+STORY_TTL_HOURS = 24
+STORY_DAILY_QUOTA = 20
+STORY_COMMENT_MAX = 200
+
+
+class StoryCreateBody(BaseModel):
+    feud_id: str
+    comment: Optional[str] = Field(default=None, max_length=STORY_COMMENT_MAX)
+
+
+class StoryReplyBody(BaseModel):
+    text: str = Field(min_length=1, max_length=1000)
+
+
+async def _story_is_visible_to(story: dict, viewer_id: Optional[str]) -> bool:
+    """Return True if `viewer_id` may see this story.
+
+    Rules (see module header):
+      1. Author can always see their own stories.
+      2. Viewer must have the author in their circle.
+      3. Viewer must NOT be on the author's `story_hidden_viewers` list.
+    """
+    if not story:
+        return False
+    author_id = story.get('user_id')
+    if not author_id:
+        return False
+    if viewer_id and viewer_id == author_id:
+        return True
+    if not viewer_id:
+        return False
+    # Viewer must follow the author (author is in viewer's circle).
+    viewer = await db.users.find_one({'user_id': viewer_id}, {'_id': 0, 'circle': 1})
+    if not viewer:
+        return False
+    circle = set(viewer.get('circle') or [])
+    if author_id not in circle:
+        return False
+    # Author must not have hidden this viewer.
+    author = await db.users.find_one(
+        {'user_id': author_id},
+        {'_id': 0, 'story_hidden_viewers': 1},
+    )
+    hidden = set((author or {}).get('story_hidden_viewers') or [])
+    if viewer_id in hidden:
+        return False
+    return True
+
+
+def _story_expired(story: dict, ref: Optional[datetime] = None) -> bool:
+    ref = ref or now_utc()
+    exp = story.get('expires_at')
+    if not isinstance(exp, datetime):
+        return True
+    if exp.tzinfo is None:
+        exp = exp.replace(tzinfo=timezone.utc)
+    return exp <= ref
+
+
+async def _hydrate_story_row(story: dict, viewer_id: Optional[str]) -> dict:
+    """Attach the referenced feud snapshot + author + viewed flag to a
+    story doc so the frontend has everything it needs to render the
+    fullscreen viewer without follow-up requests.
+    """
+    out = {
+        'story_id': story['story_id'],
+        'user_id': story['user_id'],
+        'feud_id': story.get('feud_id'),
+        'comment': story.get('comment') or '',
+        'created_at': _iso_utc(story['created_at']) if isinstance(story.get('created_at'), datetime) else story.get('created_at'),
+        'expires_at': _iso_utc(story['expires_at']) if isinstance(story.get('expires_at'), datetime) else story.get('expires_at'),
+    }
+    # Compact feud payload — just what the story card needs. Full detail
+    # is fetched only when the user actually taps through to /feud/[id].
+    feud = await db.feuds.find_one({'feud_id': out['feud_id']}, {'_id': 0})
+    if feud:
+        _attach_percentages(feud, revealed=False)
+        out['feud'] = {
+            'feud_id': feud['feud_id'],
+            'title': feud.get('title'),
+            'category': feud.get('category'),
+            'category_label': feud.get('category_label'),
+            'party_a': feud.get('party_a'),
+            'party_b': feud.get('party_b'),
+            'image_url': feud.get('image_url'),
+            'summary': feud.get('summary'),
+        }
+    else:
+        # Feud was deleted after the story was posted — surface a placeholder
+        # so the viewer can still show the author's comment without crashing.
+        out['feud'] = None
+    # Author profile — minimal projection to keep the payload light.
+    author = await db.users.find_one(
+        {'user_id': story['user_id']},
+        {'_id': 0, 'user_id': 1, 'nickname': 1, 'display_name': 1, 'photos': 1},
+    )
+    if author:
+        photos = author.get('photos') or []
+        out['author'] = {
+            'user_id': author['user_id'],
+            'nickname': author.get('nickname'),
+            'display_name': author.get('display_name'),
+            'avatar': photos[0] if photos else None,
+        }
+    # Viewed flag — true if the viewer already saw this specific story.
+    viewers = story.get('viewers') or []
+    out['viewed'] = bool(viewer_id and viewer_id in viewers)
+    return out
+
+
+@api_router.post('/stories')
+async def create_story(body: StoryCreateBody, user: dict = Depends(get_current_user)):
+    if user.get('auth_provider') == 'anonymous' or user.get('is_anonymous'):
+        raise HTTPException(status_code=403, detail="Gli account anonimi non possono pubblicare storie")
+    # Referenced feud must exist — otherwise the story would be a broken card.
+    feud = await db.feuds.find_one({'feud_id': body.feud_id}, {'_id': 0, 'feud_id': 1})
+    if not feud:
+        raise HTTPException(status_code=404, detail='Faida non trovata')
+
+    # Comment moderation — same two-stage pipeline used by feud comments.
+    clean_comment = ''
+    if body.comment and body.comment.strip():
+        clean_comment, flagged = _moderate_text(body.comment)
+        if flagged:
+            await _log_flagged(user['user_id'], body.feud_id, body.comment, flagged)
+            raise HTTPException(
+                status_code=400,
+                detail=f"Commento bloccato: contiene termini non consentiti ({', '.join(flagged)})",
+            )
+        ai_safe, ai_reason = await _ai_moderate_comment(clean_comment)
+        if not ai_safe:
+            await _log_flagged(user['user_id'], body.feud_id, clean_comment, [f'ai:{ai_reason or "unsafe"}'])
+            raise HTTPException(
+                status_code=400,
+                detail='Commento bloccato: contenuto non consentito (hate speech, minacce o incitamento alla violenza).',
+            )
+
+    # Rolling-window quota: count stories by this author in the last 24 h.
+    since = now_utc() - timedelta(hours=STORY_TTL_HOURS)
+    recent = await db.stories.count_documents({
+        'user_id': user['user_id'],
+        'created_at': {'$gte': since},
+    })
+    if recent >= STORY_DAILY_QUOTA:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Hai raggiunto il limite di {STORY_DAILY_QUOTA} storie giornaliere.",
+        )
+
+    created = now_utc()
+    doc = {
+        'story_id': new_id('story'),
+        'user_id': user['user_id'],
+        'feud_id': body.feud_id,
+        'comment': clean_comment,
+        'created_at': created,
+        'expires_at': created + timedelta(hours=STORY_TTL_HOURS),
+        'viewers': [],
+    }
+    await db.stories.insert_one(doc)
+    return {'story': await _hydrate_story_row(doc, user['user_id'])}
+
+
+@api_router.get('/stories/feed')
+async def stories_feed(user: dict = Depends(get_current_user)):
+    """Return stories grouped by author. Groups with any unseen story
+    come first (`has_unseen: true`), then already-seen groups. Within a
+    group stories are chronological (oldest → newest) so the fullscreen
+    viewer can play them in order.
+
+    Feed sources: (1) the caller's own stories (always first), (2) every
+    author in the caller's circle. Story-level hide-list is applied for
+    circle authors — an author can silence individual viewers.
+    """
+    now = now_utc()
+    me = user['user_id']
+    my_doc = await db.users.find_one({'user_id': me}, {'_id': 0, 'circle': 1})
+    circle_ids = list((my_doc or {}).get('circle') or [])
+
+    # Collect all authors we may show: self + circle.
+    author_ids = list({me, *circle_ids})
+    cur = db.stories.find(
+        {'user_id': {'$in': author_ids}, 'expires_at': {'$gt': now}},
+        {'_id': 0},
+    ).sort('created_at', 1)
+    all_stories = await cur.to_list(2000)
+
+    # Group by author + apply per-story visibility (hidden viewers).
+    groups: dict = {}
+    for s in all_stories:
+        author_id = s['user_id']
+        if author_id != me:
+            visible = await _story_is_visible_to(s, me)
+            if not visible:
+                continue
+        groups.setdefault(author_id, []).append(s)
+
+    hydrated_groups: list = []
+    for author_id, stories in groups.items():
+        rows = [await _hydrate_story_row(s, me) for s in stories]
+        has_unseen = any(not r['viewed'] for r in rows)
+        # Sort key for the bar: latest created_at (int seconds) — the
+        # frontend uses it to render "newest first" within each bucket.
+        latest = max(
+            (datetime.fromisoformat(r['created_at'].replace('Z', '+00:00')) for r in rows if r.get('created_at')),
+            default=now,
+        )
+        hydrated_groups.append({
+            'user_id': author_id,
+            'author': rows[0]['author'] if rows and rows[0].get('author') else None,
+            'has_unseen': has_unseen,
+            'is_mine': author_id == me,
+            'stories': rows,
+            'latest_ts': _iso_utc(latest),
+        })
+
+    # Sorting rules for the top strip:
+    #   1. Mine always first (even if all seen).
+    #   2. Unseen groups next, newest first.
+    #   3. Seen groups last, newest first.
+    def _sort_key(g):
+        mine = 0 if g['is_mine'] else 1
+        unseen = 0 if g['has_unseen'] else 1
+        return (mine, unseen, -datetime.fromisoformat(g['latest_ts'].replace('Z', '+00:00')).timestamp())
+
+    hydrated_groups.sort(key=_sort_key)
+    return {'groups': hydrated_groups, 'ttl_hours': STORY_TTL_HOURS, 'quota': STORY_DAILY_QUOTA}
+
+
+@api_router.get('/stories/user/{author_id}')
+async def stories_by_user(author_id: str, user: dict = Depends(get_current_user)):
+    """Return the full chronological story sequence for a specific
+    author. Used by the fullscreen viewer when the user taps into a
+    circle from the top strip.
+    """
+    now = now_utc()
+    cur = db.stories.find(
+        {'user_id': author_id, 'expires_at': {'$gt': now}},
+        {'_id': 0},
+    ).sort('created_at', 1)
+    docs = await cur.to_list(200)
+    me = user['user_id']
+    out = []
+    for s in docs:
+        if author_id != me:
+            visible = await _story_is_visible_to(s, me)
+            if not visible:
+                continue
+        out.append(await _hydrate_story_row(s, me))
+    return {'user_id': author_id, 'stories': out}
+
+
+@api_router.post('/stories/{story_id}/view')
+async def mark_story_viewed(story_id: str, user: dict = Depends(get_current_user)):
+    """Idempotent viewer-tracking. Adds the caller to the story's
+    `viewers` array if not already present. The array is bounded — old
+    entries are trimmed off past 5000 to keep the doc size sane.
+    """
+    story = await db.stories.find_one({'story_id': story_id}, {'_id': 0})
+    if not story:
+        raise HTTPException(status_code=404, detail='Storia non trovata')
+    if _story_expired(story):
+        raise HTTPException(status_code=410, detail='Storia scaduta')
+    if not await _story_is_visible_to(story, user['user_id']):
+        raise HTTPException(status_code=403, detail='Non puoi visualizzare questa storia')
+    await db.stories.update_one(
+        {'story_id': story_id},
+        {'$addToSet': {'viewers': user['user_id']}},
+    )
+    return {'ok': True}
+
+
+@api_router.delete('/stories/{story_id}')
+async def delete_story(story_id: str, user: dict = Depends(get_current_user)):
+    story = await db.stories.find_one({'story_id': story_id}, {'_id': 0, 'user_id': 1})
+    if not story:
+        raise HTTPException(status_code=404, detail='Storia non trovata')
+    if story['user_id'] != user['user_id']:
+        raise HTTPException(status_code=403, detail='Non sei il proprietario di questa storia')
+    await db.stories.delete_one({'story_id': story_id})
+    return {'ok': True}
+
+
+@api_router.get('/stories/hidden_viewers')
+async def stories_hidden_viewers(user: dict = Depends(get_current_user)):
+    """Return the dynamic audience roster for the caller: everyone who
+    currently has them in their circle, annotated with a `hidden`
+    flag indicating whether the caller has silenced them.
+    """
+    me = user['user_id']
+    if user.get('auth_provider') == 'anonymous' or user.get('is_anonymous'):
+        return {'viewers': [], 'hidden_count': 0}
+    # Anyone with `me` in their circle == someone who can see my stories.
+    followers = await db.users.find(
+        {'circle': me},
+        {'_id': 0, 'user_id': 1, 'nickname': 1, 'display_name': 1, 'photos': 1, 'is_anonymous': 1, 'auth_provider': 1},
+    ).to_list(2000)
+    me_doc = await db.users.find_one({'user_id': me}, {'_id': 0, 'story_hidden_viewers': 1})
+    hidden = set((me_doc or {}).get('story_hidden_viewers') or [])
+    out = []
+    for f in followers:
+        # Anons in the follower set can't be told apart with a nickname,
+        # but we still list them so the owner can hide them explicitly.
+        photos = f.get('photos') or []
+        out.append({
+            'user_id': f['user_id'],
+            'nickname': f.get('nickname'),
+            'display_name': f.get('display_name'),
+            'avatar': photos[0] if photos else None,
+            'is_anonymous': bool(f.get('is_anonymous') or f.get('auth_provider') == 'anonymous'),
+            'hidden': f['user_id'] in hidden,
+        })
+    # Sort: not-hidden first (alpha), then hidden. Nickname collation.
+    out.sort(key=lambda r: (r['hidden'], (r.get('nickname') or '').lower()))
+    return {'viewers': out, 'hidden_count': sum(1 for r in out if r['hidden'])}
+
+
+@api_router.put('/stories/hidden_viewers/{viewer_id}')
+async def toggle_hidden_viewer(viewer_id: str, body: dict, user: dict = Depends(get_current_user)):
+    """Set/unset the hide-flag for a specific viewer. Body: {hidden: bool}."""
+    if user.get('auth_provider') == 'anonymous' or user.get('is_anonymous'):
+        raise HTTPException(status_code=403, detail="Non disponibile per account anonimi")
+    hidden = bool(body.get('hidden'))
+    op = '$addToSet' if hidden else '$pull'
+    await db.users.update_one(
+        {'user_id': user['user_id']},
+        {op: {'story_hidden_viewers': viewer_id}},
+    )
+    return {'ok': True, 'viewer_id': viewer_id, 'hidden': hidden}
+
+
+@api_router.post('/stories/{story_id}/reply')
+async def reply_to_story(story_id: str, body: StoryReplyBody, user: dict = Depends(get_current_user)):
+    """Send a DM to the story author with a pre-formatted preamble
+    referencing the story's feud. This is the "answer to a story" flow
+    familiar from Instagram — the reply lands directly in the author's
+    inbox with attached context.
+    """
+    story = await db.stories.find_one({'story_id': story_id}, {'_id': 0})
+    if not story:
+        raise HTTPException(status_code=404, detail='Storia non trovata')
+    if _story_expired(story):
+        raise HTTPException(status_code=410, detail='Storia scaduta')
+    if not await _story_is_visible_to(story, user['user_id']):
+        raise HTTPException(status_code=403, detail='Non puoi rispondere a questa storia')
+    if story['user_id'] == user['user_id']:
+        raise HTTPException(status_code=400, detail='Non puoi rispondere alla tua stessa storia')
+    # Reuse the existing DM pipeline. The message text carries a small
+    # inline reference so the recipient sees "risposta alla tua storia".
+    feud = await db.feuds.find_one({'feud_id': story.get('feud_id')}, {'_id': 0, 'title': 1})
+    ref_title = (feud or {}).get('title') or 'una tua storia'
+    dm_text = f"[Risposta alla storia: {ref_title}]\n\n{body.text.strip()}"
+    # Delegate to the same send_message logic. Rather than duplicating
+    # the moderation + throttle code we import via a tiny helper.
+    result = await _send_dm_internal(sender_id=user['user_id'], recipient_id=story['user_id'], text=dm_text)
+    return {'ok': True, 'message': result}
+
+
+async def _send_dm_internal(sender_id: str, recipient_id: str, text: str) -> dict:
+    """Backend-only helper mirroring the public `POST /messages` route
+    behaviour so story replies share the exact same delivery, blocking
+    and moderation rules as regular DMs. Kept private because we don't
+    want /api callers to bypass rate-limit gates.
+    """
+    # Check block relationship in either direction.
+    blocked = await db.user_blocks.find_one({
+        '$or': [
+            {'blocker_id': recipient_id, 'blocked_id': sender_id},
+            {'blocker_id': sender_id, 'blocked_id': recipient_id},
+        ]
+    })
+    if blocked:
+        raise HTTPException(status_code=403, detail='Impossibile inviare il messaggio')
+    clean, flagged = _moderate_text(text)
+    if flagged:
+        raise HTTPException(status_code=400, detail='Messaggio bloccato dal filtro contenuti')
+    ai_safe, _ = await _ai_moderate_comment(clean)
+    if not ai_safe:
+        raise HTTPException(status_code=400, detail='Messaggio non consentito')
+    msg = {
+        'message_id': new_id('msg'),
+        'sender_id': sender_id,
+        'recipient_id': recipient_id,
+        'text': clean,
+        'created_at': now_utc(),
+        'read_at': None,
+    }
+    await db.messages.insert_one(msg)
+    msg.pop('_id', None)
+    msg['created_at'] = _iso_utc(msg['created_at'])
+    # Best-effort websocket push — do not fail the request if it errors.
+    try:
+        await _ws_send(recipient_id, {'type': 'message.new', 'message': msg})
+        await _ws_send(sender_id, {'type': 'message.sent', 'message': msg})
+    except Exception:
+        pass
+    return msg
+
+
 
 
 app.include_router(api_router)

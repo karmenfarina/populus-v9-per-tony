@@ -179,6 +179,23 @@ export const api = {
   publicUserHistory: (id: string, filter: 'all' | 'majority' | 'minority' = 'all') =>
     request(`/users/${id}/history?filter=${filter}`),
   categoryBadges: (id: string) => request(`/users/${id}/category_badges`),
+  // ─── Stories ───────────────────────────────────────────────
+  storiesFeed: () => request('/stories/feed'),
+  storiesByUser: (userId: string) => request(`/stories/user/${userId}`),
+  createStory: (feud_id: string, comment?: string) =>
+    request('/stories', { method: 'POST', body: JSON.stringify({ feud_id, comment: comment || null }) }),
+  markStoryViewed: (story_id: string) =>
+    request(`/stories/${story_id}/view`, { method: 'POST' }),
+  deleteStory: (story_id: string) =>
+    request(`/stories/${story_id}`, { method: 'DELETE' }),
+  storiesHiddenViewers: () => request('/stories/hidden_viewers'),
+  toggleHiddenViewer: (viewer_id: string, hidden: boolean) =>
+    request(`/stories/hidden_viewers/${viewer_id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ hidden }),
+    }),
+  replyToStory: (story_id: string, text: string) =>
+    request(`/stories/${story_id}/reply`, { method: 'POST', body: JSON.stringify({ text }) }),
   archiveDates: (category?: string) =>
     request(`/feuds/archive/dates${category && category !== 'all' ? `?category=${category}` : ''}`),
   archiveFeuds: (date: string, category?: string) => {

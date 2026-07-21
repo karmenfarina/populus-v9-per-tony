@@ -1,0 +1,59 @@
+{
+  "summary": "Tested Stories backend (24 pytest cases) + smoke-tested frontend (StoriesBar, Hidden Viewers, profile entry). 19/24 backend tests pass. CRITICAL BUG: circle-based visibility is completely broken for stories — the stories code queries `db.users.circle` (an array field that is never populated) instead of the actual `db.friendships` collection where circle relationships live. Effect: NOBODY sees anyone else's stories in the feed, view/reply on a circle-member's story returns 403, and hidden_viewers list is always empty. Story creation, own-feed, delete, moderation, quota, anon-restriction, own-story-reply-guard all work correctly. Frontend components render properly (StoriesBar has correct testIDs, HiddenViewers screen loads via `stories-privacy-open`), UI just surfaces the empty backend results.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "GET /api/stories/feed  ·  GET /api/stories/user/{id}  ·  POST /api/stories/{id}/view  ·  POST /api/stories/{id}/reply  ·  GET /api/stories/hidden_viewers",
+        "issue": "Circle-membership check reads `db.users.circle` array (never populated). Actual circle relationships live in `db.friendships` collection (see `circle_add` at server.py:5687 which inserts into friendships and never touches users.circle). Result: circle_ids is always empty → every visibility check fails. Verified in Mongo: user_6e65e19525d5 (A) has 1 friendship with user_16f709708760 (B) but users doc has no `circle` field. server.py:5853, 5856-5857, 5997-5998, 6114-6115 all rely on the non-existent field.",
+        "priority": "CRITICAL"
+      }
+    ],
+    "minor": [
+      {
+        "endpoint": "POST /api/stories",
+        "issue": "Comment >200 chars returns 422 (Pydantic default). Frontend enforces 200 via `maxLength` prop but backend should probably return a friendlier 400 with an Italian message consistent with other body-validation errors."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "StoriesBar / HiddenViewers renders empty for authed user with active friendships",
+        "issue": "This is downstream of the backend circle bug. HiddenViewers screen shows '0 persone · 0 nascoste — Nessuno ti segue' for user A even though user B has A in their circle. Once the backend fix lands, retest UI end-to-end.",
+        "affected_testIDs": ["stories-bar", "stories-bar-mine", "stories-bar-{userId}", "hidden-toggle-{userId}"]
+      }
+    ],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_stories.py",
+    "/app/test_reports/pytest/stories.xml"
+  ],
+  "action_items": [
+    "FIX (CRITICAL): Replace `users.circle` lookups in stories code with reads from the `friendships` collection (source of truth). Concretely, in server.py: (a) line ~5997 `stories_feed` — derive `circle_ids` from `db.friendships.find({'user_id': me},{'friend_id':1})`; (b) `_story_is_visible_to` (5853-5857) — check `db.friendships.count_documents({'user_id':viewer_id,'friend_id':author_id})` instead of `viewer.circle`; (c) `stories_hidden_viewers` (6114-6115) — followers are `db.friendships.find({'friend_id':me},{'user_id':1})` (i.e. anyone who has ME as a friend), then look up user docs. Verify with the existing pytest suite `backend/tests/test_stories.py` — the 5 failing tests should all pass afterwards.",
+    "Optional: return 400 (with Italian detail) instead of Pydantic 422 for comment length overflow on POST /api/stories, for consistency with other endpoints.",
+    "After backend fix, re-run the frontend smoke test to confirm StoriesBar shows circle members' stories and HiddenViewers lists followers."
+  ],
+  "critical_code_review_comments": [
+    "server.py:5997 (`stories_feed`) and 5853 (`_story_is_visible_to`) and 6114 (`stories_hidden_viewers`) all read `users.circle` — this field is never written anywhere in server.py (`circle_add` at 5687 only touches `friendships`). This is the root cause of the failing tests and effectively disables the whole stories feature for non-self viewing.",
+    "server.py:5931 `create_story`: OK — checks anon (403), moderates comment (400), enforces 20/24h quota (429), returns hydrated story. All matched by tests.",
+    "server.py:6152 `reply_to_story`: Nice — reuses existing DM moderation + block-check pipeline via `_send_dm_internal`. Owner-reply guard (400 for self) works.",
+    "StoriesBar (StoriesBar.tsx): testIDs `stories-bar`, `stories-bar-mine`, `stories-bar-{userId}` all present. Anon early-return works. `openComposerOrMine` fallback pushes to `/archive` — reasonable; the primary entry to composer stays the feud share sheet (`in-app-add-to-story`).",
+    "StoryComposerModal (StoryComposerModal.tsx): 200-char client cap, moderation errors surface via Alert.alert with server message, `story-composer-publish` testID present. Solid.",
+    "No deprecated Expo packages detected (expo-av / expo-barcode-scanner / expo-background-fetch not used in the stories code paths)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_stories.py (new)"
+  ],
+  "success_rate": {
+    "backend": "79% (19/24)",
+    "frontend": "smoke only — components render and testIDs exist; end-to-end blocked by backend bug"
+  },
+  "seed_data_creation": "Created two live stories via existing test users (user_6e65e19525d5 chat_a and user_16f709708760 chat_b), also added them to each other's friendships (POST /api/circle). No new user accounts were persisted beyond the anonymous ones auto-created by tests.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Re-run `pytest /app/backend/tests/test_stories.py -v` after main agent fixes the circle-lookup mismatch. All 5 currently-failing tests should turn green: test_feed_shows_circle_member_stories, test_stories_by_user_circle_member, test_mark_viewed_idempotent, test_get_hidden_viewers_lists_followers, test_reply_creates_dm. Frontend UI checks: after fix, StoriesBar should show a `stories-bar-{userB_id}` circle when logged as A (and vice-versa), and `/stories/hidden_viewers` should list the other user with a `hidden-toggle-{userId}` switch.",
+  "rca_of_issue": "ROOT CAUSE: two disjoint data models. The circle feature (added earlier) stores friendships as documents in `db.friendships` with shape `{user_id, friend_id}`. The new stories feature was written assuming an array field `circle` on the user doc. These two models were never bridged — neither `circle_add` writes to `users.circle`, nor does the stories code read from `friendships`. REPRODUCTION: 1) login as chat_a and chat_b (both have `email_verified=true`); 2) POST /api/circle/{userB_id} as A and vice-versa (returns 200); 3) POST /api/stories as A and as B (both return 200); 4) GET /api/stories/feed as A — response `groups` only contains A's own group, missing B. Direct Mongo query confirms `users` doc for A has no `circle` field despite the friendship document existing. MITIGATION: change all four locations in server.py that read `users.circle` / query `{'circle': me}` to instead query `db.friendships`."
+}

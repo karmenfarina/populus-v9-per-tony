@@ -667,6 +667,10 @@ export default function FeudDetail() {
         visible={inAppShareOpen}
         feudId={feud.feud_id}
         feudTitle={feud.title}
+        feudCategoryLabel={feud.category_label}
+        feudPartyA={feud.party_a}
+        feudPartyB={feud.party_b}
+        feudImageUrl={feud.image_url}
         onClose={() => setInAppShareOpen(false)}
         onOpenExternal={() => setShareOpen(true)}
       />
