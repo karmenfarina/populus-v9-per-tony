@@ -239,6 +239,27 @@ async def require_admin(x_admin_key: Optional[str] = Header(None, alias='X-Admin
     return True
 
 
+# Nickname validation — Instagram-style handle. Allowed characters are
+# lowercase/uppercase letters, digits, underscore and period. No spaces,
+# no punctuation, no emoji. Length is enforced at Pydantic level (2..24).
+# We normalize by trimming + stripping any leading '@' the user may type.
+NICKNAME_ALLOWED_RE = _re.compile(r'^[A-Za-z0-9._]+$')
+
+
+def _normalize_and_validate_nickname(raw: Optional[str]) -> str:
+    if not raw:
+        raise HTTPException(status_code=400, detail='Nickname mancante')
+    n = raw.strip().lstrip('@')
+    if len(n) < 2 or len(n) > 24:
+        raise HTTPException(status_code=400, detail='Il nickname deve avere 2-24 caratteri')
+    if not NICKNAME_ALLOWED_RE.match(n):
+        raise HTTPException(
+            status_code=400,
+            detail='Il nickname può contenere solo lettere, numeri, punti e underscore (nessuno spazio)',
+        )
+    return n
+
+
 class SignupBody(BaseModel):
     email: EmailStr
     password: str = Field(min_length=6)
@@ -577,6 +598,8 @@ async def resend_verification(body: ResendVerificationBody, request: Request):
 
 @api_router.post('/auth/signup')
 async def signup(body: SignupBody, authorization: Optional[str] = Header(None)):
+    # Enforce Instagram-style nickname rules (no spaces/emoji/punctuation).
+    normalized_nick = _normalize_and_validate_nickname(body.nickname)
     email_lc = body.email.lower()
     existing = await db.users.find_one({'email': email_lc})
     anon_user = await _resolve_anon_user_from_authorization(authorization)
@@ -593,7 +616,7 @@ async def signup(body: SignupBody, authorization: Optional[str] = Header(None)):
             {'user_id': user_id},
             {'$set': {
                 'password_hash': hash_password(body.password),
-                'nickname': body.nickname,
+                'nickname': normalized_nick,
                 'auth_provider': 'email',
             }},
         )
@@ -617,7 +640,7 @@ async def signup(body: SignupBody, authorization: Optional[str] = Header(None)):
     if anon_uid:
         await _upgrade_anon_in_place(anon_uid, {
             'email': email_lc,
-            'nickname': body.nickname,
+            'nickname': normalized_nick,
             'password_hash': hash_password(body.password),
             'auth_provider': 'email',
             'email_verified': False,
@@ -635,7 +658,7 @@ async def signup(body: SignupBody, authorization: Optional[str] = Header(None)):
     user = {
         'user_id': user_id,
         'email': email_lc,
-        'nickname': body.nickname,
+        'nickname': normalized_nick,
         'password_hash': hash_password(body.password),
         'auth_provider': 'email',
         'created_at': now_utc(),
@@ -690,9 +713,10 @@ async def login(body: LoginBody, authorization: Optional[str] = Header(None)):
 
 @api_router.post('/auth/anonymous')
 async def anonymous(body: AnonymousBody):
+    normalized_nick = _normalize_and_validate_nickname(body.nickname)
     user_id = new_id('anon')
     user = {
-        'user_id': user_id, 'email': None, 'nickname': body.nickname,
+        'user_id': user_id, 'email': None, 'nickname': normalized_nick,
         'auth_provider': 'anonymous', 'created_at': now_utc(),
         'majority_votes': 0, 'minority_votes': 0, 'total_votes': 0,
         # Anonymous users skip onboarding and see all categories by default
@@ -863,10 +887,8 @@ async def update_profile(body: ProfileBody, user: dict = Depends(get_current_use
     if body.profession is not None:
         updates['profession'] = body.profession
     if body.nickname is not None:
-        # Trim + strip a leading '@' if the user typed one manually.
-        nick = body.nickname.strip().lstrip('@')
-        if len(nick) < 2 or len(nick) > 24:
-            raise HTTPException(status_code=400, detail='Il nickname deve avere 2-24 caratteri')
+        # Full validation via shared helper — same rules as signup/anon.
+        nick = _normalize_and_validate_nickname(body.nickname)
         # Uniqueness (case-insensitive). We match on the lowercased form so
         # "ChatA" and "chata" collide — but the caller's original casing is
         # preserved in storage.

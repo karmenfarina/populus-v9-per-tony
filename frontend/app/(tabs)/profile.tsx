@@ -10,6 +10,7 @@ import { useAuth } from "@/src/auth/AuthContext";
 import { api, HistoryItem, UserPhoto } from "@/src/api";
 import { colors, spacing, font, sideColor } from "@/src/theme";
 import PhotoCropper from "@/src/components/PhotoCropper";
+import { sanitizeNicknameInput, validateNickname, NICKNAME_HINT, NICKNAME_MAX } from "@/src/utils/nickname";
 
 /**
  * Module-level cache mapping (photo_id + short data hash) → local file URI.
@@ -459,14 +460,15 @@ export default function Profile() {
     try {
       // Nickname / display name are stored on the profile record and require
       // the age / sex / region trio to have been completed at onboarding.
-      const nick = editNick.trim().replace(/^@+/, "");
+      const nick = sanitizeNicknameInput(editNick).trim();
       const displayName = editDisplay.trim();
       const nickChanged = user && nick !== (user.nickname || "");
       const displayChanged = user && displayName !== (user.display_name || "");
 
       if (nickChanged) {
-        if (nick.length < 2 || nick.length > 24) {
-          setDetailsError("Il nickname deve avere 2-24 caratteri");
+        const nickErr = validateNickname(nick);
+        if (nickErr) {
+          setDetailsError(nickErr);
           setSavingDetails(false);
           return;
         }
@@ -978,15 +980,15 @@ export default function Profile() {
                 <TextInput
                   testID="edit-nickname-input"
                   value={editNick}
-                  onChangeText={(t) => setEditNick(t.replace(/^@+/, "").slice(0, 24))}
+                  onChangeText={(t) => setEditNick(sanitizeNicknameInput(t))}
                   placeholder="es. gossip_queen"
                   placeholderTextColor={colors.muted}
                   autoCapitalize="none"
                   autoCorrect={false}
-                  maxLength={24}
+                  maxLength={NICKNAME_MAX}
                   style={styles.identInput}
                 />
-                <Text style={styles.identHint}>2-24 caratteri. Deve essere unico.</Text>
+                <Text style={styles.identHint}>2-24 caratteri. {NICKNAME_HINT} Deve essere unico.</Text>
 
                 <Text style={[styles.editSectionTitle, { marginTop: spacing.md }]}>NOME</Text>
                 <TextInput

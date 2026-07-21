@@ -9,6 +9,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "@/src/auth/AuthContext";
 import { api } from "@/src/api";
 import { colors, spacing, font } from "@/src/theme";
+import { sanitizeNicknameInput, validateNickname, NICKNAME_MAX } from "@/src/utils/nickname";
 
 type Mode = "email" | "google" | "anon";
 
@@ -45,17 +46,13 @@ export default function AuthScreen() {
       if (!password) { setError("Inserisci la password."); return; }
       if (password.length < 6) { setError("La password deve avere almeno 6 caratteri."); return; }
       if (isSignup) {
-        const n = nickname.trim();
-        if (!n) { setError("Scegli un nickname."); return; }
-        if (n.length < 2) { setError("Il nickname deve avere almeno 2 caratteri."); return; }
-        if (n.length > 24) { setError("Il nickname è troppo lungo (max 24 caratteri)."); return; }
+        const nickErr = validateNickname(nickname);
+        if (nickErr) { setError(nickErr); return; }
         if (password !== confirmPassword) { setError("Le password non coincidono."); return; }
       }
     } else if (mode === "anon") {
-      const n = nickname.trim();
-      if (!n) { setError("Scegli un nickname."); return; }
-      if (n.length < 2) { setError("Il nickname deve avere almeno 2 caratteri."); return; }
-      if (n.length > 24) { setError("Il nickname è troppo lungo (max 24 caratteri)."); return; }
+      const nickErr = validateNickname(nickname);
+      if (nickErr) { setError(nickErr); return; }
     }
     setLoading(true);
     try {
@@ -192,11 +189,13 @@ export default function AuthScreen() {
                 <TextInput
                   testID="auth-nickname-input"
                   style={styles.input}
-                  placeholder="Nickname"
+                  placeholder="Nickname (solo lettere, numeri, . e _)"
                   placeholderTextColor={colors.muted}
                   value={nickname}
-                  onChangeText={setNickname}
+                  onChangeText={(t) => setNickname(sanitizeNicknameInput(t))}
                   autoCapitalize="none"
+                  autoCorrect={false}
+                  maxLength={NICKNAME_MAX}
                 />
               )}
               <TextInput
@@ -245,11 +244,13 @@ export default function AuthScreen() {
               <TextInput
                 testID="auth-anon-nickname-input"
                 style={styles.input}
-                placeholder="Nickname"
+                placeholder="Nickname (solo lettere, numeri, . e _)"
                 placeholderTextColor={colors.muted}
                 value={nickname}
-                onChangeText={setNickname}
+                onChangeText={(t) => setNickname(sanitizeNicknameInput(t))}
                 autoCapitalize="none"
+                autoCorrect={false}
+                maxLength={NICKNAME_MAX}
               />
             </View>
           )}

@@ -274,8 +274,8 @@ metadata:
 
 test_plan:
   current_focus:
-    - "Profile edit modal now includes NICKNAME + NOME at top"
-    - "ShareSheet Instagram/Messenger paste-guide overlay"
+    - "Nickname Instagram-style validation (signup, anonymous, profile edit)"
+    - "ShareSheet uses OS native Share.share() for Instagram/Messenger"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"

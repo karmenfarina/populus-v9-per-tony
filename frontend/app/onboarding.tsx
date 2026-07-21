@@ -9,6 +9,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { api } from "@/src/api";
 import { useAuth } from "@/src/auth/AuthContext";
 import { colors, spacing, font } from "@/src/theme";
+import { sanitizeNicknameInput, validateNickname, NICKNAME_HINT, NICKNAME_MAX } from "@/src/utils/nickname";
 
 const REGIONS = [
   "Abruzzo", "Basilicata", "Calabria", "Campania", "Emilia-Romagna",
@@ -109,9 +110,10 @@ export default function Onboarding() {
   const goNext = () => {
     setError(null);
     if (step === 1) {
-      const clean = nickname.trim().replace(/^@+/, "");
-      if (clean.length < 2 || clean.length > 24) {
-        setError("Il nickname deve avere 2-24 caratteri");
+      const clean = sanitizeNicknameInput(nickname).trim();
+      const err = validateNickname(clean);
+      if (err) {
+        setError(err);
         return;
       }
       setNickname(clean);
@@ -208,13 +210,13 @@ export default function Onboarding() {
                   placeholder="es. gossip_queen"
                   placeholderTextColor={colors.muted}
                   value={nickname}
-                  onChangeText={(t) => setNickname(t.replace(/^@+/, "").slice(0, 24))}
+                  onChangeText={(t) => setNickname(sanitizeNicknameInput(t))}
                   autoCapitalize="none"
                   autoCorrect={false}
-                  maxLength={24}
+                  maxLength={NICKNAME_MAX}
                 />
               </View>
-              <Text style={styles.hintTiny}>2-24 caratteri. Puoi cambiarlo in seguito.</Text>
+              <Text style={styles.hintTiny}>2-24 caratteri. {NICKNAME_HINT} Puoi cambiarlo in seguito.</Text>
             </View>
           )}
 

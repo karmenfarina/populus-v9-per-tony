@@ -8,6 +8,7 @@ import {
   ScrollView,
   Platform,
   Linking,
+  Share,
 } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import { Ionicons } from "@expo/vector-icons";
@@ -65,10 +66,7 @@ async function openUrl(target: string): Promise<boolean> {
   try {
     if (Platform.OS === "web" && typeof window !== "undefined" && window.open) {
       const w = window.open(target, "_blank", "noopener,noreferrer");
-      // Some browsers block popups — if we get back null, fall back to same-tab redirect
-      if (!w) {
-        window.location.href = target;
-      }
+      if (!w) window.location.href = target;
       return true;
     }
     await Linking.openURL(target);
@@ -78,13 +76,56 @@ async function openUrl(target: string): Promise<boolean> {
   }
 }
 
-// Copy-and-paste guidance shown when the destination has no URL share API.
+/**
+ * Use the OS-level share sheet. On iOS/Android this pops the NATIVE picker
+ * containing every app that supports share intents (Instagram, Messenger,
+ * WhatsApp, Telegram, Signal, Mail, AirDrop, …) plus the OS' contact picker.
+ * Users pick the app AND the recipient in one step — same UX as any native
+ * app's "share" button.
+ *
+ * On modern mobile browsers Web Share API (`navigator.share`) is available
+ * and behaves identically. On desktop browsers it usually isn't — we then
+ * fall back to a paste guide overlay so the user can copy+paste.
+ */
+async function shareNative(payload: { message: string; url: string; title: string }): Promise<"ok" | "unsupported" | "cancelled" | "error"> {
+  // Web: prefer the Web Share API when the browser supports it (Safari iOS,
+  // Chrome mobile, Edge mobile). If it's missing we fall back to `unsupported`
+  // so the caller can show a paste-guide overlay.
+  if (Platform.OS === "web") {
+    const anyNav = typeof navigator !== "undefined" ? (navigator as any) : null;
+    if (anyNav && typeof anyNav.share === "function") {
+      try {
+        await anyNav.share({ title: payload.title, text: payload.message, url: payload.url });
+        return "ok";
+      } catch (e: any) {
+        // AbortError = user cancelled the share picker — don't treat as failure
+        if (e?.name === "AbortError") return "cancelled";
+        return "error";
+      }
+    }
+    return "unsupported";
+  }
+
+  // Native (iOS / Android): React Native's Share.share always exists.
+  try {
+    const res = await Share.share(
+      { message: `${payload.message}\n${payload.url}`, url: payload.url, title: payload.title },
+      { dialogTitle: payload.title },
+    );
+    if (res.action === Share.dismissedAction) return "cancelled";
+    return "ok";
+  } catch {
+    return "error";
+  }
+}
+
+// Copy-and-paste guidance shown when the destination has no URL share API
+// AND the OS-level share sheet is not available (e.g. desktop web).
 type PasteGuide = {
   key: "instagram" | "messenger";
   appLabel: string;
   color: string;
   icon: keyof typeof Ionicons.glyphMap;
-  mobileScheme: string;
   webUrl: string;
   instructions: string;
 };
@@ -95,54 +136,58 @@ const PASTE_GUIDES: Record<"instagram" | "messenger", PasteGuide> = {
     appLabel: "Instagram",
     color: "#E1306C",
     icon: "logo-instagram",
-    mobileScheme: "instagram://app",
     webUrl: "https://www.instagram.com/",
     instructions:
-      "Instagram non permette di aprire una chat con un link già pronto. Il link è stato copiato negli appunti: aprilo in un DM, una Storia o un post e incolla (tieni premuto → Incolla).",
+      "Il tuo browser non supporta la condivisione diretta verso Instagram. Il link è stato copiato: apri Instagram, entra in un DM o crea una Storia, tieni premuto sul campo di testo e tocca «Incolla».",
   },
   messenger: {
     key: "messenger",
     appLabel: "Messenger",
     color: "#0084FF",
     icon: "chatbubbles",
-    mobileScheme: "fb-messenger://",
     webUrl: "https://www.messenger.com/",
     instructions:
-      "Messenger non permette la condivisione diretta da web. Il link è stato copiato negli appunti: apri una chat e incolla il link nel messaggio.",
+      "Il tuo browser non supporta la condivisione diretta verso Messenger. Il link è stato copiato: apri Messenger, entra in una chat, tieni premuto sul campo di testo e tocca «Incolla».",
   },
 };
 
 export default function ShareSheet({ visible, onClose, url, title, message, onCopy }: Props) {
   const [pasteGuide, setPasteGuide] = useState<PasteGuide | null>(null);
-  const [pasteCopyOk, setPasteCopyOk] = useState<boolean>(false);
 
-  const openPasteGuide = async (key: "instagram" | "messenger") => {
-    const ok = await copyToClipboard(url);
-    setPasteCopyOk(ok);
+  /**
+   * Instagram / Messenger tap:
+   * 1. Try the NATIVE OS share sheet first — on real devices this opens the
+   *    picker with Instagram, Messenger, contact list and a "send" button
+   *    pre-filled with the link. Exactly what the user asked for.
+   * 2. If the OS refuses (desktop browsers without Web Share API), copy the
+   *    link to the clipboard and show a paste-guide overlay explaining what
+   *    to do next.
+   */
+  const openNativeOrGuide = async (key: "instagram" | "messenger") => {
+    const result = await shareNative({ message, url, title });
+    if (result === "ok") {
+      onClose();
+      return;
+    }
+    if (result === "cancelled") {
+      // User dismissed the native picker — leave everything as-is.
+      return;
+    }
+    // Fallback (desktop web, or an unexpected error): copy + guide.
+    await copyToClipboard(url);
     setPasteGuide(PASTE_GUIDES[key]);
   };
 
   const openTargetAppFromGuide = async () => {
     if (!pasteGuide) return;
-    // Try native scheme first, fallback to the web URL (which always opens).
-    let opened = false;
-    if (Platform.OS !== "web") {
-      opened = await openUrl(
-        pasteGuide.key === "messenger"
-          ? `fb-messenger://share/?link=${encodeURIComponent(url)}`
-          : pasteGuide.mobileScheme,
-      );
-    }
-    if (!opened) {
-      await openUrl(pasteGuide.webUrl);
-    }
+    await openUrl(pasteGuide.webUrl);
     setPasteGuide(null);
     onClose();
   };
 
   const shareVia = async (key: OptionKey) => {
     if (key === "instagram" || key === "messenger") {
-      await openPasteGuide(key);
+      await openNativeOrGuide(key);
       return;
     }
 
@@ -216,8 +261,9 @@ export default function ShareSheet({ visible, onClose, url, title, message, onCo
         </Pressable>
       </Pressable>
 
-      {/* Paste-guide overlay for Instagram / Messenger. Sits above the share
-          sheet and clearly explains what to do after we copy the link. */}
+      {/* Fallback paste-guide overlay: shown ONLY on desktop browsers where
+          the OS share sheet is not available. On mobile the native picker
+          handles everything (Instagram, Messenger, WhatsApp, contact list…). */}
       <Modal
         animationType="fade"
         transparent
@@ -231,9 +277,7 @@ export default function ShareSheet({ visible, onClose, url, title, message, onCo
                 <View style={[styles.guideIcon, { backgroundColor: pasteGuide.color }]}>
                   <Ionicons name={pasteGuide.icon} size={34} color="#FFFFFF" />
                 </View>
-                <Text style={styles.guideTitle}>
-                  {pasteCopyOk ? "LINK COPIATO" : "APRI"} {pasteGuide.appLabel.toUpperCase()}
-                </Text>
+                <Text style={styles.guideTitle}>{`LINK COPIATO — APRI ${pasteGuide.appLabel.toUpperCase()}`}</Text>
                 <Text style={styles.guideBody}>{pasteGuide.instructions}</Text>
 
                 <View style={styles.guideActions}>
@@ -250,7 +294,7 @@ export default function ShareSheet({ visible, onClose, url, title, message, onCo
                     style={[styles.guidePrimaryBtn, { backgroundColor: pasteGuide.color }]}
                   >
                     <Ionicons name="open-outline" size={16} color="#FFFFFF" />
-                    <Text style={styles.guidePrimaryTxt}>APRI {pasteGuide.appLabel.toUpperCase()}</Text>
+                    <Text style={styles.guidePrimaryTxt}>{`APRI ${pasteGuide.appLabel.toUpperCase()}`}</Text>
                   </Pressable>
                 </View>
               </>
@@ -298,7 +342,6 @@ const styles = StyleSheet.create({
   },
   urlLabel: { color: colors.muted, fontSize: font.sizes.xs, fontFamily: Platform.OS === "web" ? "monospace" : undefined },
 
-  // ────── paste-guide overlay ──────
   guideBackdrop: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.7)",
@@ -316,11 +359,8 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   guideIcon: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    alignItems: "center",
-    justifyContent: "center",
+    width: 72, height: 72, borderRadius: 36,
+    alignItems: "center", justifyContent: "center",
     marginBottom: spacing.sm,
   },
   guideTitle: {
@@ -349,8 +389,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     borderWidth: 2,
     borderColor: colors.border,
-    alignItems: "center",
-    justifyContent: "center",
+    alignItems: "center", justifyContent: "center",
   },
   guideSecondaryTxt: {
     color: colors.onSurface,
@@ -362,8 +401,7 @@ const styles = StyleSheet.create({
     flex: 1.4,
     paddingVertical: spacing.md,
     borderRadius: 10,
-    alignItems: "center",
-    justifyContent: "center",
+    alignItems: "center", justifyContent: "center",
     flexDirection: "row",
     gap: 6,
   },
