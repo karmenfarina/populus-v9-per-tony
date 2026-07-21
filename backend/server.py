@@ -1194,11 +1194,12 @@ async def _user_voted_ids(user_id: str, feud_ids: List[str]) -> dict:
 async def list_hype_feuds(user: Optional[dict] = Depends(get_current_user_optional)):
     """The always-on 'HYPE' rail.
 
-    Returns the most-discussed feuds from the last 7 days grouped by day
-    (most recent day first) and, within each day, ranked by an engagement
-    score = total_votes + 2*total_comments. This mirrors the user's rule:
-    "in ordine cronologico dalle notizie del giorno a quelle dei giorni
-    passati, tutte le notizie più discusse".
+    Returns feuds from the last 7 days ranked by an engagement score
+        engagement = total_votes + 2*comments + replies
+    …with the newer post winning any tie. Posts that received ZERO
+    engagement (no vote, no comment, no reply) are excluded — the rail
+    is supposed to surface what's actually being discussed, not fill
+    space with untouched articles.
 
     This section is deliberately outside `/api/categories` and outside a
     user's favorite_categories filter — it always appears in every user's
@@ -1207,53 +1208,74 @@ async def list_hype_feuds(user: Optional[dict] = Depends(get_current_user_option
     since = now_utc() - timedelta(days=7)
     docs = await db.feuds.find(
         {'created_at': {'$gte': since}}, {'_id': 0}
-    ).sort('created_at', -1).to_list(400)
+    ).sort('created_at', -1).to_list(1500)
     if not docs:
         return {'feuds': [], 'personalized': False}
-    # Comment counts in a single aggregation to avoid N+1 queries.
     feud_ids = [d['feud_id'] for d in docs]
+    # Comment + reply counts in ONE aggregation per collection.
     comment_counts: dict = {}
+    reply_counts: dict = {}
     try:
-        pipeline = [
+        async for row in db.comments.aggregate([
             {'$match': {'feud_id': {'$in': feud_ids}}},
             {'$group': {'_id': '$feud_id', 'count': {'$sum': 1}}},
-        ]
-        async for row in db.comments.aggregate(pipeline):
+        ]):
             comment_counts[row['_id']] = int(row.get('count') or 0)
     except Exception as e:
         logger.warning(f"hype: comments aggregation failed: {e}")
+    # Replies live under a comment_id. Do a lookup: replies → comment → feud.
+    try:
+        async for row in db.replies.aggregate([
+            {'$lookup': {
+                'from': 'comments', 'localField': 'comment_id',
+                'foreignField': 'comment_id', 'as': 'c',
+            }},
+            {'$unwind': '$c'},
+            {'$match': {'c.feud_id': {'$in': feud_ids}}},
+            {'$group': {'_id': '$c.feud_id', 'count': {'$sum': 1}}},
+        ]):
+            reply_counts[row['_id']] = int(row.get('count') or 0)
+    except Exception as e:
+        logger.warning(f"hype: replies aggregation failed: {e}")
 
-    # Score + day-bucket. Day bucket key = YYYY-MM-DD (UTC) so ordering is
-    # trivial: bigger key = more recent day.
-    def _day_key(dt) -> str:
-        if isinstance(dt, datetime):
-            return dt.strftime('%Y-%m-%d')
-        return str(dt)[:10]
-
+    scored: List[dict] = []
     for d in docs:
         votes = int(d.get('votes_a', 0) or 0) + int(d.get('votes_b', 0) or 0)
         cc = comment_counts.get(d['feud_id'], 0)
-        d['_hype_score'] = votes + 2 * cc
-        d['_day_key'] = _day_key(d.get('created_at'))
+        rc = reply_counts.get(d['feud_id'], 0)
+        score = votes + 2 * cc + rc
+        # Drop untouched posts entirely — HYPE is for what's being talked
+        # about, not for filler.
+        if score <= 0:
+            continue
+        d['_hype_score'] = score
+        d['_comments'] = cc
+        d['_replies'] = rc
+        scored.append(d)
 
-    # Sort: day DESC, then hype DESC, then created_at DESC as final tiebreak.
-    docs.sort(key=lambda d: (d['_day_key'], d['_hype_score'], d.get('created_at') or ''), reverse=True)
-
-    # Cap the rail (users don't need 400 items in a "hype" ribbon).
-    docs = docs[:80]
+    # Primary: engagement DESC. Secondary: newer wins ties. Both rules
+    # satisfy the user's "più votati / commentati" priority while still
+    # keeping fresh voted posts near the top when their scores match older
+    # ones (very common when only 1-2 people have interacted so far).
+    scored.sort(
+        key=lambda d: (d['_hype_score'], d.get('created_at') or ''),
+        reverse=True,
+    )
+    scored = scored[:80]
 
     voted_map: dict = {}
-    if user and docs:
-        voted_map = await _user_voted_ids(user['user_id'], [d['feud_id'] for d in docs])
-    for d in docs:
+    if user and scored:
+        voted_map = await _user_voted_ids(user['user_id'], [d['feud_id'] for d in scored])
+    for d in scored:
         my_vote = voted_map.get(d['feud_id']) if user else None
         _attach_percentages(d, revealed=bool(my_vote))
         d['my_vote'] = my_vote
         if isinstance(d.get('created_at'), datetime):
             d['created_at'] = _iso_utc(d['created_at'])
         d.pop('_hype_score', None)
-        d.pop('_day_key', None)
-    return {'feuds': docs, 'personalized': False, 'source': 'hype'}
+        d.pop('_comments', None)
+        d.pop('_replies', None)
+    return {'feuds': scored, 'personalized': False, 'source': 'hype'}
 
 
 @api_router.get('/feuds')

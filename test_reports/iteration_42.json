@@ -1,0 +1,33 @@
+{
+  "summary": "Backend-only validation of the iteration-42 fix on GET /api/feuds/hype. Wrote /app/backend/tests/test_hype_feuds.py with 10 pytest cases against the live public URL (https://faide-poll.preview.emergentagent.com) using MongoDB (test_database) as the source of truth for engagement scores. Result: 9 PASSED, 1 SKIPPED (no natural comment-only-zero-vote feud in DB; the Live-Update test synthesizes exactly this condition and PASSES). All eight functional requirements listed in the review request are satisfied: (1) no zero-engagement feud leaks in; (2) every voted 7-day feud (36 in DB) appears in the response; (3) ordering is monotonic non-increasing on the engagement score, with newer created_at winning ties; (4) inserting a comment on a zero-engagement feud immediately surfaces it on the next call; (5) no feud outside the 7-day window is returned; (6) anonymous callers get my_vote=null on every feud; (7) authenticated calls (chat_a@test.it) return 200 with my_vote populated on the correct docs.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_hype_feuds.py",
+    "/app/test_reports/pytest/hype_feuds_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "list_hype_feuds (server.py:1193-1278): pre-slice window is now 1500 candidates. With 385 total feuds in DB this is comfortably safe; if the corpus grows past 1500 within a 7-day rolling window the primary sort must be pushed into the Mongo aggregation to guarantee correctness. Not a bug today, just a future scale note.",
+    "The sort tuple uses `d.get('created_at') or ''` as tiebreaker. Since datetime > str comparison would raise, this only works because all docs actually have `created_at` set. Consider making the fallback a datetime.min for defensive coding.",
+    "Response returns votes_a/votes_b as None when the caller has not voted (this is _attach_percentages behavior). The test report notes from the request confirm this is intentional; the frontend must not rely on those numeric fields for the HYPE rail unless my_vote is present."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_hype_feuds.py (new)",
+    "/app/test_reports/pytest/hype_feuds_results.xml (new)"
+  ],
+  "success_rate": {"backend": "100% (9/9 executed, 1 skipped by design)", "frontend": "not tested"},
+  "seed_data_creation": "None persistent. TestLiveUpdate inserts one synthetic comment (comment_id starts with 'cmt_TEST_HYPE_LIVE_') and deletes it in the finally block. Verified no residue post-run.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend DB is 'test_database' (NOT 'populus'). At snapshot time DB had 385 feuds, 60 comments, 14 replies, 199 votes. 36 voted feuds in the last 7 days, all present in HYPE. 308 zero-vote feuds exist in the 7-day window and correctly EXCLUDED. The natural DB has zero comment-only-zero-vote feuds, so test_comment_only_feud_is_included legitimately skips; the Live-Update test covers that requirement synthetically. All tests read engagement directly from Mongo (via _db_engagement helper) so they don't depend on the API's response hiding votes_a/votes_b when revealed=False.",
+  "rca_of_issue": "Iteration 41 sorted primarily by day (YYYY-MM-DD DESC) then engagement, so today's zero-engagement feuds outranked yesterday's voted ones, and no filter excluded score<=0 items. Iteration-42 fix (server.py:1241-1264) computes score = votes_a+votes_b+2*comments+replies via one $group per collection, hard-drops score<=0, and sorts by (score DESC, created_at DESC). Candidate window increased 400→1500 to prevent voted feuds being pre-sliced. Verified end-to-end with the live public URL: engagement scores match Mongo reality, ordering is monotonic on score, tie-breaks correctly follow created_at."
+}
