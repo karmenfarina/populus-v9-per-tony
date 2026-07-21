@@ -1857,6 +1857,66 @@ def _moderate_text(text: str) -> tuple[str, list[str]]:
     return original, hits
 
 
+async def _ai_moderate_comment(text: str) -> tuple[bool, Optional[str]]:
+    """AI-based moderation — catches hate speech, threats and violence
+    incitement that the keyword filter misses (paraphrased slurs, coded
+    language, insinuations, calls to harm etc.).
+
+    Returns (is_safe, reason). `reason` is a short Italian label for the
+    audit log when the text is unsafe.
+
+    Uses Claude Haiku 4.5 via emergentintegrations for latency (< 1s) and
+    cost. Falls back to `is_safe=True` on any provider error so the app
+    doesn't hard-fail moderation when the LLM is down — the keyword
+    filter already ran and caught the low-hanging fruit.
+    """
+    if not EMERGENT_LLM_KEY:
+        return True, None
+    original = (text or '').strip()
+    if not original or len(original) < 3:
+        return True, None
+    # Cap payload to keep latency low. Long rants are truncated but the
+    # first 800 chars are more than enough for a hate/violence classifier.
+    payload = original[:800]
+    try:
+        from emergentintegrations.llm.chat import LlmChat, UserMessage
+    except Exception as e:
+        logger.warning(f"ai-moderation: emergentintegrations import failed: {e}")
+        return True, None
+    try:
+        chat = LlmChat(
+            api_key=EMERGENT_LLM_KEY,
+            session_id=f"mod-{new_id('mod')}",
+            system_message=(
+                "Sei un moderatore di contenuti per una community italiana. "
+                "Il tuo compito: classificare un commento come SAFE o UNSAFE. "
+                "UNSAFE se e solo se contiene una di queste cose: "
+                "(1) hate speech verso una categoria protetta (razza, etnia, "
+                "religione, orientamento sessuale, identità di genere, disabilità); "
+                "(2) minaccia diretta o indiretta a una persona; "
+                "(3) incitamento alla violenza o al danno fisico/psicologico; "
+                "(4) molestia o doxxing (rivelazione di dati privati). "
+                "Le opinioni forti, la critica politica anche aspra, la satira, "
+                "il turpiloquio generico e i toni polemici sono SAFE. "
+                "Rispondi ESCLUSIVAMENTE con una riga in questo formato: "
+                "SAFE oppure UNSAFE|<categoria breve>. "
+                "Esempi validi di risposta UNSAFE: "
+                "UNSAFE|hate_speech, UNSAFE|minaccia, UNSAFE|incitamento_violenza."
+            ),
+        ).with_model('anthropic', 'claude-haiku-4-5-20251001')
+        reply = await chat.send_message(UserMessage(text=payload))
+        raw = (str(reply) if reply is not None else '').strip().upper()
+        if raw.startswith('UNSAFE'):
+            # Extract the short category after the pipe.
+            parts = raw.split('|', 1)
+            reason = parts[1].strip().lower() if len(parts) > 1 else 'unsafe'
+            return False, reason
+        return True, None
+    except Exception as e:
+        logger.warning(f"ai-moderation failed (allow-listing text): {e}")
+        return True, None
+
+
 async def _log_flagged(user_id: str, feud_id: str, text: str, hits: list[str]):
     try:
         await db.flagged_comments.insert_one({
@@ -2214,6 +2274,13 @@ async def add_comment(feud_id: str, body: CommentBody, user: dict = Depends(get_
     if flagged:
         await _log_flagged(user['user_id'], feud_id, body.text, flagged)
         raise HTTPException(status_code=400, detail=f"Commento bloccato: contiene termini non consentiti ({', '.join(flagged)})")
+    ai_safe, ai_reason = await _ai_moderate_comment(clean_text)
+    if not ai_safe:
+        await _log_flagged(user['user_id'], feud_id, clean_text, [f'ai:{ai_reason or "unsafe"}'])
+        raise HTTPException(
+            status_code=400,
+            detail='Commento bloccato: contenuto non consentito (hate speech, minacce o incitamento alla violenza).',
+        )
     doc = {
         'comment_id': new_id('cmt'), 'feud_id': feud_id, 'user_id': user['user_id'],
         'nickname': user.get('nickname'), 'side': vote['side'], 'text': clean_text,
@@ -2290,6 +2357,13 @@ async def add_reply(comment_id: str, body: ReplyBody, user: dict = Depends(get_c
     if flagged:
         await _log_flagged(user['user_id'], parent['feud_id'], body.text, flagged)
         raise HTTPException(status_code=400, detail=f"Risposta bloccata: contiene termini non consentiti ({', '.join(flagged)})")
+    ai_safe, ai_reason = await _ai_moderate_comment(clean_text)
+    if not ai_safe:
+        await _log_flagged(user['user_id'], parent['feud_id'], clean_text, [f'ai:{ai_reason or "unsafe"}'])
+        raise HTTPException(
+            status_code=400,
+            detail='Risposta bloccata: contenuto non consentito (hate speech, minacce o incitamento alla violenza).',
+        )
     doc = {
         'reply_id': new_id('rep'), 'comment_id': comment_id, 'feud_id': parent['feud_id'],
         'user_id': user['user_id'], 'nickname': user.get('nickname'), 'side': side,
