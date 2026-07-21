@@ -4808,28 +4808,33 @@ async def search_users(q: str, limit: int = 20, user: dict = Depends(get_current
 
 @api_router.get('/circle/suggestions')
 async def suggested_users(limit: int = 20, user: dict = Depends(get_current_user)):
-    """Suggest users the viewer might want to add to their Cerchia.
+    """Suggest users the viewer is REALLY connected to.
 
-    Ranking pool (union, each candidate deduped and self+block-filtered):
-      1. DM contacts (users the viewer has exchanged messages with).
-      2. Friends-of-friends (members of the viewer's circle's circles).
-      3. Co-commenters (users who recently commented on the same feuds
-         the viewer commented on).
+    Strict criteria (any qualifies):
+      1. DM contacts — the viewer has exchanged private messages with them.
+      2. Reply exchanges — either the viewer replied to that user's
+         comment, or that user replied to one of the viewer's comments.
 
-    Each candidate gets a score composed of the three signals; the final
-    list is truncated to `limit`. Users already in the viewer's circle,
-    or who blocked (or were blocked by) the viewer, are excluded.
+    Signals we explicitly DO NOT use (they surface strangers, defeating
+    the whole point of a suggestion list):
+      - "Friends of friends" (circle-of-circle traversal): too indirect,
+        the viewer may never have interacted with the person.
+      - Plain co-commenters on the same feud without a reply link: the
+        two authors just happen to share a topic, that is not a
+        connection.
+      - Co-voters on the same feud (never was used, but stated for
+        completeness).
 
-    Anonymous users get an empty list — Populus' social graph is opt-in
-    and requires a real identity anyway.
+    Users already in the viewer's circle, or who blocked/were blocked by
+    the viewer, are excluded. Anonymous viewers get an empty list.
     """
     if user.get('is_anonymous') or user.get('auth_provider') == 'anonymous':
         return {'users': []}
     me = user['user_id']
     limit = max(1, min(int(limit or 20), 40))
 
-    # Exclusions: my current circle + people blocked in either direction.
-    my_circle = set()
+    # Exclusions.
+    my_circle: set[str] = set()
     async for row in db.friendships.find({'user_id': me}, {'_id': 0, 'friend_id': 1}):
         my_circle.add(row['friend_id'])
     blocked: set[str] = set()
@@ -4842,18 +4847,17 @@ async def suggested_users(limit: int = 20, user: dict = Depends(get_current_user
             blocked.add(other)
     excluded = my_circle | blocked | {me}
 
-    # Weights per signal — tuneable. DM contacts are strongest because
-    # they represent explicit interaction; friends-of-friends is second
-    # because it's a graph proxy; co-commenters is the softest signal.
+    # Weights per signal. DMs stay strongest because they are the most
+    # deliberate 1-to-1 interaction; reply exchanges are second because
+    # they still represent a direct back-and-forth (unlike pure
+    # co-commenting).
     W_DM = 5.0
-    W_FOF = 3.0
-    W_COC = 1.0
+    W_REPLY = 3.0
 
     scores: dict[str, float] = {}
     reasons: dict[str, list[str]] = {}
 
-    # 1. DM contacts (union of sender/recipient counterparties). Count
-    # message exchanges (capped) so power-contacts float higher.
+    # 1. DM contacts (count of exchanges, capped).
     dm_counts: dict[str, int] = {}
     async for m in db.messages.find(
         {
@@ -4869,50 +4873,46 @@ async def suggested_users(limit: int = 20, user: dict = Depends(get_current_user
         scores[uid] = scores.get(uid, 0) + W_DM * min(cnt, 20) / 20
         reasons.setdefault(uid, []).append('chat')
 
-    # 2. Friends-of-friends. Fetch the circles of everyone in MY circle,
-    # then count how many mutual paths lead to each candidate.
-    if my_circle:
-        fof_counts: dict[str, int] = {}
-        async for row in db.friendships.find(
-            {'user_id': {'$in': list(my_circle)}},
-            {'_id': 0, 'friend_id': 1},
+    # 2. Reply exchanges. Two directions:
+    #    (a) other users replied TO my comments;
+    #    (b) I replied TO other users' comments.
+    reply_counts: dict[str, int] = {}
+    #   (a) Find comment_ids I authored, then all replies pointing at them.
+    my_comment_ids: list[str] = []
+    async for c in db.comments.find({'user_id': me}, {'_id': 0, 'comment_id': 1}):
+        cid = c.get('comment_id')
+        if cid:
+            my_comment_ids.append(cid)
+    if my_comment_ids:
+        async for r in db.replies.find(
+            {'comment_id': {'$in': my_comment_ids}, 'user_id': {'$ne': me}},
+            {'_id': 0, 'user_id': 1},
         ):
-            fid = row.get('friend_id')
-            if fid and fid not in excluded:
-                fof_counts[fid] = fof_counts.get(fid, 0) + 1
-        for uid, cnt in fof_counts.items():
-            scores[uid] = scores.get(uid, 0) + W_FOF * min(cnt, 10) / 10
-            reasons.setdefault(uid, []).append('amici_di_amici')
-
-    # 3. Co-commenters on the same feuds. Look at my recent comments to
-    # find the feud ids I've engaged with, then any OTHER commenter on
-    # those feuds is a plausible ideological neighbour.
-    my_feuds: set[str] = set()
-    async for c in db.comments.find(
-        {'user_id': me}, {'_id': 0, 'feud_id': 1},
-    ).sort('created_at', -1).limit(60):
-        fid = c.get('feud_id')
-        if fid:
-            my_feuds.add(fid)
-    if my_feuds:
-        co_counts: dict[str, int] = {}
+            uid = r.get('user_id')
+            if uid and uid not in excluded:
+                reply_counts[uid] = reply_counts.get(uid, 0) + 1
+    #   (b) Find my replies, then look up the parent-comment authors.
+    parent_ids: list[str] = []
+    async for r in db.replies.find({'user_id': me}, {'_id': 0, 'comment_id': 1}):
+        cid = r.get('comment_id')
+        if cid:
+            parent_ids.append(cid)
+    if parent_ids:
         async for c in db.comments.find(
-            {'feud_id': {'$in': list(my_feuds)}, 'user_id': {'$ne': me}},
+            {'comment_id': {'$in': parent_ids}, 'user_id': {'$ne': me}},
             {'_id': 0, 'user_id': 1},
         ):
             uid = c.get('user_id')
             if uid and uid not in excluded:
-                co_counts[uid] = co_counts.get(uid, 0) + 1
-        for uid, cnt in co_counts.items():
-            scores[uid] = scores.get(uid, 0) + W_COC * min(cnt, 20) / 20
-            reasons.setdefault(uid, []).append('commenti_in_comune')
+                reply_counts[uid] = reply_counts.get(uid, 0) + 1
+    for uid, cnt in reply_counts.items():
+        scores[uid] = scores.get(uid, 0) + W_REPLY * min(cnt, 15) / 15
+        reasons.setdefault(uid, []).append('commenti')
 
     if not scores:
         return {'users': []}
 
-    # Sort by score desc, then hydrate mini_user info. Stop once we have
-    # `limit` non-anonymous users (we may lose some to the anonymity or
-    # existence filter).
+    # Sort by score desc, then hydrate mini_user info.
     ranked = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
     hydrated: list[dict] = []
     for uid, _score in ranked:

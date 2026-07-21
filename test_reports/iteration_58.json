@@ -1,0 +1,36 @@
+{
+  "summary": "Verified the strict rewrite of GET /api/circle/suggestions in Populus. Created /app/backend/tests/test_circle_suggestions_strict.py covering the 5 scenarios requested (DM contact, reply exchange, pure co-commenter exclusion, friend-of-friend exclusion, self/in-circle/blocked exclusion). Also created chat_c on the fly (directly in Mongo, since signup requires email verification) with full teardown. All 7 pytest cases PASS (12.75s). Post-cleanup probe of chat_a's suggestions returned only chat_b with reasons=['chat'] (DM history), confirming zero leakage of strangers, co-commenters, or friends-of-friends. The reasons array now only ever contains 'chat' and/or 'commenti' as required.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_circle_suggestions_strict.py",
+    "/app/test_reports/pytest/circle_suggestions_strict.xml"
+  ],
+  "action_items": [
+    "Optional: the previous iter57 test file (/app/backend/tests/test_circle_find_iter57.py) still asserts reason ∈ ('chat','amici_di_amici','commenti_in_comune') at line 75. It happens to pass today because only 'chat' shows up, but the whitelist is stale after the strict fix. Consider updating it to ('chat','commenti') to stay consistent with the new contract."
+  ],
+  "critical_code_review_comments": [
+    "server.py:4809-4941 — suggested_users implementation matches the described strict contract: only DM contacts (W_DM=5) and bidirectional reply exchanges (W_REPLY=3) are scored; friends-of-friends and pure co-commenters are gone. Exclusions (self, my_circle, blocked pair) are computed once and applied to both signals. Hydration filters out anonymous target users. Empty scores short-circuit to {'users': []}.",
+    "Test 1 payload for chat_a after full test-suite cleanup: [{'user_id':'user_16f709708760','nickname':'chatUserB','reasons':['chat']}] — no strangers surfaced."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_circle_suggestions_strict.py (new)"
+  ],
+  "success_rate": {
+    "backend": "100% (7/7)",
+    "frontend": "not tested (backend-only request)"
+  },
+  "seed_data_creation": "Created a temporary verified user chat_c_<suffix>@test.it directly in Mongo (bypassing email verification) for Tests 3 and 4. Full teardown deletes the user and all their friendships / comments / replies / votes / messages / blocks. No residual data remains after the run.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Suggestions endpoint now returns strictly {chat, commenti} reasons. The stale whitelist in test_circle_find_iter57.py::test_200_and_shape (line 75) still accepts the old labels — it passes today but should be tightened. Use test_circle_suggestions_strict.py as the canonical regression suite for this endpoint going forward.",
+  "rca_of_issue": "N/A — verification of a fix, not a bug. All 5 requested scenarios (DM contact appears with 'chat', reply exchange appears with 'commenti', pure co-commenter NOT surfaced, friend-of-friend NOT surfaced, self/in-circle/blocked exclusions) behave exactly as specified."
+}

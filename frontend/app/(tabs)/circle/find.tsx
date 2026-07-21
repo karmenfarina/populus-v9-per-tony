@@ -40,8 +40,7 @@ type Row = {
 
 const REASON_LABEL: Record<string, string> = {
   chat: "Chat",
-  amici_di_amici: "Amici di amici",
-  commenti_in_comune: "Commenti in comune",
+  commenti: "Ha risposto ai tuoi commenti",
 };
 
 const DEBOUNCE_MS = 260;
