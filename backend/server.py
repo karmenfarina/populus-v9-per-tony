@@ -266,7 +266,9 @@ def _normalize_and_validate_nickname(raw: Optional[str]) -> str:
 class SignupBody(BaseModel):
     email: EmailStr
     password: str = Field(min_length=6)
-    nickname: str = Field(min_length=2, max_length=24)
+    # Length + character rules are enforced by `_normalize_and_validate_nickname`
+    # so we can return specific Italian 400s instead of Pydantic 422s.
+    nickname: str
 
 
 class LoginBody(BaseModel):
@@ -275,7 +277,7 @@ class LoginBody(BaseModel):
 
 
 class AnonymousBody(BaseModel):
-    nickname: str = Field(min_length=2, max_length=24)
+    nickname: str
 
 
 class GoogleSessionBody(BaseModel):
@@ -292,7 +294,8 @@ class ProfileBody(BaseModel):
     # Nickname override — used by external-provider signups (Google) so the
     # user can choose their own handle instead of inheriting the Google name.
     # Optional to keep backwards compatibility with existing onboarding calls.
-    nickname: Optional[str] = Field(default=None, min_length=2, max_length=24)
+    # Rules enforced in `_normalize_and_validate_nickname`, not by Pydantic.
+    nickname: Optional[str] = None
     # Optional public "display name" shown in grey under the nickname on the
     # profile. Free-form, doesn't need to be unique.
     display_name: Optional[str] = Field(default=None, max_length=40)
