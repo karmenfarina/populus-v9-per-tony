@@ -68,6 +68,12 @@ export default function CircleFindScreen() {
     return () => { cancelled = true; };
   }, [user?.user_id]);
 
+  // Keep a live ref of myCircleIds so the debounced search reads the
+  // latest membership WITHOUT registering it as an effect dependency.
+  // Without this, every add/remove flip would re-fire the network call.
+  const myCircleIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => { myCircleIdsRef.current = myCircleIds; }, [myCircleIds]);
+
   // Debounced search. We do NOT trigger a request for empty queries —
   // this keeps the empty state clean and avoids listing "recently
   // active users" that wouldn't have privacy consent anyway.
@@ -86,7 +92,7 @@ export default function CircleFindScreen() {
           display_name: u.display_name,
           photo_data: u.photo_data ?? null,
           is_me: u.user_id === user?.user_id,
-          in_my_circle: myCircleIds.has(u.user_id),
+          in_my_circle: myCircleIdsRef.current.has(u.user_id),
         }));
         setRows(list);
       } catch {
@@ -96,7 +102,7 @@ export default function CircleFindScreen() {
       }
     }, DEBOUNCE_MS);
     return () => { if (timer.current) clearTimeout(timer.current); };
-  }, [q, user?.user_id, myCircleIds]);
+  }, [q, user?.user_id]);
 
   const toggleAdd = useCallback(async (row: Row) => {
     if (row.is_me || pending[row.user_id]) return;
