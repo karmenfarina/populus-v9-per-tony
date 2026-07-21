@@ -10,6 +10,7 @@ import { api, Feud } from "@/src/api";
 import { useAuth } from "@/src/auth/AuthContext";
 import { colors, spacing, font } from "@/src/theme";
 import FeudCard from "@/src/components/FeudCard";
+import { useHardwareBack } from "@/src/utils/useHardwareBack";
 
 const ALL_CAT = { id: "all", label: "Tutte" };
 
@@ -152,12 +153,21 @@ export default function ArchiveScreen() {
 
   const emptyDates = useMemo(() => !loadingDates && dates.length === 0, [loadingDates, dates]);
 
+  // Hardware back mirrors the on-screen back arrow, which returns to
+  // the home feed pre-filtered on the currently selected category. Same
+  // callback — no divergence in behaviour.
+  const onBack = useCallback(
+    () => router.replace(`/?category=${category}` as any),
+    [router, category],
+  );
+  useHardwareBack(onBack);
+
   return (
     <SafeAreaView style={styles.safe} edges={["top"]} testID="archive-screen">
       <View style={styles.header}>
         <View style={styles.headerTop}>
           <Pressable
-            onPress={() => router.replace(`/?category=${category}`)}
+            onPress={onBack}
             testID="archive-back"
             style={styles.backBtn}
           >

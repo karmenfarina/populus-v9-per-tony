@@ -8,6 +8,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { storage } from "@/src/utils/storage";
 import { colors, spacing, font } from "@/src/theme";
+import { useHardwareBack } from "@/src/utils/useHardwareBack";
 
 const KEY_STORAGE = "populus_admin_key";
 const BASE = process.env.EXPO_PUBLIC_BACKEND_URL || "";
@@ -83,6 +84,13 @@ export default function AdminScreen() {
   const totalSex = stats ? Object.values(stats.by_sex).reduce((s, n) => s + n, 0) : 0;
   const totalAge = stats ? Object.values(stats.by_age).reduce((s, n) => s + n, 0) : 0;
 
+  // Bind Android hardware back to the same callback used by the
+  // on-screen "chevron-back" button on the admin gate. The panel view
+  // itself has no back button — hardware back returns to the previous
+  // route (same as the gate) so behaviour stays consistent.
+  const onBack = useCallback(() => router.back(), [router]);
+  useHardwareBack(onBack);
+
   if (!hydrated) {
     return (
       <SafeAreaView style={styles.safe}>
@@ -96,7 +104,7 @@ export default function AdminScreen() {
       <SafeAreaView style={styles.safe} edges={["top", "bottom"]}>
         <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
           <View style={styles.gateWrap}>
-            <Pressable onPress={() => router.back()} style={styles.gateBack} testID="admin-back">
+            <Pressable onPress={onBack} style={styles.gateBack} testID="admin-back">
               <Ionicons name="chevron-back" size={22} color={colors.onSurface} />
               <Text style={styles.gateBackTxt}>INDIETRO</Text>
             </Pressable>

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import {
   View, Text, StyleSheet, ScrollView, Pressable, TextInput, ActivityIndicator,
   KeyboardAvoidingView, Platform,
@@ -9,6 +9,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { api, ApiError } from "@/src/api";
 import { colors, spacing, font } from "@/src/theme";
 import { useAuth } from "@/src/auth/AuthContext";
+import { useHardwareBack } from "@/src/utils/useHardwareBack";
 
 const CATEGORIES = [
   { id: "Bug", label: "Bug o malfunzionamento" },
@@ -32,6 +33,12 @@ export default function SupportScreen() {
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  // Hardware back mirrors the on-screen "chevron-back" button which
+  // simply pops one route. Applied here at the component level so it
+  // works for ALL three render branches below (anon lock, sent, form).
+  const onBack = useCallback(() => router.back(), [router]);
+  useHardwareBack(onBack);
 
   const validate = (): string | null => {
     if (!category) return "Seleziona una categoria del problema.";
@@ -66,7 +73,7 @@ export default function SupportScreen() {
     return (
       <SafeAreaView style={styles.safe} edges={["top"]} testID="support-anon-lock">
         <View style={styles.headerBar}>
-          <Pressable onPress={() => router.back()} style={styles.backBtn} testID="support-back">
+          <Pressable onPress={onBack} style={styles.backBtn} testID="support-back">
             <Ionicons name="chevron-back" size={22} color={colors.brandSecondary} />
           </Pressable>
           <Text style={styles.title}>ASSISTENZA</Text>
@@ -99,7 +106,7 @@ export default function SupportScreen() {
     return (
       <SafeAreaView style={styles.safe} edges={["top"]} testID="support-sent">
         <View style={styles.headerBar}>
-          <Pressable onPress={() => router.back()} style={styles.backBtn} testID="support-back">
+          <Pressable onPress={onBack} style={styles.backBtn} testID="support-back">
             <Ionicons name="chevron-back" size={22} color={colors.brandSecondary} />
           </Pressable>
           <Text style={styles.title}>ASSISTENZA</Text>
@@ -119,7 +126,7 @@ export default function SupportScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={["top"]} testID="support-screen">
       <View style={styles.headerBar}>
-        <Pressable onPress={() => router.back()} style={styles.backBtn} testID="support-back">
+        <Pressable onPress={onBack} style={styles.backBtn} testID="support-back">
           <Ionicons name="chevron-back" size={22} color={colors.brandSecondary} />
         </Pressable>
         <View style={{ flex: 1 }}>

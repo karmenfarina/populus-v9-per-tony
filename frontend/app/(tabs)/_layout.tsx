@@ -1,7 +1,7 @@
-import { Tabs, usePathname, useRouter } from "expo-router";
+import { Tabs, usePathname } from "expo-router";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { View, Text, StyleSheet, Platform, BackHandler } from "react-native";
+import { View, Text, StyleSheet } from "react-native";
 import { useEffect } from "react";
 import { colors } from "@/src/theme";
 import { useNotifications } from "@/src/notifications/NotificationsContext";
@@ -68,41 +68,6 @@ export default function TabsLayout() {
       navStack.clear();
     }
   }, [pathname]);
-
-  // ─── Global Android hardware-back handler ──────────────────────
-  // Per-screen `useSmartBack` already wires the hardware-back button on
-  // detail screens, but tab ROOT screens (home, profile, top, messages
-  // list, notifications, circle/find) don't use it — so on Android the
-  // hardware back on those screens used to fall through to the OS and
-  // could exit the app or send the user through unrelated browser
-  // history. This global handler mirrors the exact same rules as
-  // `useSmartBack`, wired once at the Tabs layout level.
-  //
-  // BackHandler fires handlers in reverse registration order and stops
-  // at the first `true` — so when a detail-screen handler is active it
-  // takes precedence, and this global one only kicks in on tab roots.
-  const router = useRouter();
-  useEffect(() => {
-    if (Platform.OS !== "android") return;
-    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
-      const currentPath = pathname || "/";
-      // On the home tab root there's nowhere sensible to go — let the
-      // OS handle it (default: prompt exit / send app to background).
-      if (currentPath === "/") return false;
-      // Pop our custom stack. Any entry that isn't the current path
-      // wins — that's the "previous screen" the user actually visited.
-      const prev = navStack.popAndPeek();
-      if (prev && prev !== currentPath) {
-        router.replace(prev as any);
-        return true;
-      }
-      // No stack entry left → fall back to the home tab so the user
-      // doesn't get kicked out of the app by mistake from a deep tab.
-      router.replace("/" as any);
-      return true;
-    });
-    return () => sub.remove();
-  }, [pathname, router]);
 
   return (
     <Tabs
