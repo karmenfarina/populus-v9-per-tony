@@ -210,4 +210,4 @@ Per esercitare i tuoi diritti, chiedere chiarimenti o segnalare abusi puoi scriv
 
 ---
 
-**Toccando "ACCETTO E CONTINUA" dichiari di aver letto e compreso questi Termini di Servizio e questa Informativa sulla Privacy, e presti il tuo consenso al trattamento dei tuoi dati come descritto.**
+**Toccando "ACCETTO E CONTINUO" dichiari di aver letto e compreso questi Termini di Servizio e questa Informativa sulla Privacy, e presti il tuo consenso al trattamento dei tuoi dati come descritto.**

@@ -148,7 +148,7 @@ export default function TermsScreen() {
           {accepting ? (
             <ActivityIndicator size="small" color={colors.onBrandPrimary} />
           ) : (
-            <Text style={styles.acceptBtnTxt}>ACCETTO E CONTINUA</Text>
+            <Text style={styles.acceptBtnTxt}>ACCETTO E CONTINUO</Text>
           )}
         </Pressable>
         <Pressable onPress={onDecline} disabled={accepting} style={styles.declineBtn} testID="terms-decline-btn" hitSlop={8}>

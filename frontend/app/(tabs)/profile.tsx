@@ -956,20 +956,6 @@ export default function Profile() {
                 <Ionicons name={historyExpanded ? "chevron-up" : "chevron-down"} size={20} color={colors.onSurface} />
               </View>
             </Pressable>
-            {historyExpanded && (
-              <Pressable
-                onPress={() => loadHistory(filter)}
-                testID="history-refresh"
-                hitSlop={8}
-                style={{ paddingHorizontal: spacing.sm, paddingVertical: spacing.xs }}
-              >
-                <Ionicons
-                  name="refresh"
-                  size={20}
-                  color={loadingH ? colors.muted : colors.brandPrimary}
-                />
-              </Pressable>
-            )}
           </View>
           {historyExpanded && (
             <View testID="history-body">
