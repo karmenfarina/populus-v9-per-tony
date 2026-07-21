@@ -97,6 +97,16 @@ export default function Profile() {
   const [photoUris, setPhotoUris] = useState<Record<string, string>>({});
   const [prefsExpanded, setPrefsExpanded] = useState(false);
   const [historyExpanded, setHistoryExpanded] = useState(false);
+  // Voting-history privacy flags — mirror the two backend toggles
+  // (`generic` covers strangers, `mutual` covers cerchia bilaterale).
+  // Local state lets the switches feel instant; failed requests are
+  // rolled back so the UI never lies about the persisted value.
+  const [histPublicGeneric, setHistPublicGeneric] = useState<boolean>(
+    user?.history_public_generic !== false,
+  );
+  const [histPublicMutual, setHistPublicMutual] = useState<boolean>(
+    user?.history_public_mutual !== false,
+  );
   // Cropper state
   const [cropperOpen, setCropperOpen] = useState(false);
   const [cropperUri, setCropperUri] = useState<string | null>(null);
@@ -209,6 +219,33 @@ export default function Profile() {
   useEffect(() => {
     if (historyExpanded) loadHistory(filter);
   }, [historyExpanded, filter, loadHistory]);
+
+  // Keep the privacy switches in sync with the latest `user` snapshot from
+  // AuthContext (e.g. after refreshMe() runs on focus). Anything undefined
+  // is treated as True to preserve pre-existing "always public" behaviour.
+  useEffect(() => {
+    setHistPublicGeneric(user?.history_public_generic !== false);
+    setHistPublicMutual(user?.history_public_mutual !== false);
+  }, [user?.history_public_generic, user?.history_public_mutual]);
+
+  /**
+   * Toggle a single history-privacy flag with optimistic UI + rollback.
+   * A single PATCH persists both flags on the server side; only the
+   * changed one is sent in the payload.
+   */
+  const updateHistPrivacy = useCallback(async (kind: "generic" | "mutual") => {
+    const prev = kind === "generic" ? histPublicGeneric : histPublicMutual;
+    const next = !prev;
+    // Optimistic swap.
+    if (kind === "generic") setHistPublicGeneric(next); else setHistPublicMutual(next);
+    try {
+      await api.updateHistoryPrivacy({ [kind]: next } as any);
+    } catch {
+      // Rollback on failure.
+      if (kind === "generic") setHistPublicGeneric(prev); else setHistPublicMutual(prev);
+      Alert.alert("Errore", "Impossibile aggiornare le impostazioni. Riprova.");
+    }
+  }, [histPublicGeneric, histPublicMutual]);
 
   // Auto-refresh the vote history every 30s while the section is expanded.
   // The per-vote `aligned` badge is recomputed by the backend on every call
@@ -936,6 +973,45 @@ export default function Profile() {
           </View>
           {historyExpanded && (
             <View testID="history-body">
+              {/* Two independent privacy switches. `generic` covers strangers
+                  browsing the public profile; `mutual` covers members of the
+                  "cerchia bilaterale" (people in my circle who also have me
+                  in theirs). Toggling one never affects the other so the
+                  owner can, for example, keep the history visible to close
+                  friends while hiding it from everyone else. */}
+              <View style={styles.historyPrivacyBox} testID="history-privacy-box">
+                <View style={styles.historyPrivacyRow}>
+                  <View style={{ flex: 1, paddingRight: spacing.sm }}>
+                    <Text style={styles.historyPrivacyTitle}>Visibile a tutti</Text>
+                    <Text style={styles.historyPrivacyHint}>
+                      Chiunque può vedere il tuo storico voti.
+                    </Text>
+                  </View>
+                  <Switch
+                    testID="hist-privacy-generic"
+                    value={histPublicGeneric}
+                    onValueChange={() => updateHistPrivacy("generic")}
+                    trackColor={{ false: colors.border, true: colors.brandPrimary }}
+                    thumbColor="#FFFFFF"
+                  />
+                </View>
+                <View style={styles.historyPrivacyDivider} />
+                <View style={styles.historyPrivacyRow}>
+                  <View style={{ flex: 1, paddingRight: spacing.sm }}>
+                    <Text style={styles.historyPrivacyTitle}>Visibile alla cerchia bilaterale</Text>
+                    <Text style={styles.historyPrivacyHint}>
+                      Chi hai nella cerchia e ti ha nella sua può vedere lo storico.
+                    </Text>
+                  </View>
+                  <Switch
+                    testID="hist-privacy-mutual"
+                    value={histPublicMutual}
+                    onValueChange={() => updateHistPrivacy("mutual")}
+                    trackColor={{ false: colors.border, true: colors.brandPrimary }}
+                    thumbColor="#FFFFFF"
+                  />
+                </View>
+              </View>
               <View style={styles.filterRow}>
                 {(["all", "majority", "minority"] as Filter[]).map((f) => (
                   <Pressable
@@ -1369,6 +1445,22 @@ const styles = StyleSheet.create({
   sectionHeadRight: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   sectionCountBadge: { color: colors.muted, fontSize: font.sizes.sm, letterSpacing: 1, minWidth: 20, textAlign: "right" },
   filterRow: { flexDirection: "row", gap: spacing.sm, paddingHorizontal: spacing.lg, paddingBottom: spacing.md },
+  historyPrivacyBox: {
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.md,
+    borderWidth: 2,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceSecondary,
+    padding: spacing.sm,
+  },
+  historyPrivacyRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: spacing.sm,
+  },
+  historyPrivacyDivider: { height: 1, backgroundColor: colors.border, marginHorizontal: -spacing.sm },
+  historyPrivacyTitle: { color: colors.onSurface, fontSize: font.sizes.sm, fontWeight: "600" },
+  historyPrivacyHint: { color: colors.muted, fontSize: font.sizes.xs, marginTop: 2, lineHeight: 14 },
   filterChip: { flex: 1, borderWidth: 2, borderColor: colors.border, paddingVertical: spacing.sm, alignItems: "center", backgroundColor: colors.surfaceSecondary },
   filterTxt: { fontSize: font.sizes.xs, letterSpacing: 1, color: colors.onSurface, fontWeight: "500" },
   center: { padding: spacing.xl, alignItems: "center" },

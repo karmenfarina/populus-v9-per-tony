@@ -228,6 +228,11 @@ export const api = {
   circleGet: (ownerId: string, q?: string) =>
     request(`/users/${ownerId}/circle${q ? `?q=${encodeURIComponent(q)}` : ''}`),
   myBlocks: () => request('/users/me/blocks'),
+  // Voting-history privacy: two independent toggles. `generic` covers all
+  // random users; `mutual` covers members of the "cerchia bilaterale"
+  // (users I have in my circle who also have me in theirs).
+  updateHistoryPrivacy: (patch: { generic?: boolean; mutual?: boolean }) =>
+    request('/users/me/history-privacy', { method: 'PATCH', body: JSON.stringify(patch) }),
   reportUser: (userId: string, reason: string, message_id?: string) =>
     request(`/users/${userId}/report`, { method: 'POST', body: JSON.stringify({ reason, message_id }) }),
 };
@@ -247,6 +252,8 @@ export type User = {
   display_name?: string | null;
   favorite_categories?: string[];
   push_notifications?: boolean;
+  history_public_generic?: boolean;
+  history_public_mutual?: boolean;
   onboarding_completed?: boolean;
   bio?: string | null;
   social_links?: { instagram?: string; tiktok?: string; twitter?: string; youtube?: string; website?: string };

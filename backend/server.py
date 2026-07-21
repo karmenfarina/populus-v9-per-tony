@@ -465,6 +465,11 @@ def _public_user(u: dict) -> dict:
         'photos_count': u.get('photos_count', 0),
         'badge': compute_badge(u),
         'push_notifications': u.get('push_notifications', True),
+        # Two independent switches govern who can see the voting history on
+        # the public profile: mutual-circle members and everyone else. Both
+        # default to True so pre-existing accounts stay fully public.
+        'history_public_generic': True if u.get('history_public_generic') is None else bool(u.get('history_public_generic')),
+        'history_public_mutual': True if u.get('history_public_mutual') is None else bool(u.get('history_public_mutual')),
     }
 
 
@@ -2209,19 +2214,84 @@ async def my_history(filter: str = 'all', user: dict = Depends(get_current_user)
 
 
 @api_router.get('/users/{user_id}/history')
-async def public_user_history(user_id: str, filter: str = 'all'):
-    u = await db.users.find_one({'user_id': user_id}, {'_id': 0, 'user_id': 1, 'auth_provider': 1})
+async def public_user_history(
+    user_id: str,
+    filter: str = 'all',
+    user: Optional[dict] = Depends(get_current_user_optional),
+):
+    u = await db.users.find_one(
+        {'user_id': user_id},
+        {'_id': 0, 'user_id': 1, 'auth_provider': 1, 'history_public_generic': 1, 'history_public_mutual': 1},
+    )
     if not u:
         raise HTTPException(status_code=404, detail='Utente non trovato')
     if u.get('auth_provider') == 'anonymous':
         # Anonymous voting history is hidden from other users.
-        return {'history': [], 'is_anonymous': True}
-    return {'history': await _history_for_user(user_id, filter)}
+        return {'history': [], 'is_anonymous': True, 'hidden': True, 'reason': 'anonymous'}
+
+    # Owner viewing self — always visible.
+    viewer_id = user['user_id'] if user else None
+    if viewer_id == user_id:
+        return {'history': await _history_for_user(user_id, filter), 'hidden': False}
+
+    # Default both flags to True (backwards compatible with existing users).
+    public_generic = u.get('history_public_generic')
+    public_mutual = u.get('history_public_mutual')
+    if public_generic is None:
+        public_generic = True
+    if public_mutual is None:
+        public_mutual = True
+
+    # Determine if viewer is in "cerchia bilaterale" (mutual circle) with owner.
+    # Requires BOTH friendship rows: viewer→owner AND owner→viewer.
+    is_mutual = False
+    if viewer_id:
+        a = await db.friendships.find_one({'user_id': viewer_id, 'friend_id': user_id}, {'_id': 0, 'user_id': 1})
+        b = await db.friendships.find_one({'user_id': user_id, 'friend_id': viewer_id}, {'_id': 0, 'user_id': 1})
+        is_mutual = bool(a and b)
+
+    # Visibility rule: mutual-circle members follow the mutual flag; everyone
+    # else follows the generic flag. If either flag applies and is False the
+    # history is hidden with a reason the frontend can render.
+    if is_mutual:
+        if not public_mutual:
+            return {'history': [], 'hidden': True, 'reason': 'mutual_private'}
+    else:
+        if not public_generic:
+            return {'history': [], 'hidden': True, 'reason': 'private'}
+    return {'history': await _history_for_user(user_id, filter), 'hidden': False}
+
+
+@api_router.patch('/users/me/history-privacy')
+async def update_history_privacy(body: dict, user: dict = Depends(get_current_user)):
+    """Toggle the two visibility flags controlling who can see the voting
+    history on the owner's public profile.
+
+    Body accepts optional booleans:
+      - `generic`: whether NON mutual-circle users can see the history.
+      - `mutual`:  whether MUTUAL-circle users can see the history.
+
+    Both default to True on brand-new accounts so behaviour is backwards
+    compatible with the previous "always public" implementation.
+    """
+    updates: dict = {}
+    if isinstance(body.get('generic'), bool):
+        updates['history_public_generic'] = body['generic']
+    if isinstance(body.get('mutual'), bool):
+        updates['history_public_mutual'] = body['mutual']
+    if not updates:
+        raise HTTPException(status_code=400, detail='Nessun campo valido')
+    await db.users.update_one({'user_id': user['user_id']}, {'$set': updates})
+    doc = await db.users.find_one({'user_id': user['user_id']}, {'_id': 0, 'history_public_generic': 1, 'history_public_mutual': 1})
+    return {
+        'history_public_generic': True if doc.get('history_public_generic') is None else bool(doc.get('history_public_generic')),
+        'history_public_mutual': True if doc.get('history_public_mutual') is None else bool(doc.get('history_public_mutual')),
+    }
 
 
 
 @api_router.get('/feuds/{feud_id}/comments')
-async def get_comments(feud_id: str):
+async def get_comments(feud_id: str, user: Optional[dict] = Depends(get_current_user_optional)):
     docs = await db.comments.find({'feud_id': feud_id}, {'_id': 0}).sort('created_at', -1).to_list(500)
     # Visibility rule: a comment is shown only if its author is CURRENTLY voting
     # for the same side the comment was posted on. Comments where the author has
@@ -2260,6 +2330,75 @@ async def get_comments(feud_id: str):
     for c in docs:
         if isinstance(c.get('created_at'), datetime):
             c['created_at'] = _iso_utc(c['created_at'])
+
+    # Viewer-personalised ordering.
+    # ────────────────────────────
+    # For authenticated viewers we surface conversations that matter most:
+    #   Bucket 0 → authors that belong to the VIEWER's Cerchia del Gossip.
+    #   Bucket 1 → authors NOT in the viewer's circle but among their
+    #              "preferiti" — anyone they've exchanged private messages
+    #              with (a lightweight proxy for closeness that's cheap to
+    #              compute and reasonably accurate).
+    #   Bucket 2 → everyone else, sorted first by popularity (reply_count),
+    #              then by recency, mimicking the "top comments" style of
+    #              other social apps.
+    # Anonymous viewers keep the plain chronological ordering that was in
+    # place before this personalisation layer.
+    if docs and user:
+        viewer_id = user['user_id']
+        author_ids = list({c['user_id'] for c in docs})
+        # Circle members (viewer → author friendship).
+        my_circle_rows = await db.friendships.find(
+            {'user_id': viewer_id, 'friend_id': {'$in': author_ids}},
+            {'_id': 0, 'friend_id': 1},
+        ).to_list(len(author_ids))
+        my_circle_ids: set[str] = {r['friend_id'] for r in my_circle_rows}
+        # DM contacts — union of counterparties in both directions.
+        dm_rows = await db.messages.find(
+            {
+                '$or': [
+                    {'sender_id': viewer_id, 'recipient_id': {'$in': author_ids}},
+                    {'recipient_id': viewer_id, 'sender_id': {'$in': author_ids}},
+                ],
+                'deleted': {'$ne': True},
+            },
+            {'_id': 0, 'sender_id': 1, 'recipient_id': 1},
+        ).to_list(2000)
+        dm_contacts: set[str] = set()
+        for m in dm_rows:
+            other = m['recipient_id'] if m['sender_id'] == viewer_id else m['sender_id']
+            dm_contacts.add(other)
+
+        def _bucket(c: dict) -> int:
+            uid = c['user_id']
+            if uid == viewer_id:
+                return 0  # viewer's own comments alongside their circle
+            if uid in my_circle_ids:
+                return 0
+            if uid in dm_contacts:
+                return 1
+            return 2
+
+        def _ts(c: dict) -> float:
+            v = c.get('created_at')
+            if isinstance(v, str):
+                try:
+                    return datetime.fromisoformat(v.replace('Z', '+00:00')).timestamp()
+                except Exception:
+                    return 0.0
+            if isinstance(v, datetime):
+                return v.timestamp()
+            return 0.0
+
+        def _sort_key(c: dict):
+            b = _bucket(c)
+            # Bucket 0/1 → recency wins.
+            # Bucket 2 → popularity (reply_count) first, then recency.
+            if b in (0, 1):
+                return (b, -_ts(c))
+            return (b, -int(c.get('reply_count') or 0), -_ts(c))
+
+        docs.sort(key=_sort_key)
     a = [c for c in docs if c['side'] == 'A']
     b = [c for c in docs if c['side'] == 'B']
     return {'side_a': a, 'side_b': b}

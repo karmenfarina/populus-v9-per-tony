@@ -170,12 +170,20 @@ export default function UserPublicScreen() {
     }
   };
 
+  const [historyHidden, setHistoryHidden] = useState<null | "private" | "mutual_private" | "anonymous">(null);
+
   const loadHistory = useCallback(async (uid: string, f: HFilter) => {
     setLoadingH(true);
     try {
-      const r = await api.publicUserHistory(uid, f);
+      const r: any = await api.publicUserHistory(uid, f);
       setHistory(r.history || []);
-    } catch { setHistory([]); }
+      // The backend surfaces a `hidden` flag + reason when the owner has
+      // opted out of showing their voting history to this viewer. Store it
+      // so the UI can render an informative empty state instead of a bare
+      // "no votes" message.
+      if (r.hidden) setHistoryHidden(r.reason || "private");
+      else setHistoryHidden(null);
+    } catch { setHistory([]); setHistoryHidden(null); }
     finally { setLoadingH(false); }
   }, []);
 
@@ -451,6 +459,27 @@ export default function UserPublicScreen() {
             </Pressable>
             {historyExpanded ? (
               <View testID="public-history-body">
+                {/* Owner has opted this history out for this viewer type. Show
+                    a clean placeholder with the appropriate reason instead
+                    of listing votes. */}
+                {historyHidden === "private" ? (
+                  <View style={styles.historyHiddenBox} testID="public-history-hidden-private">
+                    <Ionicons name="lock-closed" size={22} color={colors.muted} />
+                    <Text style={styles.historyHiddenTitle}>Storico voti privato</Text>
+                    <Text style={styles.historyHiddenHint}>
+                      Questo utente ha scelto di non condividere il suo storico voti.
+                    </Text>
+                  </View>
+                ) : historyHidden === "mutual_private" ? (
+                  <View style={styles.historyHiddenBox} testID="public-history-hidden-mutual">
+                    <Ionicons name="lock-closed" size={22} color={colors.muted} />
+                    <Text style={styles.historyHiddenTitle}>Storico voti privato</Text>
+                    <Text style={styles.historyHiddenHint}>
+                      Nemmeno i membri della cerchia bilaterale possono vedere lo storico voti.
+                    </Text>
+                  </View>
+                ) : (
+                  <>
                 <View style={styles.filterRow}>
                   {(["all", "majority", "minority"] as HFilter[]).map((f) => (
                     <Pressable
@@ -515,6 +544,8 @@ export default function UserPublicScreen() {
                       );
                     })}
                   </View>
+                )}
+                  </>
                 )}
               </View>
             ) : null}
@@ -737,6 +768,17 @@ const styles = StyleSheet.create({
   filterChip: { flex: 1, borderWidth: 2, borderColor: colors.border, paddingVertical: spacing.sm, alignItems: "center", backgroundColor: colors.surfaceSecondary },
   filterTxt: { fontSize: font.sizes.xs, letterSpacing: 1, color: colors.onSurface, fontWeight: "500" },
   emptyH: { paddingVertical: spacing.lg, color: colors.muted, fontSize: font.sizes.base, textAlign: "center" },
+  historyHiddenBox: {
+    alignItems: "center",
+    padding: spacing.lg,
+    gap: spacing.sm,
+    borderWidth: 2,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceSecondary,
+    marginTop: spacing.sm,
+  },
+  historyHiddenTitle: { color: colors.onSurface, fontSize: font.sizes.base, fontWeight: "600" },
+  historyHiddenHint: { color: colors.muted, fontSize: font.sizes.sm, textAlign: "center", lineHeight: 18 },
   historyList: { gap: spacing.sm, marginTop: spacing.sm },
   historyItem: { flexDirection: "row", borderWidth: 2, borderColor: colors.border, backgroundColor: colors.surfaceSecondary, overflow: "hidden" },
   sideBar: { width: 8 },

@@ -1,0 +1,32 @@
+{
+  "summary": "Iteration 54 — tested two new features in Populus: (1) voting-history privacy toggles and (2) personalised comment ordering. Backend: 10/10 pytest cases PASS in /app/backend/tests/test_history_privacy_and_comment_ordering.py (13.6s). All 7 steps from Test 1 verified (PATCH generic=false, non-mutual viewer hidden/private, anon viewer hidden/private, owner-self visible, PATCH generic=true+mutual=false round-trip, mutual-circle viewer hidden/mutual_private, empty body 400) plus 3 extra sanity checks. Comment ordering: buckets are correctly enforced — circle-member author precedes DM-partner author precedes stranger author, regardless of chronology; anonymous viewer receives the plain newest-first order. Frontend: mobile viewport (390x844), Expo web preview. STORICO VOTI expands to reveal privacy box with both switches (`hist-privacy-generic`, `hist-privacy-mutual`) and Italian labels 'Visibile a tutti' + 'Visibile alla cerchia bilaterale'. Tapping the generic switch flipped backend history_public_generic from True→False (optimistic, persisted). After reload the toggle state stayed. Navigating to a stranger with generic=False renders the `public-history-hidden-private` placeholder with 'Storico voti privato · Questo utente ha scelto di non condividere il suo storico voti.' No React Native / Expo deprecated-package issues encountered in the modified files.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_history_privacy_and_comment_ordering.py",
+    "/app/test_reports/pytest/iter54_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py:2265 — update_history_privacy uses `isinstance(body.get('generic'), bool)` guard so non-bool payloads (e.g. `{\"generic\": \"yes\"}`) also trigger the 400 branch. Good defensive behaviour; matches Pydantic-style validation.",
+    "server.py:2216 — public_user_history correctly discriminates owner-viewing-self, anonymous-owner, mutual-circle-viewer, generic-viewer paths. Mutual is computed with TWO friendship queries (bilateral requirement enforced).",
+    "server.py:2347 — Personalised bucket ordering runs only when both `docs` and `user` are truthy — anonymous viewers correctly bypass all extra queries (perf win). DM-based Bucket 1 is computed by scanning `messages` with `sender_id`/`recipient_id` OR match filtered on non-deleted rows; the list is capped at 2000, which is a soft ceiling for very active users — acceptable for now.",
+    "profile.tsx:236 — updateHistPrivacy performs optimistic UI + rollback on Alert.alert error; the payload only sends the changed key, matching the backend's optional-fields contract. Nothing to fix.",
+    "user/[id].tsx:184 — public-history hidden state is read from `r.hidden`+`r.reason` and rendered with correct testIDs; anonymous case falls through to the private variant which is technically fine since the placeholder copy is identical enough, but if a stricter distinction is desired the `anonymous` reason could get its own testID.",
+    "test_history_privacy_and_comment_ordering.py — signup no longer returns a token (email-verification wall). The test helper flips `email_verified=True` directly in Mongo and then calls /auth/login to obtain a session; this mirrors how existing test_credentials.md pre-verified users were provisioned. Documented for future testing agents."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_history_privacy_and_comment_ordering.py (new)"
+  ],
+  "success_rate": {"backend": "100% (10/10)", "frontend": "100% (all 6 UI steps pass)"},
+  "seed_data_creation": "Created 6 throwaway test users via /api/auth/signup + direct Mongo `email_verified: true` patch: 2 for TestHistoryPrivacy (owner+viewer), 4 for TestCommentOrdering (viewer, circle_author, dm_author, stranger_author), plus 2 for the Playwright run (uiown*, uistr*). Each votes on the first available feud. Owners are added to circles via /api/circle/{friend_id}. Stranger's history_public_generic set to False. All test-only accounts, safe to leave.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Signup NOW returns 'requires_verification' without a token. To spin up a usable account in tests: POST /api/auth/signup → db.users.update_one({email},{'$set':{'email_verified':True}}) via pymongo → POST /api/auth/login to obtain the JWT. Anonymous accounts still receive a token immediately but cannot use the circle endpoints (403). /api/auth/me returns {user:{...}}, NOT the user dict at the top level. Pre-verified test accounts chat_a@test.it/chat_b@test.it (test123) are available for quick manual smokes. Public URL: https://faide-poll.preview.emergentagent.com. testIDs on the new UI: history-section, history-section-toggle, history-privacy-box, hist-privacy-generic, hist-privacy-mutual on /profile; public-history-toggle, public-history-hidden-private, public-history-hidden-mutual on /user/{id}.",
+  "rca_of_issue": "N/A — no failing feature. One transient failure during test-authoring (test_5 asserted directly on the auth/me response but the endpoint wraps user in `{\"user\": {...}}`); fixed in the test file by unwrapping before assertion."
+}
