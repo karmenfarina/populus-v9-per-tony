@@ -19,7 +19,7 @@ export default function Index() {
   // so the user can't fill in personal data before consenting to the
   // trattamento dei dati. `terms_accepted` is a server-computed boolean
   // that also flips back to `false` whenever the terms version bumps.
-  if (user.terms_accepted === false) return <Redirect href="/terms" />;
+  if (user.terms_accepted !== true) return <Redirect href="/terms" />;
   if (!user.onboarding_completed) return <Redirect href="/onboarding" />;
   return <Redirect href="/(tabs)" />;
 }

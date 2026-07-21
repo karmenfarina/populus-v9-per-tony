@@ -2463,8 +2463,11 @@ async def _ai_faction_summary(feud: dict, comments_a: list[dict], comments_b: li
         "punto (es. 'la situazione è vergognosa', 'servono regole più chiare'), "
         "mettilo in `common` (0–3 bullet). Se non c'è nulla di veramente comune, "
         "lascia l'array VUOTO.\n"
-        "5. Se la sezione commenti è vuota o troppo scarna per un'analisi, "
-        'rispondi {"empty": true}.\n\n'
+        "5. Se la sezione commenti è DAVVERO vuota (nessuna opinione "
+        "leggibile per una fazione, o meno di 2 commenti reali complessivi), "
+        'rispondi {"empty": true}. Altrimenti sforzati sempre di produrre '
+        "almeno 1 bullet per fazione, anche solo distillando l'unica tesi "
+        "principale rilevabile.\n\n"
         "Rispondi SOLO con questo JSON, in italiano, senza commenti né testo extra:\n"
         '{"side_a": ["bullet 1", "bullet 2", "..."], '
         '"side_b": ["bullet 1", "bullet 2", "..."], '
