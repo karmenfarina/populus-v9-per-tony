@@ -23,6 +23,7 @@ import { api, ChatMessage, MiniUser } from "@/src/api";
 import { useAuth } from "@/src/auth/AuthContext";
 import { useMessaging } from "@/src/messaging/MessagingContext";
 import { colors, spacing, font } from "@/src/theme";
+import { useSmartBack } from "@/src/utils/useSmartBack";
 
 const REACTIONS = ["❤️", "😂", "😮", "😢", "😡", "👍", "👎", "🔥"];
 
@@ -115,31 +116,13 @@ function formatDay(ts: string): string {
 
 export default function ChatScreen() {
   const { userId, from } = useLocalSearchParams<{ userId: string; from?: string }>();
+  void from; // kept for backwards compat — useSmartBack reads the param itself
   const router = useRouter();
   const { user } = useAuth();
   const { subscribe, refresh: refreshBadge } = useMessaging();
 
-  // Route back to wherever the user came from. Callers pass `?from=/circle/…`
-  // or `?from=/messages` when they push the chat so the back button honours
-  // the origin. Fallback: the messages list (safe default when we can't
-  // determine the origin, e.g. deep-link or push notification).
-  const goBackToMessagesList = useCallback(() => {
-    const target = (typeof from === "string" && from.startsWith("/")) ? from : "/messages";
-    router.replace(target as any);
-  }, [router, from]);
-
-  // Android hardware back button — override so it also goes to the
-  // messages list instead of popping to Home.
-  useFocusEffect(
-    useCallback(() => {
-      if (Platform.OS !== "android") return;
-      const sub = BackHandler.addEventListener("hardwareBackPress", () => {
-        goBackToMessagesList();
-        return true; // consume the event
-      });
-      return () => sub.remove();
-    }, [goBackToMessagesList]),
-  );
+  // Standard back behaviour — respects `?from=…` and Android hardware back.
+  const goBackToMessagesList = useSmartBack("/messages");
 
   const [otherUser, setOtherUser] = useState<MiniUser | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);

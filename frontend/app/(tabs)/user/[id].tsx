@@ -8,6 +8,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { api, PublicUser, HistoryItem } from "@/src/api";
 import { useAuth } from "@/src/auth/AuthContext";
 import { colors, spacing, font, sideColor } from "@/src/theme";
+import { useSmartBack } from "@/src/utils/useSmartBack";
 import { PhotoGalleryViewer } from "@/src/components/PhotoGalleryViewer";
 
 const SOCIAL_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
@@ -30,6 +31,7 @@ type HFilter = "all" | "majority" | "minority";
 export default function UserPublicScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const goBack = useSmartBack("/");
   const { user: me } = useAuth();
   const [profile, setProfile] = useState<PublicUser | null>(null);
   const [loading, setLoading] = useState(true);
@@ -219,7 +221,7 @@ export default function UserPublicScreen() {
     return (
       <SafeAreaView style={styles.safe} edges={["top"]} testID="public-user-screen">
         <View style={styles.topbar}>
-          <Pressable onPress={() => router.back()} testID="user-back" style={styles.backBtn}>
+          <Pressable onPress={goBack} testID="user-back" style={styles.backBtn}>
             <Ionicons name="chevron-back" size={22} color={colors.onSurfaceInverse} />
             <Text style={styles.backTxt}>INDIETRO</Text>
           </Pressable>
@@ -246,7 +248,7 @@ export default function UserPublicScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={["top"]} testID="public-user-screen">
       <View style={styles.topbar}>
-        <Pressable onPress={() => router.back()} testID="user-back" style={styles.backBtn}>
+        <Pressable onPress={goBack} testID="user-back" style={styles.backBtn}>
           <Ionicons name="chevron-back" size={22} color={colors.onSurfaceInverse} />
           <Text style={styles.backTxt}>INDIETRO</Text>
         </Pressable>
@@ -309,7 +311,12 @@ export default function UserPublicScreen() {
             </Text>
           ) : null}
           <Pressable
-            onPress={() => router.push(`/circle/${id}`)}
+            onPress={() =>
+              router.push({
+                pathname: "/circle/[userId]",
+                params: { userId: id!, from: `/user/${id}` },
+              })
+            }
             style={styles.circleChip}
             testID="public-circle-open"
             hitSlop={4}

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useState } from "react";
 import {
   View,
   Text,
@@ -13,10 +13,11 @@ import {
   Platform,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "@/src/api";
 import { useAuth } from "@/src/auth/AuthContext";
+import { useSmartBack } from "@/src/utils/useSmartBack";
 import { colors, spacing, font } from "@/src/theme";
 
 type Member = {
@@ -48,9 +49,7 @@ export default function CircleScreen() {
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
 
-  const goBack = useCallback(() => {
-    router.replace(userId === user?.user_id ? "/profile" : `/user/${userId}`);
-  }, [router, userId, user?.user_id]);
+  const goBack = useSmartBack(userId === user?.user_id ? "/profile" : `/user/${userId}`);
 
   const load = useCallback(async () => {
     if (!userId) return;
@@ -66,7 +65,15 @@ export default function CircleScreen() {
     finally { setLoading(false); }
   }, [userId, q]);
 
-  useEffect(() => { load(); }, [load]);
+  // Load whenever the screen gains focus. This also handles the initial
+  // mount and, crucially, returning from a profile where the user tapped
+  // Add/Remove from Circle so the list, count and privacy flag stay in
+  // sync in real time.
+  useFocusEffect(
+    useCallback(() => {
+      load();
+    }, [load]),
+  );
 
   const togglePrivacy = async (v: boolean) => {
     // Optimistic switch — flip local then persist.
@@ -120,7 +127,12 @@ export default function CircleScreen() {
         </View>
       </Pressable>
       <Pressable
-        onPress={() => router.push(`/user/${item.user_id}`)}
+        onPress={() =>
+          router.push({
+            pathname: "/user/[id]",
+            params: { id: item.user_id, from: `/circle/${userId}` },
+          })
+        }
         style={styles.iconBtn}
         testID={`circle-open-profile-${item.user_id}`}
         hitSlop={6}

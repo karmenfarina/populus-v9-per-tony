@@ -697,7 +697,12 @@ export default function Profile() {
               ) : null}
               {!isAnonymous ? (
                 <Pressable
-                  onPress={() => router.push(`/circle/${user.user_id}`)}
+                  onPress={() =>
+                    router.push({
+                      pathname: "/circle/[userId]",
+                      params: { userId: user.user_id, from: "/profile" },
+                    })
+                  }
                   style={styles.circleChip}
                   testID="profile-circle-open"
                   hitSlop={6}

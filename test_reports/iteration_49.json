@@ -1,0 +1,33 @@
+{
+  "summary": "Verified both circle-related fixes on Populus (mobile viewport 390x844, chat_a login via token injection). BUG 1 (back-from-circle navigation) — RESOLVED: from own profile the chip /profile-circle-open now pushes with params {from:'/profile'}, and useSmartBack correctly router.replace('/profile') on tap of circle-back (URL ends with /profile, testID profile-nickname visible). Same for other-user profile: public-circle-open pushes with from=/user/{id}, back returns to /user/{id}. BUG 2 (circle list not refreshing) — RESOLVED: useFocusEffect(load) triggers reload each time the circle screen regains focus. E2E flow: from B's public profile tapped user-circle-toggle (AGGIUNGI → NELLA CERCHIA), navigated to own profile → Cerchia, row `circle-row-user_16f709708760` appeared. Then went back to B, tapped NELLA CERCHIA to remove, returned to own Cerchia — row was gone. Backend spot-check (7/7 PASS in test_circle_endpoints.py): GET /api/users/{id}/circle, POST/DELETE /api/circle/{friend_id}, GET /api/circle/me/status/{id} — create→verify, remove→verify, all data assertions pass. Note: request mentioned POST/DELETE /api/users/{user_id}/circle but the actual routes in server.py are POST/DELETE /api/circle/{friend_id} (add/remove) plus GET /api/users/{owner_id}/circle (list) — behavior is correct, just an endpoint-path typo in the request.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_circle_endpoints.py",
+    "/app/test_reports/pytest/circle_endpoints.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "useSmartBack correctly prefers ?from= param over router.back(), which is the right approach for web where Expo Router history may not include the origin.",
+    "useFocusEffect(useCallback(() => load(), [load])) in circle/[userId].tsx correctly reloads on every focus (initial + return). Depending on [load] whose deps are [userId,q] means live search also triggers reload — expected.",
+    "Fallback in useSmartBack (line 52 of circle/[userId].tsx) is set contextually (/profile for owner, /user/{id} for guest) — good defensive coding in case ?from= is somehow lost.",
+    "Endpoint naming inconsistency: add/remove use /api/circle/{friend_id}, list uses /api/users/{owner_id}/circle — works but slightly asymmetric. Not a bug."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_circle_endpoints.py (new)"
+  ],
+  "success_rate": {"backend": "100% (7/7)", "frontend": "100% (4/4 checks: own back, user back, add refresh, remove refresh)"},
+  "seed_data_creation": "None. Test transiently added user_16f709708760 to chat_a's circle then removed — net zero change.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "chat_a token can be injected via localStorage keys `faide_token` (stringified JSON string) and `faide_user`. Email login UI is hidden — use POST /api/auth/login via page.evaluate. Anonymous accounts are blocked from circle endpoints (403 'Gli account anonimi non possono usare la cerchia'). Circle endpoints: POST/DELETE /api/circle/{friend_id}, GET /api/users/{owner_id}/circle, GET /api/circle/me/status/{other_id}, PATCH /api/circle/me/privacy.",
+  "rca_of_issue": "BUG1 root cause: previously the profile/user chips called router.push('/circle/[userId]') without a ?from= param, so useSmartBack fell through to router.canGoBack()/router.back() which on Expo web returns to the previously mounted tab (Home). Fix passes explicit from=/profile or from=/user/{id} so router.replace(from) is used. BUG2 root cause: the previous useEffect(load,[load]) only ran when [load] (=[userId,q]) changed, not on screen re-focus, so add/remove from other screens did not refresh the mounted circle. Fix uses useFocusEffect which fires on every focus event."
+}
