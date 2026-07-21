@@ -1,0 +1,24 @@
+{
+  "summary": "Regression tested the navStack cross-tab leak fix in /app/frontend/app/(tabs)/_layout.tsx (useEffect(navStack.clear) on any TAB_ROOTS pathname). All three requested tests PASS on Expo web (mobile viewport 390x844) against public URL https://faide-poll.preview.emergentagent.com. TEST 1 (single tab-switch leak) — profile → /circle/{me} → FAIDE tab (no back) → open feud → press back-button on feud detail → correctly lands on '/' (Home), NOT on stale /circle/{me}. TEST 2 (full-chain back regression) — profile → /circle/{me} → /user/D → /circle/D → /user/Y → 4 back presses correctly walk one step per press: back1→/circle/D, back2→/user/D, back3→/circle/{me}, back4→/profile. All 4 URL transitions verified. TEST 3 (multiple consecutive tab switches) — /profile → /circle/{me} → MESSAGGI → NOTIFICHE → FAIDE (each tab root clears stack) → open feud → back → correctly lands on '/'. The navStack.clear() on TAB_ROOTS effectively wipes any leaked /circle/{me} entry the moment the user lands on any tab root, so subsequent detail-screen back presses only walk within that new tab's chain. No regressions to the previously-fixed full-chain back navigation (TEST 2 matches iter52 behavior exactly).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Fix in /app/frontend/app/(tabs)/_layout.tsx is minimal and correct: a single useEffect keyed on usePathname() that calls navStack.clear() whenever pathname ∈ TAB_ROOTS (/, /top, /messages, /notifications, /profile). Runs at the Tabs layout level so it fires regardless of which detail screen is mounted underneath, catching every tab-root landing (initial navigation, tab-bar tap, and router.replace() back to root).",
+    "TAB_ROOTS set is authoritative — matches the five visible Tabs.Screen entries (index/top/messages/notifications/profile). If a future top-level tab is added, the constant must be updated too; consider deriving it from the Tabs.Screen config to avoid drift.",
+    "Clearing on EVERY tab-root landing (including initial mount) is safe because navStack is only populated by detail-screen useSmartBack push()es; tab roots never push themselves. So there is nothing legitimate to preserve at tab-root time."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (frontend-only)", "frontend": "100% (3/3 tests pass: T1 /, T2 4/4 back hops, T3 /)"},
+  "seed_data_creation": "Reset onboarding_completed=true for user_2a0ff12bc193 (test_ui_me_1ce7d6@test.it). Seeded friendships: me→{user_10f1cc7a9b78 (D=testd), user_d46e23635f08 (B), user_1068b5d0ef7e (extra)}; D→{user_38c17fc20806 (C), user_d46e23635f08 (B), user_1068b5d0ef7e}. Ensures TEST 2 chain (profile→/circle/me→/user/D→/circle/D→/user/Y) has a non-empty second-hop circle.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Login: POST /api/auth/login with test_ui_me_1ce7d6@test.it / test1234; then localStorage.setItem('faide_token', JSON.stringify(token)) and goto '/'. Tab bar labels are hidden (tabBarShowLabel:false) so text-based selectors fail — use anchor href selectors: a[href='/'], a[href='/profile'], a[href='/messages'], a[href='/notifications'], a[href='/top']. Feud back button testID is 'back-button' (not 'feud-back'). User-page circle-open testID is 'public-circle-open' (not 'user-circle-open'). Seed friendships and onboarding_completed flag are set on the me user; if either is reset by another test, restore them before re-running.",
+  "rca_of_issue": "PRE-FIX BUG (as described in review_request): navStack is a module-level singleton. Entries pushed by useSmartBack on detail-screen focus were NOT cleared when the user switched tabs via the tab bar (tab-bar tap only changes pathname, doesn't pop the manual stack). So sequence: profile→push('/circle/me')→tab-tap FAIDE (stack still contains ['/circle/me'])→open feud (stack: ['/circle/me','/feud/X'])→back from feud pops to '/circle/me' — wrong destination. FIX (verified in this iter): useEffect in TabsLayout listens to usePathname(); the moment pathname matches a top-level tab root, navStack.clear() runs. So after tab-tap FAIDE, pathname becomes '/', TAB_ROOTS.has('/')===true, stack is emptied; when feud is later opened, stack is ['/feud/X'] and back correctly falls through to the fallback ('/'). Same guard fires on MESSAGGI/NOTIFICHE/etc, so TEST 3 (multi-hop tab switching) also passes. Full-chain intra-detail back (TEST 2) is unaffected because no tab-root pathname is encountered mid-chain."
+}

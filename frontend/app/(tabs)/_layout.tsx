@@ -1,10 +1,21 @@
-import { Tabs } from "expo-router";
+import { Tabs, usePathname } from "expo-router";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { View, Text, StyleSheet } from "react-native";
+import { useEffect } from "react";
 import { colors } from "@/src/theme";
 import { useNotifications } from "@/src/notifications/NotificationsContext";
 import { useMessaging } from "@/src/messaging/MessagingContext";
+import { navStack } from "@/src/utils/navStack";
+
+/**
+ * Top-level tab paths that should reset the nav stack when reached.
+ * Landing on any of these means the user "returned home" for that tab,
+ * so previously pushed detail-screen entries must not leak into the
+ * new browsing session (which caused the "back accidentally opens
+ * Cerchia" bug).
+ */
+const TAB_ROOTS = new Set(["/", "/top", "/messages", "/notifications", "/profile"]);
 
 function NotifIcon({ color, size }: { color: string; size: number }) {
   const { unread } = useNotifications();
@@ -37,6 +48,18 @@ function MessagesIcon({ color, size }: { color: string; size: number }) {
 export default function TabsLayout() {
   const insets = useSafeAreaInsets();
   const bottomPad = Math.max(insets.bottom, 12);
+  const pathname = usePathname();
+
+  // Whenever navigation lands on a top-level tab root, wipe the manual
+  // back-stack. Without this, stale entries from a previous detail-
+  // screen chain (e.g., an earlier trip through /circle/{me}) would
+  // survive a tab switch and the very next back-press from a new
+  // detail screen would send the user back into that stale route.
+  useEffect(() => {
+    if (pathname && TAB_ROOTS.has(pathname)) {
+      navStack.clear();
+    }
+  }, [pathname]);
 
   return (
     <Tabs
