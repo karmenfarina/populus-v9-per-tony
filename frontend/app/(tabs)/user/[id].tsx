@@ -114,7 +114,7 @@ export default function UserPublicScreen() {
 
   const openChat = () => {
     if (!id) return;
-    router.push({ pathname: "/messages/[userId]", params: { userId: id } });
+    router.push({ pathname: "/messages/[userId]", params: { userId: id, from: `/user/${id}` } });
   };
 
   const toggleBlock = async () => {

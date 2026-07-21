@@ -103,7 +103,7 @@ export default function CircleScreen() {
   const renderMember = ({ item }: { item: Member }) => (
     <View style={styles.row} testID={`circle-row-${item.user_id}`}>
       <Pressable
-        onPress={() => router.push(`/messages/${item.user_id}`)}
+        onPress={() => router.push({ pathname: "/messages/[userId]", params: { userId: item.user_id, from: `/circle/${userId}` } })}
         style={styles.rowLeft}
         testID={`circle-open-chat-${item.user_id}`}
       >

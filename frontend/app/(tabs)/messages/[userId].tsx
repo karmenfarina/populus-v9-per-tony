@@ -114,17 +114,19 @@ function formatDay(ts: string): string {
 }
 
 export default function ChatScreen() {
-  const { userId } = useLocalSearchParams<{ userId: string }>();
+  const { userId, from } = useLocalSearchParams<{ userId: string; from?: string }>();
   const router = useRouter();
   const { user } = useAuth();
   const { subscribe, refresh: refreshBadge } = useMessaging();
 
-  // Route back to the messages LIST — used by header button, hardware back
-  // and error paths. Never falls back to browser/router history so the
-  // user always lands where they expect.
+  // Route back to wherever the user came from. Callers pass `?from=/circle/…`
+  // or `?from=/messages` when they push the chat so the back button honours
+  // the origin. Fallback: the messages list (safe default when we can't
+  // determine the origin, e.g. deep-link or push notification).
   const goBackToMessagesList = useCallback(() => {
-    router.replace("/messages");
-  }, [router]);
+    const target = (typeof from === "string" && from.startsWith("/")) ? from : "/messages";
+    router.replace(target as any);
+  }, [router, from]);
 
   // Android hardware back button — override so it also goes to the
   // messages list instead of popping to Home.

@@ -159,7 +159,7 @@ export default function MessagesListScreen() {
           }
           renderItem={({ item }) => (
             <Pressable
-              onPress={() => router.push({ pathname: "/messages/[userId]", params: { userId: item.other_user.user_id } })}
+              onPress={() => router.push({ pathname: "/messages/[userId]", params: { userId: item.other_user.user_id, from: "/messages" } })}
               style={styles.row}
               testID={`convo-${item.other_user.user_id}`}
             >
