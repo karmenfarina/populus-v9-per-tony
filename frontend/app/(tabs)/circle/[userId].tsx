@@ -225,8 +225,9 @@ export default function CircleScreen() {
         {/* Owner-only shortcut to the dedicated user-search screen where
             new friends can be discovered and added to the circle. Rendered
             in the header's right slot so it stays reachable regardless of
-            list scroll position. */}
-        {isOwner ? (
+            list scroll position. Hidden entirely for anonymous accounts —
+            they can't use search either as searcher or target. */}
+        {isOwner && !(user?.is_anonymous === true || user?.auth_provider === 'anonymous') ? (
           <Pressable
             onPress={() => router.push({ pathname: "/circle/find", params: { from: `/circle/${userId}` } })}
             style={styles.backBtn}

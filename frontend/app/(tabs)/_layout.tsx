@@ -7,6 +7,7 @@ import { colors } from "@/src/theme";
 import { useNotifications } from "@/src/notifications/NotificationsContext";
 import { useMessaging } from "@/src/messaging/MessagingContext";
 import { navStack } from "@/src/utils/navStack";
+import { useAuth } from "@/src/auth/AuthContext";
 
 /**
  * Top-level tab paths that should reset the nav stack when reached.
@@ -49,6 +50,13 @@ export default function TabsLayout() {
   const insets = useSafeAreaInsets();
   const bottomPad = Math.max(insets.bottom, 12);
   const pathname = usePathname();
+  const { user } = useAuth();
+  // The "Cerca amici" (find friends) tab is intentionally gated to
+  // NON-anonymous accounts. Anonymous users can't be discovered nor
+  // discover others via the search endpoint (backend enforces this),
+  // so exposing the tab would be dead UI. Hiding it here keeps the
+  // tab bar consistent with the actual capabilities of the account.
+  const isAnon = user?.is_anonymous === true || user?.auth_provider === 'anonymous';
 
   // Whenever navigation lands on a top-level tab root, wipe the manual
   // back-stack. Without this, stale entries from a previous detail-
@@ -122,6 +130,10 @@ export default function TabsLayout() {
         name="circle/find"
         options={{
           title: "CERCA AMICI",
+          // For anonymous users the whole screen is unavailable — hide
+          // the tab entry completely by setting `href: null` so it
+          // doesn't render an icon in the tab bar at all.
+          href: isAnon ? null : undefined,
           tabBarIcon: ({ color, size }) => <Ionicons name="person-add" color={color} size={size} />,
         }}
       />

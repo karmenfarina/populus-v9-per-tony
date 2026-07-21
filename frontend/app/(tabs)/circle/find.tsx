@@ -10,7 +10,7 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "@/src/api";
 import { useAuth } from "@/src/auth/AuthContext";
@@ -48,6 +48,11 @@ const DEBOUNCE_MS = 260;
 export default function CircleFindScreen() {
   const router = useRouter();
   const { user } = useAuth();
+  // Anonymous users are not allowed to use user search — the backend
+  // returns an empty list for them anyway and they can't be added to
+  // any circle. Rather than render a broken/empty state, show a clear
+  // notice and a shortcut back to the profile.
+  const isAnon = user?.is_anonymous === true || (user as any)?.auth_provider === 'anonymous';
   // Custom back: go DIRECTLY to the profile (not to the Cerchia) so
   // the user doesn't have to walk through the intermediate Cerchia
   // screen every time they close the search sheet. The "+" button
@@ -79,32 +84,48 @@ export default function CircleFindScreen() {
 
   // Bootstrap my own circle AND fetch curated suggestions in parallel so
   // the empty state has actionable rows immediately on mount.
-  useEffect(() => {
-    if (!user?.user_id) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const [c, s]: any[] = await Promise.all([
-          api.circleGet(user.user_id),
-          api.circleSuggestions(15),
-        ]);
-        if (cancelled) return;
-        const ids: Set<string> = new Set((c?.members || []).map((m: any) => m.user_id));
-        setMyCircleIds(ids);
-        setSuggested((s?.users || []).map((u: any) => ({
-          user_id: u.user_id,
-          nickname: u.nickname,
-          display_name: u.display_name,
-          photo_data: u.photo_data ?? null,
-          is_me: u.user_id === user.user_id,
-          in_my_circle: ids.has(u.user_id),
-          reasons: u.reasons || [],
-        })));
-      } catch { /* silent */ }
-      finally { if (!cancelled) setLoadingSug(false); }
-    })();
-    return () => { cancelled = true; };
-  }, [user?.user_id]);
+  //
+  // Wrapped in `useFocusEffect` (not `useEffect`) so returning to this
+  // tab after adding/removing someone elsewhere always refreshes the
+  // AGGIUNGI/NELLA CERCHIA button state — without this, stale rows
+  // linger with the wrong toggle label.
+  useFocusEffect(
+    useCallback(() => {
+      if (!user?.user_id) return;
+      // Skip network work entirely for anonymous accounts — the whole
+      // feature is disabled below anyway, and the backend would just
+      // return empty arrays.
+      if (isAnon) return;
+      let cancelled = false;
+      (async () => {
+        setLoadingSug(true);
+        try {
+          const [c, s]: any[] = await Promise.all([
+            api.circleGet(user.user_id),
+            api.circleSuggestions(15),
+          ]);
+          if (cancelled) return;
+          const ids: Set<string> = new Set((c?.members || []).map((m: any) => m.user_id));
+          setMyCircleIds(ids);
+          setSuggested((s?.users || []).map((u: any) => ({
+            user_id: u.user_id,
+            nickname: u.nickname,
+            display_name: u.display_name,
+            photo_data: u.photo_data ?? null,
+            is_me: u.user_id === user.user_id,
+            in_my_circle: ids.has(u.user_id),
+            reasons: u.reasons || [],
+          })));
+          // Also refresh in_my_circle flag on any currently-visible search
+          // results so a returning user sees the correct button label
+          // even if they don't touch the search field.
+          setRows((prev) => prev.map((x) => ({ ...x, in_my_circle: ids.has(x.user_id) })));
+        } catch { /* silent */ }
+        finally { if (!cancelled) setLoadingSug(false); }
+      })();
+      return () => { cancelled = true; };
+    }, [user?.user_id, isAnon]),
+  );
 
   // Keep a live ref of myCircleIds so the debounced search reads the
   // latest membership WITHOUT registering it as an effect dependency.
@@ -119,7 +140,7 @@ export default function CircleFindScreen() {
   useEffect(() => {
     if (timer.current) clearTimeout(timer.current);
     const trimmed = q.trim();
-    if (!trimmed) { setRows([]); setLoading(false); return; }
+    if (!trimmed || isAnon) { setRows([]); setLoading(false); return; }
     setLoading(true);
     timer.current = setTimeout(async () => {
       try {
@@ -140,7 +161,7 @@ export default function CircleFindScreen() {
       }
     }, DEBOUNCE_MS);
     return () => { if (timer.current) clearTimeout(timer.current); };
-  }, [q, user?.user_id]);
+  }, [q, user?.user_id, isAnon]);
 
   const toggleAdd = useCallback(async (row: Row) => {
     if (row.is_me || pending[row.user_id]) return;
@@ -308,7 +329,20 @@ export default function CircleFindScreen() {
         </View>
       </View>
 
-      <View style={styles.searchWrap}>
+      {isAnon ? (
+        <View style={styles.empty} testID="find-anon-blocked">
+          <Ionicons name="lock-closed-outline" size={44} color={colors.muted} />
+          <Text style={styles.emptyTitle}>Funzione non disponibile</Text>
+          <Text style={styles.emptyHint}>
+            {"La ricerca amici non è disponibile per i profili anonimi.\n\nCrea un account per aggiungere persone alla tua Cerchia del Gossip."}
+          </Text>
+          <Pressable onPress={goBack} style={styles.anonBackBtn} testID="find-anon-back">
+            <Text style={styles.anonBackTxt}>TORNA AL PROFILO</Text>
+          </Pressable>
+        </View>
+      ) : (
+        <>
+          <View style={styles.searchWrap}>
         <View style={styles.searchIconSlot}>
           <Ionicons name="search-outline" size={20} color={colors.muted} />
         </View>
@@ -346,6 +380,8 @@ export default function CircleFindScreen() {
         testID="find-list"
         keyboardShouldPersistTaps="handled"
       />
+        </>
+      )}
     </SafeAreaView>
   );
 }
@@ -461,4 +497,17 @@ const styles = StyleSheet.create({
   },
   emptyTitle: { color: colors.onSurface, fontSize: font.sizes.lg, fontWeight: "600" },
   emptyHint: { color: colors.muted, fontSize: font.sizes.sm, textAlign: "center", lineHeight: 20 },
+  anonBackBtn: {
+    marginTop: spacing.lg,
+    backgroundColor: colors.brandPrimary,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    borderRadius: 4,
+  },
+  anonBackTxt: {
+    color: colors.onBrandPrimary,
+    fontSize: font.sizes.sm,
+    fontWeight: "700",
+    letterSpacing: 1.5,
+  },
 });
