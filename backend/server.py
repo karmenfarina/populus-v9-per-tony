@@ -5837,7 +5837,8 @@ async def _story_is_visible_to(story: dict, viewer_id: Optional[str]) -> bool:
 
     Rules (see module header):
       1. Author can always see their own stories.
-      2. Viewer must have the author in their circle.
+      2. Viewer must have the author in their circle (a `friendships`
+         row with `{user_id: viewer, friend_id: author}` exists).
       3. Viewer must NOT be on the author's `story_hidden_viewers` list.
     """
     if not story:
@@ -5849,12 +5850,12 @@ async def _story_is_visible_to(story: dict, viewer_id: Optional[str]) -> bool:
         return True
     if not viewer_id:
         return False
-    # Viewer must follow the author (author is in viewer's circle).
-    viewer = await db.users.find_one({'user_id': viewer_id}, {'_id': 0, 'circle': 1})
-    if not viewer:
-        return False
-    circle = set(viewer.get('circle') or [])
-    if author_id not in circle:
+    # Viewer must have the author in their friendships (i.e. Cerchia).
+    edge = await db.friendships.find_one(
+        {'user_id': viewer_id, 'friend_id': author_id},
+        {'_id': 0, 'user_id': 1},
+    )
+    if not edge:
         return False
     # Author must not have hidden this viewer.
     author = await db.users.find_one(
@@ -5994,8 +5995,14 @@ async def stories_feed(user: dict = Depends(get_current_user)):
     """
     now = now_utc()
     me = user['user_id']
-    my_doc = await db.users.find_one({'user_id': me}, {'_id': 0, 'circle': 1})
-    circle_ids = list((my_doc or {}).get('circle') or [])
+    # Circle IDs derive from the `friendships` collection: rows where
+    # `user_id == me` represent people I have added to MY circle. Those
+    # are the authors whose stories I'm entitled to see (plus my own).
+    circle_rows = await db.friendships.find(
+        {'user_id': me},
+        {'_id': 0, 'friend_id': 1},
+    ).to_list(500)
+    circle_ids = [r['friend_id'] for r in circle_rows if r.get('friend_id')]
 
     # Collect all authors we may show: self + circle.
     author_ids = list({me, *circle_ids})
@@ -6110,9 +6117,17 @@ async def stories_hidden_viewers(user: dict = Depends(get_current_user)):
     me = user['user_id']
     if user.get('auth_provider') == 'anonymous' or user.get('is_anonymous'):
         return {'viewers': [], 'hidden_count': 0}
-    # Anyone with `me` in their circle == someone who can see my stories.
+    # Anyone with a `friendships` row `{user_id: X, friend_id: me}` has
+    # ME in their circle — those are the people who can see my stories.
+    follower_rows = await db.friendships.find(
+        {'friend_id': me},
+        {'_id': 0, 'user_id': 1},
+    ).to_list(2000)
+    follower_ids = [r['user_id'] for r in follower_rows if r.get('user_id')]
+    if not follower_ids:
+        return {'viewers': [], 'hidden_count': 0}
     followers = await db.users.find(
-        {'circle': me},
+        {'user_id': {'$in': follower_ids}},
         {'_id': 0, 'user_id': 1, 'nickname': 1, 'display_name': 1, 'photos': 1, 'is_anonymous': 1, 'auth_provider': 1},
     ).to_list(2000)
     me_doc = await db.users.find_one({'user_id': me}, {'_id': 0, 'story_hidden_viewers': 1})
