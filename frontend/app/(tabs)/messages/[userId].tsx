@@ -541,7 +541,20 @@ export default function ChatScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={["top"]} testID="chat-screen">
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()} style={styles.backBtn} testID="chat-back">
+        <Pressable
+          onPress={() => {
+            // Prefer the browser/back stack when there IS one so any
+            // deep-nested screens (e.g. arriving via a shared-feud link)
+            // pop naturally. If we opened the chat directly (push
+            // notification, deep link) `canGoBack` is false — fall back
+            // to the messages list explicitly so the user never lands on
+            // the Home tab by accident.
+            if (router.canGoBack()) router.back();
+            else router.replace("/messages");
+          }}
+          style={styles.backBtn}
+          testID="chat-back"
+        >
           <Ionicons name="chevron-back" size={22} color={colors.onSurfaceInverse} />
         </Pressable>
         <Pressable
