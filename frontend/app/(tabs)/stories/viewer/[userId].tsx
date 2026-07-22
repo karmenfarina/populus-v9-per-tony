@@ -191,6 +191,7 @@ export default function StoriesViewer() {
   const goPrev = () => {
     if (idx === 0) { setProgress(0); return; }
     setIdx(idx - 1);
+    setProgress(0);
   };
 
   const goNext = () => {
@@ -199,6 +200,7 @@ export default function StoriesViewer() {
       return;
     }
     setIdx(idx + 1);
+    setProgress(0);
   };
 
   const onLongPressStart = () => setPaused(true);
@@ -351,63 +353,68 @@ export default function StoriesViewer() {
             testID="story-tap-next"
           />
 
-          {/* Feud card — the "content" of the story. Rendered with
-              pointerEvents="box-none" so taps on the visual body pass
-              THROUGH to the underlying prev/next tap zones. Only the
-              CTA button below is a Pressable that grabs its own tap. */}
-          <View style={styles.card} pointerEvents="box-none">
+          {/* Feud card — pure visual, pointer-events disabled so taps
+              anywhere on it fall through to the underlying prev/next
+              tap zones. The "APRI LA FAIDA" button is rendered as a
+              SIBLING outside the card so it can still grab its own
+              touches. This structure guarantees identical behaviour
+              on both web and native, unlike box-none which has subtle
+              cross-platform differences. */}
+          <View style={styles.card} pointerEvents="none">
             {currentStory.feud ? (
               <>
-                <View pointerEvents="none">
-                  {currentStory.feud.image_url ? (
-                    <Image
-                      source={{ uri: currentStory.feud.image_url }}
-                      style={styles.cardImage}
-                      resizeMode="cover"
-                    />
-                  ) : null}
-                  <View style={styles.cardBody}>
-                    <Text style={styles.cardCat} numberOfLines={1}>
-                      {(currentStory.feud.category_label || currentStory.feud.category || "").toUpperCase()}
-                    </Text>
-                    <Text style={styles.cardTitle} numberOfLines={4}>
-                      {currentStory.feud.title}
-                    </Text>
-                    <View style={styles.cardVsRow}>
-                      <View style={[styles.cardParty, { backgroundColor: colors.brandPrimary }]}>
-                        <Text style={styles.cardPartyTxt} numberOfLines={2}>
-                          {currentStory.feud.party_a}
-                        </Text>
-                      </View>
-                      <Text style={styles.cardVs}>VS</Text>
-                      <View style={[styles.cardParty, { backgroundColor: colors.brandSecondary }]}>
-                        <Text style={[styles.cardPartyTxt, { color: colors.onBrandSecondary }]} numberOfLines={2}>
-                          {currentStory.feud.party_b}
-                        </Text>
-                      </View>
+                {currentStory.feud.image_url ? (
+                  <Image
+                    source={{ uri: currentStory.feud.image_url }}
+                    style={styles.cardImage}
+                    resizeMode="cover"
+                  />
+                ) : null}
+                <View style={styles.cardBody}>
+                  <Text style={styles.cardCat} numberOfLines={1}>
+                    {(currentStory.feud.category_label || currentStory.feud.category || "").toUpperCase()}
+                  </Text>
+                  <Text style={styles.cardTitle} numberOfLines={4}>
+                    {currentStory.feud.title}
+                  </Text>
+                  <View style={styles.cardVsRow}>
+                    <View style={[styles.cardParty, { backgroundColor: colors.brandPrimary }]}>
+                      <Text style={styles.cardPartyTxt} numberOfLines={2}>
+                        {currentStory.feud.party_a}
+                      </Text>
+                    </View>
+                    <Text style={styles.cardVs}>VS</Text>
+                    <View style={[styles.cardParty, { backgroundColor: colors.brandSecondary }]}>
+                      <Text style={[styles.cardPartyTxt, { color: colors.onBrandSecondary }]} numberOfLines={2}>
+                        {currentStory.feud.party_b}
+                      </Text>
                     </View>
                   </View>
                 </View>
-                {/* Explicit CTA — the only Pressable inside the card,
-                    keeps the "open feud" affordance discoverable. */}
-                <Pressable onPress={openFeud} style={styles.cardCta} testID="story-open-feud">
-                  <Text style={styles.cardCtaTxt}>APRI LA FAIDA</Text>
-                  <Ionicons name="chevron-forward" size={16} color={colors.brandPrimary} />
-                </Pressable>
               </>
             ) : (
-              <View style={styles.cardMissing} pointerEvents="none">
+              <View style={styles.cardMissing}>
                 <Ionicons name="alert-circle-outline" size={40} color={colors.muted} />
                 <Text style={styles.cardMissingTxt}>Faida non più disponibile</Text>
               </View>
             )}
 
             {currentStory.comment ? (
-              <View style={styles.commentBox} pointerEvents="none">
+              <View style={styles.commentBox}>
                 <Text style={styles.commentTxt}>{currentStory.comment}</Text>
               </View>
             ) : null}
           </View>
+
+          {/* Explicit "open feud" CTA — sibling of the card so it can
+              still receive taps despite the card being pointer-events:
+              none. Positioned right below the card in the layout flow. */}
+          {currentStory.feud ? (
+            <Pressable onPress={openFeud} style={styles.openFeudBtn} testID="story-open-feud">
+              <Text style={styles.openFeudTxt}>APRI LA FAIDA</Text>
+              <Ionicons name="chevron-forward" size={16} color={colors.brandPrimary} />
+            </Pressable>
+          ) : null}
         </View>
 
         {/* Reply row — hidden on my own stories */}
@@ -622,6 +629,26 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
   },
   cardCtaTxt: {
+    color: colors.brandPrimary,
+    fontSize: 12,
+    fontWeight: "700",
+    letterSpacing: 1.5,
+  },
+  openFeudBtn: {
+    marginTop: spacing.sm,
+    alignSelf: "center",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    backgroundColor: colors.surface,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: colors.brandPrimary,
+    zIndex: 2,
+  },
+  openFeudTxt: {
     color: colors.brandPrimary,
     fontSize: 12,
     fontWeight: "700",
