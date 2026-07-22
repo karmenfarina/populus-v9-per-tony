@@ -11,6 +11,13 @@ type AuthState = {
   login: (email: string, password: string) => Promise<void>;
   anonymous: (nickname: string) => Promise<void>;
   loginWithGoogle: () => Promise<void>;
+  // Firebase email/password flows — Firebase handles the credentials
+  // + verification email; our backend receives the ID token and mints
+  // its own session on success.
+  firebaseSignup: (email: string, password: string) => Promise<void>;
+  firebaseLogin: (email: string, password: string) => Promise<void>;
+  firebaseResendVerification: () => Promise<void>;
+  firebasePasswordReset: (email: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshMe: () => Promise<void>;
 };
@@ -248,12 +255,65 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = async () => {
     try { await api.logout(); } catch {}
+    try {
+      // Fire-and-forget Firebase sign-out so a stale Firebase session
+      // can't override our next login attempt. Import inline to keep
+      // the auth module tree-shakeable on cold start.
+      const fb = await import('./firebase');
+      await fb.fbSignOut(fb.auth);
+    } catch {}
     await setToken(null);
     setUser(null);
   };
 
+  // ── Firebase email/password bridge ──
+  const firebaseSignup = async (email: string, password: string) => {
+    const fb = await import('./firebase');
+    const cred = await fb.createUserWithEmailAndPassword(fb.auth, email.trim(), password);
+    // Fire verification email immediately. The user cannot log in
+    // until they click the link.
+    try { await fb.sendEmailVerification(cred.user); } catch {}
+    // We do NOT create the backend session yet — that happens on
+    // login AFTER the user has verified their email.
+  };
+
+  const firebaseLogin = async (email: string, password: string) => {
+    const fb = await import('./firebase');
+    const cred = await fb.signInWithEmailAndPassword(fb.auth, email.trim(), password);
+    // Refresh so the latest `emailVerified` propagates from Firebase.
+    try { await fb.fbReload(cred.user); } catch {}
+    if (!cred.user.emailVerified) {
+      const err: any = new Error(
+        "Email non verificata. Controlla la casella e clicca il link di conferma."
+      );
+      err.code = 'auth/email-not-verified';
+      throw err;
+    }
+    const idToken = await cred.user.getIdToken(true);
+    const res: any = await api.firebaseSession(idToken);
+    await applyAuthResult(res);
+  };
+
+  const firebaseResendVerification = async () => {
+    const fb = await import('./firebase');
+    if (!fb.auth.currentUser) {
+      throw new Error("Fai prima il login per reinviare l'email.");
+    }
+    await fb.sendEmailVerification(fb.auth.currentUser);
+  };
+
+  const firebasePasswordReset = async (email: string) => {
+    const fb = await import('./firebase');
+    await fb.sendPasswordResetEmail(fb.auth, email.trim());
+  };
+
   return (
-    <AuthContext.Provider value={{ user, loading, signup, login, anonymous, loginWithGoogle, logout, refreshMe }}>
+    <AuthContext.Provider value={{
+      user, loading,
+      signup, login, anonymous, loginWithGoogle,
+      firebaseSignup, firebaseLogin, firebaseResendVerification, firebasePasswordReset,
+      logout, refreshMe,
+    }}>
       {children}
     </AuthContext.Provider>
   );

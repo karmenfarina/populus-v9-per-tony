@@ -7,7 +7,7 @@ import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "@/src/auth/AuthContext";
-import { api } from "@/src/api";
+// import { api } from "@/src/api"; // no longer used — Firebase handles email flow
 import { colors, spacing, font } from "@/src/theme";
 import { sanitizeNicknameInput, validateNickname, NICKNAME_MAX } from "@/src/utils/nickname";
 
@@ -15,13 +15,14 @@ type Mode = "email" | "google" | "anon";
 
 export default function AuthScreen() {
   const router = useRouter();
-  const { login, signup, anonymous, loginWithGoogle } = useAuth();
-  // NOTE: The EMAIL tab is currently HIDDEN from the UI (verification email
-  // delivery isn't operational yet). All the email login/signup code below
-  // is intentionally preserved and functional — flip AUTH_EMAIL_ENABLED to
-  // `true` (or remove the guards on the tabs render/default mode) to bring
-  // the tab back without any other changes.
-  const AUTH_EMAIL_ENABLED = false;
+  // `login` and `signup` (legacy backend endpoints) are intentionally
+  // not destructured — the email tab is now backed by Firebase.
+  const { anonymous, loginWithGoogle, firebaseSignup, firebaseLogin, firebaseResendVerification } = useAuth();
+  // Email/password is now backed by Firebase Auth (verification email
+  // sent by Firebase from noreply@populus-1f567.firebaseapp.com — no
+  // custom SMTP or domain required). Legacy backend signup/login are
+  // kept in the code as fallback but the tab now routes to Firebase.
+  const AUTH_EMAIL_ENABLED = true;
   const VISIBLE_MODES: Mode[] = AUTH_EMAIL_ENABLED
     ? (["email", "google", "anon"] as Mode[])
     : (["google", "anon"] as Mode[]);
@@ -57,8 +58,16 @@ export default function AuthScreen() {
     setLoading(true);
     try {
       if (mode === "email") {
-        if (isSignup) await signup(email.trim(), password, nickname.trim());
-        else await login(email.trim(), password);
+        if (isSignup) {
+          // Firebase creates the account + auto-sends the verification
+          // email. We surface the "check your inbox" panel and stop —
+          // the user must click the link before we mint a session.
+          await firebaseSignup(email.trim(), password);
+          setPendingVerify(email.trim());
+          setError(null);
+          return;
+        }
+        await firebaseLogin(email.trim(), password);
       } else if (mode === "anon") {
         await anonymous(nickname.trim());
       } else if (mode === "google") {
@@ -68,24 +77,42 @@ export default function AuthScreen() {
       // but here we push explicitly for immediacy.
       router.replace("/");
     } catch (e: any) {
-      // Signup flow now stops on `requires_verification`: show a "check your
-      // inbox" panel with a resend CTA, no session token was issued.
+      // Firebase login throws with code 'auth/email-not-verified' when
+      // the user tries to log in before clicking the link. Route to
+      // the "check your inbox" panel with a resend CTA.
+      if (e?.code === 'auth/email-not-verified') {
+        setPendingVerify(email.trim());
+        setError(null);
+        return;
+      }
+      // Firebase error code → friendly Italian message.
+      const fbCode = e?.code as string | undefined;
+      if (fbCode) {
+        const fbMsg: Record<string, string> = {
+          'auth/email-already-in-use': "Email già registrata. Prova ad accedere invece.",
+          'auth/invalid-email': "Indirizzo email non valido.",
+          'auth/weak-password': "Password troppo debole (minimo 6 caratteri).",
+          'auth/user-not-found': "Nessun account con questa email.",
+          'auth/wrong-password': "Password sbagliata.",
+          'auth/invalid-credential': "Email o password sbagliata.",
+          'auth/too-many-requests': "Troppi tentativi. Riprova più tardi.",
+          'auth/network-request-failed': "Nessuna connessione. Riprova.",
+        };
+        if (fbMsg[fbCode]) { setError(fbMsg[fbCode]); return; }
+      }
+      // Legacy backend signup flow used `requires_verification`; kept
+      // for the (unused) legacy signup/login paths.
       if (e?.requires_verification) {
         setPendingVerify(e.email || email.trim());
         setError(null);
         return;
       }
-      // Backend blocks login on unverified email accounts with 403 +
-      // structured detail `{email_not_verified: true, email}`. Surface the
-      // same inbox panel so the user can resend.
       const d = e?.detail;
       if (d && typeof d === 'object' && d.email_not_verified) {
         setPendingVerify(d.email || email.trim());
         setError(null);
         return;
       }
-      // The API layer already returns human-friendly Italian messages via
-      // ApiError.detail. Any other thrown value falls back to a generic label.
       setError(typeof d === 'string' ? d : (e?.message || "Errore imprevisto. Riprova."));
     } finally { setLoading(false); }
   };
@@ -95,10 +122,25 @@ export default function AuthScreen() {
     setResending(true);
     setError(null);
     try {
-      const res: any = await api.resendVerification(pendingVerify);
-      setError(res?.message || "Email di verifica inviata. Controlla la casella.");
+      // Firebase resend works on the currently-authenticated user.
+      // If we're here right after signup Firebase already holds a
+      // reference, otherwise we sign the user in again silently to
+      // get a fresh handle. The email/password must still be typed
+      // in the form fields.
+      try {
+        await firebaseResendVerification();
+      } catch {
+        // Fallback: relog silently to reattach a Firebase user, then resend.
+        if (password) {
+          await firebaseLogin(email.trim(), password).catch(() => {});
+          await firebaseResendVerification();
+        } else {
+          throw new Error("Reinserisci la password per ricevere di nuovo l'email.");
+        }
+      }
+      setError("Email di verifica inviata. Controlla la casella (e la cartella spam).");
     } catch (e: any) {
-      setError(e?.detail || e?.message || "Errore invio email.");
+      setError(e?.message || "Errore invio email.");
     } finally { setResending(false); }
   };
 

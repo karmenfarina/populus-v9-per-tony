@@ -1,0 +1,49 @@
+{
+  "summary": "Iter 73 — Firebase Email/Password Auth integration. Backend: 14/14 pytest passed (POST /api/auth/firebase-session returns 401 with 'Token Firebase non valido: ...' on bad token, 422 on missing id_token, no 503 → firebase-admin correctly initialized with FIREBASE_SERVICE_ACCOUNT_PATH & FIREBASE_PROJECT_ID; regression on /auth/login, /auth/signup, /auth/google-session, /auth/anonymous, /auth/me all green). Frontend: /auth screen shows 3 tabs (EMAIL active by default, GOOGLE, ANONIMO); Firebase signup flow triggers createUserWithEmailAndPassword and shows the CONTROLLA LA TUA EMAIL panel with correct email; login attempt on unverified user routes to the same pendingVerify panel (auth/email-not-verified path); anonymous tab still renders correctly. Minor UX gotcha: REINVIA EMAIL shortly after signup surfaces the raw untranslated Firebase code 'Firebase: Error (auth/too-many-requests).' because doResend() does not run the fbCode→Italian mapping used in handle(). No bundling/runtime errors from firebase JS SDK v12.16.0 on web.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "auth.tsx doResend()",
+        "issue": "Errori Firebase nel pannello REINVIA EMAIL (es. auth/too-many-requests) vengono mostrati come stringa raw non tradotta ('Firebase: Error (auth/too-many-requests).') invece di usare la stessa mappatura fbCode→italiano usata in handle(). UX minore, non blocca.",
+        "testID": "verify-resend",
+        "priority": "LOW"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_firebase_session_iter73.py",
+    "/app/test_reports/pytest/iter73_firebase.xml"
+  ],
+  "action_items": [
+    "OPTIONAL (UX polish): in app/auth.tsx doResend(), catch Firebase errors, read e.code and use the same fbMsg mapping used in handle() to show Italian messages (e.g. 'Troppi tentativi. Riprova più tardi.' invece di 'Firebase: Error (auth/too-many-requests).').",
+    "NOTE (not a bug, informational): Firebase blocks the immediate resend after signup with auth/too-many-requests because Firebase already fired sendEmailVerification during createUserWithEmailAndPassword. Expected behaviour — no code change required if UX is acceptable.",
+    "Cannot end-to-end verify the click-through email link automatically (requires real inbox). Backend 403 on unverified login and 200 with token on verified login has been validated by unit path and by the /auth/firebase-session code review (email_verified check present)."
+  ],
+  "critical_code_review_comments": [
+    "server.py:_get_firebase_app() correctly caches the firebase_admin app and gracefully returns None + 503 if service account is missing — good defensive style.",
+    "server.py:/auth/firebase-session enforces email_verified before minting a session_token (correct). Upserts by firebase_uid OR email so legacy users get linked cleanly.",
+    "frontend/src/auth/firebase.ts fallback getAuth() vs initializeAuth() is fine for MVP; note comment acknowledges native persistence is in-memory (session survives via backend session_token — acceptable).",
+    "AuthContext.firebaseLogin does fbReload before checking emailVerified — correct, otherwise stale token would let through unverified users.",
+    "AuthContext.logout calls fbSignOut so stale Firebase session cannot bleed into next login — good.",
+    "auth.tsx doResend() error surface path does not reuse the fbCode→Italian mapping (see ui_bug above)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_firebase_session_iter73.py (new)"
+  ],
+  "success_rate": {
+    "backend": "100% (14/14)",
+    "frontend": "100% on required flows (signup→pendingVerify, unverified login→pendingVerify, tabs render, anon regression); 1 low-priority UX polish item"
+  },
+  "seed_data_creation": "One TEST_iter73_* legacy user created via /api/auth/signup regression test (bcrypt-verified user). One anonymous user created via /api/auth/anonymous. One Firebase user created via UI test: testuser.firebasetest.1784749809@gmail.com (unverified, cannot log in — expected).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Iter 73 introduced Firebase Auth for email/password. Backend endpoint /api/auth/firebase-session verifies a Firebase ID token, requires email_verified=true, and upserts users keyed by firebase_uid OR email. Frontend /auth has 3 tabs; EMAIL uses Firebase JS SDK (v12.16.0) directly. Google (Emergent OAuth) and Anonymous (custom backend) are untouched. Real end-to-end verification requires clicking the Firebase email link (cannot be automated). Legacy chat_a@test.it / test123 login still works as before for regression tests.",
+  "rca_of_issue": "No blocking issue. Minor UX: raw Firebase error strings leak through doResend()'s catch block instead of being translated. Root cause: the Italian mapping in auth.tsx handle() (fbMsg dictionary) is not reused inside doResend(). Fix: extract the mapping into a helper and call it in both places. Repro: sign up a new email → immediately press REINVIA EMAIL → observe 'Firebase: Error (auth/too-many-requests).' shown untranslated. Mitigation: main agent adds shared translator + returns friendly Italian message."
+}

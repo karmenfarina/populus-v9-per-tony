@@ -119,6 +119,8 @@ export const api = {
     request('/auth/anonymous', { method: 'POST', body: JSON.stringify({ nickname }) }),
   googleSession: (session_id: string) =>
     request('/auth/google-session', { method: 'POST', body: JSON.stringify({ session_id }) }),
+  firebaseSession: (id_token: string) =>
+    request('/auth/firebase-session', { method: 'POST', body: JSON.stringify({ id_token }) }),
   me: () => request('/auth/me'),
   logout: () => request('/auth/logout', { method: 'POST' }),
   categories: () => request('/categories'),

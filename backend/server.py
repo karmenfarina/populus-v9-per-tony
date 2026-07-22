@@ -965,6 +965,120 @@ async def google_session(body: GoogleSessionBody, authorization: Optional[str] =
     return {'token': session_token, 'user': await _hydrate_primary_photo(_public_user(user))}
 
 
+# ─────────────────────────────────────────────────────────────────────
+# Firebase email/password auth bridge.
+# The frontend authenticates the user directly with Firebase (email +
+# password + email verification), then POSTs the resulting Firebase ID
+# token here. We verify the token with firebase-admin, upsert the user
+# in MongoDB (keyed by firebase_uid → user_id), and hand back our own
+# session token so the rest of the app doesn't need to know about
+# Firebase at all. Existing Google/anonymous/legacy flows are unaffected.
+# ─────────────────────────────────────────────────────────────────────
+_firebase_app = None
+
+
+def _get_firebase_app():
+    global _firebase_app
+    if _firebase_app is not None:
+        return _firebase_app
+    try:
+        import firebase_admin
+        from firebase_admin import credentials as fb_credentials
+        sa_path = os.environ.get('FIREBASE_SERVICE_ACCOUNT_PATH')
+        if not sa_path or not os.path.exists(sa_path):
+            logger.warning(f"Firebase service account not found at {sa_path}")
+            return None
+        if not firebase_admin._apps:
+            cred = fb_credentials.Certificate(sa_path)
+            _firebase_app = firebase_admin.initialize_app(cred)
+        else:
+            _firebase_app = firebase_admin.get_app()
+        return _firebase_app
+    except Exception as e:
+        logger.error(f"Firebase init failed: {e}")
+        return None
+
+
+class FirebaseSessionBody(BaseModel):
+    id_token: str
+
+
+@api_router.post('/auth/firebase-session')
+async def firebase_session(body: FirebaseSessionBody):
+    app = _get_firebase_app()
+    if app is None:
+        raise HTTPException(status_code=503, detail='Firebase non configurato')
+    try:
+        from firebase_admin import auth as fb_auth
+        decoded = fb_auth.verify_id_token(body.id_token, app=app)
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=f'Token Firebase non valido: {e}')
+
+    email = (decoded.get('email') or '').lower().strip()
+    if not email:
+        raise HTTPException(status_code=400, detail='Email mancante nel token Firebase')
+
+    # Firebase forces `email_verified` to true only AFTER the user clicks
+    # the verification link. We enforce it here so unverified users can't
+    # spam the platform.
+    if not decoded.get('email_verified'):
+        raise HTTPException(
+            status_code=403,
+            detail='Email non verificata. Controlla la casella e clicca il link di conferma prima di accedere.',
+        )
+
+    firebase_uid = decoded.get('uid') or decoded.get('user_id')
+    display_name = decoded.get('name') or email.split('@')[0]
+
+    # Look up an existing account by firebase_uid OR email so we don't
+    # accidentally create a duplicate for someone who already registered
+    # via the legacy email/password path.
+    user = await db.users.find_one({
+        '$or': [
+            {'firebase_uid': firebase_uid},
+            {'email': email},
+        ]
+    })
+    if user is None:
+        user_id = new_id('user')
+        # Derive a starter nickname from the local-part of the email; if
+        # it fails validation we fall back to a deterministic one so the
+        # signup never crashes on unusual addresses.
+        try:
+            nick = _normalize_and_validate_nickname(email.split('@')[0])
+        except Exception:
+            nick = f'user_{user_id[-6:]}'
+        user = {
+            'user_id': user_id,
+            'email': email,
+            'nickname': nick,
+            'display_name': display_name,
+            'auth_provider': 'firebase',
+            'firebase_uid': firebase_uid,
+            'email_verified': True,
+            'created_at': now_utc(),
+            'circle': [],
+            'granted_category_badges': [],
+        }
+        await db.users.insert_one(user)
+    else:
+        # Attach firebase_uid to legacy accounts on first Firebase login.
+        await db.users.update_one(
+            {'user_id': user['user_id']},
+            {'$set': {'firebase_uid': firebase_uid, 'email_verified': True}},
+        )
+        user['firebase_uid'] = firebase_uid
+        user['email_verified'] = True
+
+    # Reuse the same JWT contract as `/auth/login` so `get_current_user`
+    # picks it up transparently.
+    session_token = make_jwt(user['user_id'])
+    return {
+        'token': session_token,
+        'user': await _hydrate_primary_photo(_public_user(user)),
+    }
+
+
 @api_router.get('/auth/me')
 async def me(user: dict = Depends(get_current_user)):
     # Throttled live recompute: if it's been more than 60s since we last checked
