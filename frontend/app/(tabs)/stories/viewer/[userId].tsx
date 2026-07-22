@@ -431,28 +431,14 @@ export default function StoriesViewer() {
     });
   }, [stories, idx]);
 
-  // Belt-and-braces synchronisation: whenever the viewer screen
-  // REGAINS focus (e.g. Expo Router restored it from the stack for
-  // a re-tap on a ring instead of re-mounting), verify our internal
-  // `currentUserId` still matches the URL param. If it drifted (an
-  // internal jumpToUser had moved it forward, or an old session
-  // never reset it), snap it back to `initialUserId` so the next
-  // paint reflects the ring the user just tapped.
-  useFocusEffect(
-    useCallback(() => {
-      const paramId = String(initialUserId || "");
-      if (!paramId) return;
-      if (paramId !== currentUserId) {
-        setCurrentUserId(paramId);
-        setInitialLoading(true);
-        setStories([]);
-        setIdx(0);
-        setProgress(0);
-        autoCloseFiredRef.current = true;
-        internalNavRef.current = false;
-      }
-    }, [initialUserId, currentUserId]),
-  );
+  // NB: An earlier version of this file had a second useFocusEffect
+  // here that re-synced `currentUserId` back to `initialUserId` on
+  // every focus. That was a bad idea — it also fired whenever
+  // `currentUserId` changed (deps: [initialUserId, currentUserId]),
+  // and so it undid every internal `jumpToUser` swap by yanking
+  // state back to the URL. The result: left/right taps no longer
+  // moved between users. The original one-shot route-sync effect
+  // higher up is enough for real external navigations.
 
   // Single global interval that ticks 20 times a second, driving the
   // progress bar of the CURRENT story. Uses `useFocusEffect` (not

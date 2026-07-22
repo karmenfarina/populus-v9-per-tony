@@ -71,6 +71,13 @@ export default function StoriesBar() {
   // for sure whether the user has active stories we render a stable
   // neutral state (avatar only, no label change, no add badge).
   const [firstLoadDone, setFirstLoadDone] = useState(false);
+  // Independent "loading" gate for the animated ring. Kept separate
+  // from firstLoadDone so we can enforce a MIN visible duration for
+  // the rotating gradient — on a fast connection the feed comes back
+  // in ~150ms, way too quick for the user to perceive the loading
+  // animation. We hold this true for at least 1500ms after mount so
+  // the "loading → loaded" transition is actually noticeable.
+  const [ringLoading, setRingLoading] = useState(true);
   // Cross-platform info sheet — Alert.alert was causing subtle state
   // corruption on React Native Web (subsequent tab taps briefly showed
   // their content, then bounced back to home). A plain <Modal> is
@@ -83,8 +90,13 @@ export default function StoriesBar() {
       setGroups([]);
       setLoading(false);
       setFirstLoadDone(true);
+      setRingLoading(false);
       return;
     }
+    // Reset the ring-loading gate at the start of every fetch so a
+    // manual refresh (or focus-triggered re-fetch) also plays the
+    // spinner animation for its minimum visible duration.
+    setRingLoading(true);
     try {
       const r: any = await api.storiesFeed();
       setGroups((r?.groups || []) as StoryGroup[]);
@@ -95,6 +107,10 @@ export default function StoriesBar() {
     } finally {
       setLoading(false);
       setFirstLoadDone(true);
+      // Hold the loading ring animation for a minimum visible time
+      // AFTER the fetch resolves — this is what makes the "loading
+      // then loaded" transition perceivable on fast connections.
+      setTimeout(() => setRingLoading(false), 900);
     }
   }, [user?.user_id, isAnon]);
 
@@ -150,7 +166,7 @@ export default function StoriesBar() {
             // Spin while the feed is still being fetched, freeze it
             // afterwards. Gives the "story loading → story loaded"
             // visual cue the user asked for (Instagram behaviour).
-            loading={!firstLoadDone}
+            loading={ringLoading}
           >
             <View style={styles.avatarWrap}>
               {(() => {
@@ -214,7 +230,7 @@ export default function StoriesBar() {
               // Only spin while the feed itself is loading. When the
               // strip has settled the ring becomes a static gradient
               // so the user can tell "loading" from "ready to tap".
-              loading={!firstLoadDone}
+              loading={ringLoading}
             >
               <View style={styles.avatarWrap}>
                 {g.author?.avatar ? (
