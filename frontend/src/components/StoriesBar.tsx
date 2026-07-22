@@ -91,13 +91,6 @@ export default function StoriesBar() {
   const [helpOpen, setHelpOpen] = useState(false);
   const isAnon = user?.is_anonymous === true || (user as any)?.auth_provider === "anonymous";
 
-  // Small debounce ref so a jittery tap (or a mid-render layout shift
-  // triggered by a `storiesFeed` refetch) can't fire `openViewer`
-  // twice with different user ids back-to-back — that was the source
-  // of the "tapping friend X sometimes opens my ring instead" bug the
-  // user reported.
-  const lastTapAtRef = useRef(0);
-
   const load = useCallback(async (opts?: { silent?: boolean }) => {
     if (!user?.user_id || isAnon) {
       setGroups([]);
@@ -150,10 +143,12 @@ export default function StoriesBar() {
 
   const openViewer = (authorId: string) => {
     if (!authorId) return;
-    const now = Date.now();
-    if (now - lastTapAtRef.current < 300) return;
-    lastTapAtRef.current = now;
-    router.push({ pathname: "/stories/viewer/[userId]", params: { userId: authorId } } as any);
+    // Direct URL push is more reliable than the templated
+    // `pathname + params` form on RN-Web — the latter has been
+    // observed to occasionally resolve to a STALE viewer instance
+    // (opening the wrong user's stories) when the previous viewer
+    // was still mid-unmount, right after a story upload flow.
+    router.push(`/stories/viewer/${encodeURIComponent(authorId)}` as any);
   };
 
   const openComposerOrMine = () => {
