@@ -1,10 +1,10 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import {
   View, Text, StyleSheet, ScrollView, Pressable, TextInput, ActivityIndicator,
   KeyboardAvoidingView, Platform,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useRouter, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { api, ApiError } from "@/src/api";
 import { colors, spacing, font } from "@/src/theme";
@@ -59,6 +59,27 @@ export default function SupportScreen() {
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  // If the user submitted a ticket and later comes back to the screen
+  // (via profile → "Richiedi assistenza" again), we want a clean form
+  // rather than the stale "Richiesta inviata!" success panel. The tab
+  // is hidden (`href: null` in the tabs layout) so React Navigation
+  // keeps the instance mounted between visits — meaning state persists
+  // across focus events unless we explicitly clear it here.
+  useFocusEffect(
+    useCallback(() => {
+      if (sent) {
+        setSent(false);
+        setCategory(null);
+        setFrequency(null);
+        setSection(null);
+        setDevice(null);
+        setDescription("");
+        setContactEmail("");
+        setErr(null);
+      }
+    }, [sent]),
+  );
 
   const validate = (): string | null => {
     if (!category) return "Seleziona una categoria del problema.";
