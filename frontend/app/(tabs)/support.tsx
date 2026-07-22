@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
   View, Text, StyleSheet, ScrollView, Pressable, TextInput, ActivityIndicator,
   KeyboardAvoidingView, Platform,
@@ -66,9 +66,20 @@ export default function SupportScreen() {
   // is hidden (`href: null` in the tabs layout) so React Navigation
   // keeps the instance mounted between visits — meaning state persists
   // across focus events unless we explicitly clear it here.
+  //
+  // We use refs to detect the transition "screen was blurred → now
+  // focused again". Depending directly on `sent` in the effect deps
+  // would re-fire the reset the moment `sent` flips to true after a
+  // successful submit — hiding the confirmation panel entirely.
+  const wasBlurredRef = useRef(false);
+  const sentRef = useRef(sent);
+  sentRef.current = sent;
+
   useFocusEffect(
     useCallback(() => {
-      if (sent) {
+      // On focus: reset only if we're coming BACK to the screen
+      // (previously blurred) AND the user had submitted last time.
+      if (wasBlurredRef.current && sentRef.current) {
         setSent(false);
         setCategory(null);
         setFrequency(null);
@@ -78,7 +89,11 @@ export default function SupportScreen() {
         setContactEmail("");
         setErr(null);
       }
-    }, [sent]),
+      wasBlurredRef.current = false;
+      // Cleanup runs on blur — remember we've left so the next focus
+      // can decide whether to reset.
+      return () => { wasBlurredRef.current = true; };
+    }, []),
   );
 
   const validate = (): string | null => {
