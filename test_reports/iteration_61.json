@@ -1,0 +1,61 @@
+{
+  "summary": "Reproduced the FLASH bug where after viewing a story and returning, tapping other tabs (PROFILO / TOP / MESSAGGI / NOTIFICHE) briefly shows the target screen then bounces back to HOME (/). Root cause identified in /app/frontend/app/(tabs)/stories/viewer/[userId].tsx: the setInterval never stops firing router.back() once progress reaches 1. The interval callback re-enters (p=1 -> next=1.007 >= 1) every 50ms and each time schedules a fresh setTimeout(router.back, 30). Multiple pending router.back() calls execute AFTER the user taps another tab, popping browser history back to `/`. Console evidence: 10+ 'GO_BACK was not handled by any navigator' React Navigation errors accumulate during the auto-advance window. Also, on RN Web the viewer route is a Tabs.Screen with `href: null`, so router.back() is inherently unreliable there (React Navigation refuses to handle GO_BACK). Reproduction is intermittent depending on browser-history depth at the time of the tab tap, which matches the user-observed 'flash' behaviour.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "stories/viewer/[userId].tsx",
+        "issue": "setInterval never clears itself when progress reaches 1 on the LAST story. The setProgress updater keeps returning 1, and every subsequent tick (50ms) evaluates `next = 1 + INCREMENT >= 1` and schedules ANOTHER setTimeout(() => router.back(), 30). Result: an unbounded queue of router.back() calls that fire while the user is on a different tab, walking browser history backward to `/`. See lines 155-172.",
+        "testID": "stories-viewer",
+        "priority": "HIGH"
+      },
+      {
+        "component": "stories/viewer/[userId].tsx",
+        "issue": "goNext() at end-of-queue calls router.back() without any guard (line 199). If tapped concurrently with an already-scheduled setTimeout(router.back) from the interval, they compound. Same lack of guard on story-close button (line 333), load()'s empty-stories path (line 127), and doDelete()'s empty-remaining path (line 253).",
+        "testID": "story-tap-next",
+        "priority": "HIGH"
+      },
+      {
+        "component": "app/(tabs)/_layout.tsx",
+        "issue": "stories/viewer/[userId] is declared as a Tabs.Screen with `href: null` (line 159). On RN Web, calling router.back() from such a screen produces 'GO_BACK was not handled by any navigator' errors and often does NOT unmount the viewer. This leaves the interval running even after the user thinks the viewer is closed. Consider using expo-router's Stack for the viewer, or router.replace('/') to close it deterministically on web.",
+        "testID": "",
+        "priority": "HIGH"
+      }
+    ],
+    "integration_issues": [
+      {
+        "flow": "story-view -> tab-switch",
+        "issue": "Pending router.back() calls scheduled by the viewer's setInterval fire AFTER the user has navigated to /profile (or /top, /messages, /notifications), popping browser history and causing the observed 'flash back to home'. Traced via history.pushState/replaceState instrumentation: viewer push at t=0, then `replace: /profile` at t=+X (tab tap), then popstate from queued router.back() -> URL reverts to `/`.",
+        "affected_testIDs": ["stories-bar-mine", "stories-viewer"]
+      }
+    ],
+    "design_issues": [],
+    "react_native_issues": [
+      {
+        "component": "stories/viewer/[userId].tsx",
+        "issue": "props.pointerEvents is deprecated - use style.pointerEvents. Warning fires from the <View style={styles.card} pointerEvents=\"none\"> at line 363. Reference: /app/frontend/app/(tabs)/stories/viewer/[userId].tsx:363"
+      }
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [
+    "Add a `closedRef = useRef(false)` in StoriesViewer and a `closeViewer()` helper that early-returns when closedRef.current is true; use closeViewer() everywhere router.back() is called in the viewer (auto-advance end, goNext end, story-close X, empty-list load, empty-remaining doDelete, replied errors).",
+    "Inside the setInterval, clear the interval immediately when reaching the last story: keep a ref to the timer id (or `let timer` closure) and call clearInterval(timer) BEFORE scheduling the close. This stops the runaway re-scheduling of router.back().",
+    "On React Native Web, prefer router.replace('/') over router.back() for closing the viewer. React Navigation reports 'GO_BACK was not handled by any navigator' because the viewer sits under Tabs with href:null. router.replace('/') is deterministic across both native and web.",
+    "Track pending setTimeouts in a ref array and clear them all in the interval effect's cleanup: pendingTimeouts.current.forEach(clearTimeout). Guarantees no delayed router.back() runs after unmount.",
+    "Optional but recommended: hoist the viewer out of the Tabs navigator into a top-level Stack route (app/stories/viewer/[userId].tsx outside of (tabs)) so router.back() behaves correctly on both platforms.",
+    "Fix pointerEvents deprecation on line 363: move `pointerEvents=\"none\"` into the style object: `style={[styles.card, { pointerEvents: 'none' }]}`."
+  ],
+  "critical_code_review_comments": [
+    "setProgress updater at line 157 performs SIDE EFFECTS (setTimeout, setIdx) inside a pure state updater. Under React StrictMode this callback can be invoked twice, doubling the scheduled router.back() calls. Move side effects out (e.g., use a useEffect that watches progress) or add strict idempotency.",
+    "The interval effect deps `[loading, stories.length]` mean the timer restarts if stories are mutated (e.g., after delete). The prior timer's cleanup runs but any setTimeouts already scheduled by that timer are NOT cleared, so router.back() can still fire from a stale timer.",
+    "`router.back()` is used pervasively without confirming there is a history entry to go back to. On direct URL loads (deep-link to /stories/viewer/xxx) history depth is 1, and back() falls through into the parent tab layout with unpredictable results. Use router.canGoBack() guard or router.replace('/')."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A", "frontend": "Bug reproduced and root-caused"},
+  "seed_data_creation": "No new seed data. Used existing chat_a@test.it credentials from /app/memory/test_credentials.md; user already has 1 active story (story_c199d12f066d on feud_917690078dc9).",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Bug is INTERMITTENT depending on browser history depth. To reliably reproduce: (1) login as chat_a via localStorage token injection (`localStorage.setItem('faide_token', JSON.stringify('<jwt>'))` then reload) since EMAIL auth tab is hidden (AUTH_EMAIL_ENABLED=false in app/auth.tsx:24). (2) Open own story via [data-testid=stories-bar-mine]. (3) Wait 7-8s for auto-advance (do NOT press X or tap-right). (4) Tap PROFILO ([a href=/profile]). Monitor page.url every 20ms for 3s AND count 'GO_BACK' console errors. Bug manifests as: URL momentarily = /profile then reverts to / within 100-300ms, OR straight to `/`. The 'GO_BACK was not handled by any navigator' error appearing 10+ times during the auto-advance window is a reliable signature that the runaway setInterval is firing.",
+  "rca_of_issue": "PRIMARY CAUSE: viewer's setInterval (lines 151-175 of stories/viewer/[userId].tsx) has no termination logic. Once `progress` reaches 1 on the last story, every subsequent 50ms tick re-evaluates `next = p + INCREMENT` with p=1, so `next = 1.007 >= 1` remains true, and each tick schedules an additional `setTimeout(() => router.back(), 30)`. Over a few hundred ms, dozens of router.back() calls get queued. SECONDARY CAUSE: on RN Web, the viewer is a Tabs.Screen with href:null (tabs/_layout.tsx:159), so router.back() from this screen frequently triggers 'GO_BACK was not handled by any navigator' and leaves the viewer mounted — the interval keeps ticking. TRIGGER: when the user taps another tab (PROFILO/TOP/etc.), the URL becomes /profile via router.replace, but the still-pending router.back() calls execute afterward, popping browser history back to `/`. MITIGATION (for main agent): (1) clearInterval + closedRef guard when reaching last story, (2) replace router.back() with router.replace('/') for the viewer close path, (3) track and clear pending setTimeouts on unmount, (4) consider hoisting the viewer out of Tabs to a proper Stack route. REPRODUCTION URLs recorded during the failing scenario: push /stories/viewer/user_6e65e19525d5 -> after 8s auto-advance click /profile -> URL polling showed `/` at t=0ms (bounce) and screenshot confirmed home page displayed."
+}
