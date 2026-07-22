@@ -296,7 +296,7 @@ export default function CategoryBadgesModal({ visible, userId, displayName, onCl
               overlay instead of Alert.alert because native alerts
               are swallowed by nested Modals on RN. */}
           {pendingShare && (
-            <View style={styles.confirmBackdrop} pointerEvents="auto">
+            <View style={styles.confirmBackdrop}>
               <View style={styles.confirmSheet} testID="badge-share-confirm">
                 <View style={[styles.confirmEmojiWrap, { backgroundColor: pendingShare.color }]}>
                   <Text style={styles.confirmEmoji}>{pendingShare.emoji}</Text>
