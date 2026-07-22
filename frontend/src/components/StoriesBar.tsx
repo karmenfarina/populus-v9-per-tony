@@ -7,6 +7,7 @@ import {
   Image,
   StyleSheet,
   ActivityIndicator,
+  Alert,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter, useFocusEffect } from "expo-router";
@@ -97,18 +98,23 @@ export default function StoriesBar() {
   };
 
   const openComposerOrMine = () => {
-    // If I have no active story yet, jump straight into the composer
-    // via the pending share flow. Otherwise open my own viewer where
-    // the "+" button lets me add another one.
+    // If I have any active story, open the viewer over my own strip
+    // so I can rewatch/delete. Otherwise show a short explainer alert
+    // — stories are ALWAYS created from a specific feud via the share
+    // sheet, so there's nothing meaningful to do from this button
+    // beyond pointing the user to that flow.
     const myGroup = groups.find((g) => g.is_mine);
     if (myGroup && myGroup.stories.length > 0) {
       openViewer(myGroup.user_id);
     } else {
-      // No active story — offer a shortcut to the archive so the user
-      // can pick a feud to share. In practice most stories will be
-      // created from the share sheet on the feud detail screen, so
-      // we route to home archive as a fallback.
-      router.push("/archive" as any);
+      // Explain the flow rather than dumping the user into /archive
+      // (which was misleading — the user had to also find the share
+      // button on a feud). One informative alert is friendlier.
+      Alert.alert(
+        "Come pubblicare una storia",
+        "Apri una faida che ti interessa, tocca il pulsante Condividi e scegli \"Aggiungi alla tua storia\".",
+        [{ text: "Ho capito" }],
+      );
     }
   };
 
@@ -146,7 +152,7 @@ export default function StoriesBar() {
             </View>
           </View>
           <Text style={styles.label} numberOfLines={1}>
-            {myGroup && myGroup.stories.length > 0 ? "Tua storia" : "Aggiungi"}
+            {myGroup && myGroup.stories.length > 0 ? "Tua storia" : "Le tue storie"}
           </Text>
         </Pressable>
 

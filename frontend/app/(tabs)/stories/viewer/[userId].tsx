@@ -10,8 +10,7 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
-  Animated,
-  Easing,
+  Modal,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -98,13 +97,22 @@ export default function StoriesViewer() {
   const [replyText, setReplyText] = useState("");
   const [sending, setSending] = useState(false);
   const [paused, setPaused] = useState(false);
+  // Progress is a plain number 0..1 driven by a setInterval so the
+  // rendering stays deterministic across web + native (Animated.Value
+  // with useNativeDriver:false was flaky on web at story transitions).
+  const [progress, setProgress] = useState(0);
+  // Cross-platform confirmation dialog for delete — Alert.alert with
+  // multiple buttons does NOT render properly on React Native Web.
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
 
-  const progress = useRef(new Animated.Value(0)).current;
-  const timerRef = useRef<any>(null);
-  const startTsRef = useRef<number>(Date.now());
-  // Fraction of the current story already played — used to resume with
-  // the correct remaining duration after a pause (long-press / focus).
-  const elapsedFracRef = useRef<number>(0);
+  // Stories ref keeps the latest array reachable from the interval
+  // callback without stale-closure captures.
+  const storiesRef = useRef<Story[]>([]);
+  const idxRef = useRef(0);
+  const pausedRef = useRef(false);
+  useEffect(() => { storiesRef.current = stories; }, [stories]);
+  useEffect(() => { idxRef.current = idx; }, [idx]);
+  useEffect(() => { pausedRef.current = paused; }, [paused]);
 
   const currentStory = stories[idx] || null;
   const isOwnStory = me?.user_id === currentStory?.user_id;
@@ -116,16 +124,13 @@ export default function StoriesViewer() {
       const r: any = await api.storiesByUser(userId as string);
       const rows: Story[] = r?.stories || [];
       if (!rows.length) {
-        // Nothing to show — bail back to the previous screen. Wrapped
-        // in setTimeout so React unmount doesn't fight our animation.
         setTimeout(() => router.back(), 100);
         return;
       }
       setStories(rows);
-      // Start at the first unseen — matches Instagram's "resume where
-      // you left off" behavior. If everything is seen, start at 0.
       const firstUnseen = rows.findIndex((s) => !s.viewed);
       setIdx(firstUnseen >= 0 ? firstUnseen : 0);
+      setProgress(0);
     } catch (e: any) {
       Alert.alert("Errore", e?.message || "Impossibile caricare le storie");
       router.back();
@@ -136,38 +141,42 @@ export default function StoriesViewer() {
 
   useEffect(() => {
     load();
-    return () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
-    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
-  // Progress-bar animation + auto-advance timer. Kicks off whenever the
-  // current story index changes AND we're not paused. The `paused`
-  // check lets long-press-to-hold behave like Instagram: hold anywhere
-  // on the screen to freeze both the timer and the progress fill.
+  // Single global interval that ticks 20 times a second, driving the
+  // progress bar of the CURRENT story and auto-advancing when it
+  // reaches 100%. Because everything reads from refs, we never need
+  // to restart the interval on story change.
   useEffect(() => {
-    if (loading || !currentStory) return;
-    if (paused) return;
-    progress.setValue(elapsedFracRef.current);
-    startTsRef.current = Date.now();
-    const remainingMs = STORY_DURATION_MS * (1 - elapsedFracRef.current);
-    Animated.timing(progress, {
-      toValue: 1,
-      duration: remainingMs,
-      easing: Easing.linear,
-      useNativeDriver: false,
-    }).start();
-    timerRef.current = setTimeout(() => {
-      elapsedFracRef.current = 0;
-      advance(1);
-    }, remainingMs);
-    return () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
-      progress.stopAnimation();
-    };
+    if (loading || stories.length === 0) return;
+    const TICK_MS = 50;
+    const INCREMENT = TICK_MS / STORY_DURATION_MS;
+    const timer = setInterval(() => {
+      if (pausedRef.current) return;
+      setProgress((p) => {
+        const next = p + INCREMENT;
+        if (next >= 1) {
+          // Time's up — auto-advance to the next story in the queue.
+          const currentIdx = idxRef.current;
+          if (currentIdx + 1 >= storiesRef.current.length) {
+            // End of queue → close viewer.
+            setTimeout(() => router.back(), 30);
+            return 1;
+          }
+          setIdx(currentIdx + 1);
+          return 0;
+        }
+        return next;
+      });
+    }, TICK_MS);
+    return () => clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [idx, loading, paused, currentStory?.story_id]);
+  }, [loading, stories.length]);
+
+  // Reset progress every time the user manually navigates to a new
+  // story (either via tap or after auto-advance).
+  useEffect(() => { setProgress(0); }, [idx]);
 
   // Fire the view-mark exactly once per story. Fire-and-forget — no
   // error handling because a missed mark just means the author's
@@ -175,58 +184,28 @@ export default function StoriesViewer() {
   useEffect(() => {
     if (!currentStory || currentStory.viewed) return;
     api.markStoryViewed(currentStory.story_id).catch(() => { /* noop */ });
-    // Locally flip the flag so we don't POST twice for the same story
-    // if the user paginates back and forth.
-    setStories((prev) => prev.map((s, i) => (i === idx ? { ...s, viewed: true } : s)));
+    setStories((prev) => prev.map((s, i) => (i === idxRef.current ? { ...s, viewed: true } : s)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentStory?.story_id]);
 
-  const advance = (delta: number) => {
-    setIdx((cur) => {
-      const next = cur + delta;
-      if (next < 0) return 0;
-      if (next >= stories.length) {
-        // End of this author's queue → close the viewer.
-        setTimeout(() => router.back(), 50);
-        return cur;
-      }
-      elapsedFracRef.current = 0;
-      return next;
-    });
+  const goPrev = () => {
+    if (idx === 0) { setProgress(0); return; }
+    setIdx(idx - 1);
   };
 
-  const onPressLeft = () => {
-    elapsedFracRef.current = 0;
-    if (idx === 0) {
-      // Restart current story instead of leaving the viewer.
-      progress.setValue(0);
+  const goNext = () => {
+    if (idx + 1 >= stories.length) {
+      router.back();
       return;
     }
-    advance(-1);
+    setIdx(idx + 1);
   };
 
-  const onPressRight = () => {
-    elapsedFracRef.current = 0;
-    advance(1);
-  };
-
-  const onLongPressStart = () => {
-    if (timerRef.current) clearTimeout(timerRef.current);
-    progress.stopAnimation((current) => {
-      elapsedFracRef.current = current as number;
-    });
-    setPaused(true);
-  };
-
-  const onLongPressEnd = () => {
-    setPaused(false);
-  };
+  const onLongPressStart = () => setPaused(true);
+  const onLongPressEnd = () => setPaused(false);
 
   const openFeud = () => {
     if (!currentStory?.feud?.feud_id) return;
-    // Pause the ticker so the user comes back to the same story after
-    // returning from the feud detail page.
-    if (timerRef.current) clearTimeout(timerRef.current);
     router.push({
       pathname: "/feud/[id]",
       params: {
@@ -252,32 +231,37 @@ export default function StoriesViewer() {
     }
   };
 
+  // Trigger the cross-platform delete confirmation modal instead of
+  // Alert.alert — the multi-button variant of the latter is not
+  // supported on React Native Web (only shows a single OK dialog).
   const confirmDelete = () => {
     if (!currentStory) return;
-    Alert.alert(
-      "Elimina storia",
-      "Sicuro di voler eliminare questa storia? Non sarà più visibile a nessuno.",
-      [
-        { text: "Annulla", style: "cancel" },
-        {
-          text: "Elimina",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              await api.deleteStory(currentStory.story_id);
-              setStories((prev) => prev.filter((_, i) => i !== idx));
-              if (stories.length <= 1) {
-                router.back();
-              } else if (idx >= stories.length - 1) {
-                setIdx(Math.max(0, idx - 1));
-              }
-            } catch (e: any) {
-              Alert.alert("Errore", e?.message || "Impossibile eliminare la storia");
-            }
-          },
-        },
-      ],
-    );
+    setPaused(true);
+    setConfirmDeleteOpen(true);
+  };
+
+  const doDelete = async () => {
+    if (!currentStory) return;
+    const toDeleteIdx = idx;
+    const remaining = stories.length - 1;
+    setConfirmDeleteOpen(false);
+    try {
+      await api.deleteStory(currentStory.story_id);
+      if (remaining <= 0) {
+        router.back();
+        return;
+      }
+      setStories((prev) => prev.filter((_, i) => i !== toDeleteIdx));
+      // Adjust idx if we deleted the last one.
+      if (toDeleteIdx >= remaining) {
+        setIdx(Math.max(0, remaining - 1));
+      }
+      setProgress(0);
+    } catch (e: any) {
+      Alert.alert("Errore", e?.message || "Impossibile eliminare la storia");
+    } finally {
+      setPaused(false);
+    }
   };
 
   if (loading) {
@@ -305,7 +289,7 @@ export default function StoriesViewer() {
         <View style={styles.progressStrip}>
           {stories.map((_, i) => (
             <View key={i} style={styles.progressTrack}>
-              <Animated.View
+              <View
                 style={[
                   styles.progressFill,
                   {
@@ -313,10 +297,7 @@ export default function StoriesViewer() {
                       i < idx
                         ? "100%"
                         : i === idx
-                          ? progress.interpolate({
-                              inputRange: [0, 1],
-                              outputRange: ["0%", "100%"],
-                            })
+                          ? `${Math.min(100, Math.max(0, progress * 100))}%`
                           : "0%",
                   },
                 ]}
@@ -356,66 +337,73 @@ export default function StoriesViewer() {
         <View style={styles.body}>
           {/* Invisible tap zones on left/right thirds for prev/next */}
           <Pressable
-            onPress={onPressLeft}
+            onPress={goPrev}
             onLongPress={onLongPressStart}
             onPressOut={onLongPressEnd}
             style={[styles.tapZone, { left: 0 }]}
             testID="story-tap-prev"
           />
           <Pressable
-            onPress={onPressRight}
+            onPress={goNext}
             onLongPress={onLongPressStart}
             onPressOut={onLongPressEnd}
             style={[styles.tapZone, { right: 0 }]}
             testID="story-tap-next"
           />
 
-          {/* Feud card — the "content" of the story */}
-          <View style={styles.card}>
+          {/* Feud card — the "content" of the story. Rendered with
+              pointerEvents="box-none" so taps on the visual body pass
+              THROUGH to the underlying prev/next tap zones. Only the
+              CTA button below is a Pressable that grabs its own tap. */}
+          <View style={styles.card} pointerEvents="box-none">
             {currentStory.feud ? (
-              <Pressable onPress={openFeud} testID="story-open-feud">
-                {currentStory.feud.image_url ? (
-                  <Image
-                    source={{ uri: currentStory.feud.image_url }}
-                    style={styles.cardImage}
-                    resizeMode="cover"
-                  />
-                ) : null}
-                <View style={styles.cardBody}>
-                  <Text style={styles.cardCat} numberOfLines={1}>
-                    {(currentStory.feud.category_label || currentStory.feud.category || "").toUpperCase()}
-                  </Text>
-                  <Text style={styles.cardTitle} numberOfLines={4}>
-                    {currentStory.feud.title}
-                  </Text>
-                  <View style={styles.cardVsRow}>
-                    <View style={[styles.cardParty, { backgroundColor: colors.brandPrimary }]}>
-                      <Text style={styles.cardPartyTxt} numberOfLines={2}>
-                        {currentStory.feud.party_a}
-                      </Text>
+              <>
+                <View pointerEvents="none">
+                  {currentStory.feud.image_url ? (
+                    <Image
+                      source={{ uri: currentStory.feud.image_url }}
+                      style={styles.cardImage}
+                      resizeMode="cover"
+                    />
+                  ) : null}
+                  <View style={styles.cardBody}>
+                    <Text style={styles.cardCat} numberOfLines={1}>
+                      {(currentStory.feud.category_label || currentStory.feud.category || "").toUpperCase()}
+                    </Text>
+                    <Text style={styles.cardTitle} numberOfLines={4}>
+                      {currentStory.feud.title}
+                    </Text>
+                    <View style={styles.cardVsRow}>
+                      <View style={[styles.cardParty, { backgroundColor: colors.brandPrimary }]}>
+                        <Text style={styles.cardPartyTxt} numberOfLines={2}>
+                          {currentStory.feud.party_a}
+                        </Text>
+                      </View>
+                      <Text style={styles.cardVs}>VS</Text>
+                      <View style={[styles.cardParty, { backgroundColor: colors.brandSecondary }]}>
+                        <Text style={[styles.cardPartyTxt, { color: colors.onBrandSecondary }]} numberOfLines={2}>
+                          {currentStory.feud.party_b}
+                        </Text>
+                      </View>
                     </View>
-                    <Text style={styles.cardVs}>VS</Text>
-                    <View style={[styles.cardParty, { backgroundColor: colors.brandSecondary }]}>
-                      <Text style={[styles.cardPartyTxt, { color: colors.onBrandSecondary }]} numberOfLines={2}>
-                        {currentStory.feud.party_b}
-                      </Text>
-                    </View>
-                  </View>
-                  <View style={styles.cardCta}>
-                    <Text style={styles.cardCtaTxt}>APRI LA FAIDA</Text>
-                    <Ionicons name="chevron-forward" size={16} color={colors.brandPrimary} />
                   </View>
                 </View>
-              </Pressable>
+                {/* Explicit CTA — the only Pressable inside the card,
+                    keeps the "open feud" affordance discoverable. */}
+                <Pressable onPress={openFeud} style={styles.cardCta} testID="story-open-feud">
+                  <Text style={styles.cardCtaTxt}>APRI LA FAIDA</Text>
+                  <Ionicons name="chevron-forward" size={16} color={colors.brandPrimary} />
+                </Pressable>
+              </>
             ) : (
-              <View style={styles.cardMissing}>
+              <View style={styles.cardMissing} pointerEvents="none">
                 <Ionicons name="alert-circle-outline" size={40} color={colors.muted} />
                 <Text style={styles.cardMissingTxt}>Faida non più disponibile</Text>
               </View>
             )}
 
             {currentStory.comment ? (
-              <View style={styles.commentBox}>
+              <View style={styles.commentBox} pointerEvents="none">
                 <Text style={styles.commentTxt}>{currentStory.comment}</Text>
               </View>
             ) : null}
@@ -451,6 +439,45 @@ export default function StoriesViewer() {
           </View>
         ) : null}
       </KeyboardAvoidingView>
+
+      {/* Cross-platform delete confirmation dialog. Uses a plain Modal
+          because RN Web's `Alert.alert` doesn't render multi-button
+          alerts natively — the "Elimina" button was completely
+          silent on the web preview otherwise. */}
+      <Modal
+        visible={confirmDeleteOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => { setConfirmDeleteOpen(false); setPaused(false); }}
+      >
+        <Pressable
+          style={styles.confirmBackdrop}
+          onPress={() => { setConfirmDeleteOpen(false); setPaused(false); }}
+        >
+          <Pressable style={styles.confirmSheet} onPress={() => { /* consume */ }}>
+            <Text style={styles.confirmTitle}>Elimina storia</Text>
+            <Text style={styles.confirmMsg}>
+              Sicuro di voler eliminare questa storia? Non sarà più visibile a nessuno.
+            </Text>
+            <View style={styles.confirmBtnRow}>
+              <Pressable
+                style={[styles.confirmBtn, styles.confirmBtnCancel]}
+                onPress={() => { setConfirmDeleteOpen(false); setPaused(false); }}
+                testID="story-delete-cancel"
+              >
+                <Text style={styles.confirmBtnCancelTxt}>ANNULLA</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.confirmBtn, styles.confirmBtnDelete]}
+                onPress={doDelete}
+                testID="story-delete-confirm"
+              >
+                <Text style={styles.confirmBtnDeleteTxt}>ELIMINA</Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -525,7 +552,7 @@ const styles = StyleSheet.create({
     position: "absolute",
     top: 0,
     bottom: 0,
-    width: "35%",
+    width: "50%",
     zIndex: 0,
   },
   card: {
@@ -583,18 +610,20 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   cardCta: {
-    marginTop: spacing.md,
+    marginTop: 0,
+    marginHorizontal: 0,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 4,
+    gap: 6,
     borderTopWidth: 1,
     borderTopColor: colors.border,
-    paddingTop: spacing.sm,
+    paddingVertical: spacing.md,
+    backgroundColor: colors.surface,
   },
   cardCtaTxt: {
     color: colors.brandPrimary,
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: "700",
     letterSpacing: 1.5,
   },
@@ -644,5 +673,65 @@ const styles = StyleSheet.create({
     backgroundColor: colors.brandPrimary,
     alignItems: "center",
     justifyContent: "center",
+  },
+  // Delete-confirm modal — cross-platform alternative to
+  // Alert.alert(multiple buttons) which doesn't work on RN Web.
+  confirmBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.7)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: spacing.lg,
+  },
+  confirmSheet: {
+    backgroundColor: colors.surface,
+    borderRadius: 12,
+    padding: spacing.lg,
+    maxWidth: 380,
+    width: "100%",
+  },
+  confirmTitle: {
+    color: colors.onSurface,
+    fontSize: font.sizes.lg,
+    fontWeight: "700",
+    letterSpacing: 1,
+    marginBottom: spacing.sm,
+  },
+  confirmMsg: {
+    color: colors.muted,
+    fontSize: font.sizes.sm,
+    lineHeight: 20,
+    marginBottom: spacing.lg,
+  },
+  confirmBtnRow: {
+    flexDirection: "row",
+    gap: spacing.sm,
+  },
+  confirmBtn: {
+    flex: 1,
+    paddingVertical: spacing.md,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 6,
+  },
+  confirmBtnCancel: {
+    backgroundColor: colors.surfaceSecondary,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  confirmBtnDelete: {
+    backgroundColor: colors.brandPrimary,
+  },
+  confirmBtnCancelTxt: {
+    color: colors.onSurface,
+    fontSize: font.sizes.xs,
+    fontWeight: "700",
+    letterSpacing: 1.5,
+  },
+  confirmBtnDeleteTxt: {
+    color: colors.onBrandPrimary,
+    fontSize: font.sizes.xs,
+    fontWeight: "700",
+    letterSpacing: 1.5,
   },
 });
