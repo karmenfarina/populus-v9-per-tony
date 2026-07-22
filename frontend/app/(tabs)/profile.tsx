@@ -164,19 +164,18 @@ export default function Profile() {
     }, [uid, isAnon, loadBlocked])
   );
 
-  // On tab re-focus, restore the ScrollView to the exact offset the
-  // user had before leaving. React Native's ScrollView loses its
-  // internal offset on unmount (which happens when a tab is swapped
-  // out of the view tree), so we push it back manually. Small delay
-  // via requestAnimationFrame ensures layout has committed first.
+  // On tab re-focus, reset the scroll offset to the TOP so the profile
+  // always feels "fresh" (avatar + stats visible). The user prefers
+  // this behaviour over restoring the previous position — a page that
+  // silently keeps its old scroll can feel stale when they come back
+  // from a feud or a modal. `scrollYRef` is still tracked for
+  // future/other uses but is intentionally NOT applied here.
   useFocusEffect(
     useCallback(() => {
-      const y = scrollYRef.current;
-      if (y > 0) {
-        requestAnimationFrame(() => {
-          scrollRef.current?.scrollTo({ y, animated: false });
-        });
-      }
+      requestAnimationFrame(() => {
+        scrollRef.current?.scrollTo({ y: 0, animated: false });
+      });
+      scrollYRef.current = 0;
     }, []),
   );
 

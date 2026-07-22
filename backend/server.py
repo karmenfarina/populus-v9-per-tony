@@ -4934,6 +4934,17 @@ async def list_conversations(user: dict = Depends(get_current_user)):
         if not c.get('last_message_at'):
             # Skip empty ghost conversations.
             continue
+        # "Deleted-for-me" cursor: if the user cleared this chat and no
+        # NEW messages have arrived since, the conversation should stay
+        # hidden from their inbox. When a fresh message lands after
+        # deletion the last_message_at moves past the cursor and the
+        # chat re-appears (Instagram/WhatsApp behaviour).
+        cleared_map = c.get('deleted_for') or {}
+        cleared_at = cleared_map.get(uid) if isinstance(cleared_map, dict) else None
+        if isinstance(cleared_at, datetime):
+            last = c.get('last_message_at')
+            if isinstance(last, datetime) and last <= cleared_at:
+                continue
         unread = await db.messages.count_documents({
             'conversation_id': c['conversation_id'],
             'recipient_id': uid,
@@ -4961,10 +4972,18 @@ async def messages_with(other_user_id: str, before: Optional[str] = None,
     _, other = await _both_registered(user['user_id'], other_user_id)
     conv = await _ensure_conversation(user['user_id'], other_user_id)
     q: dict = {'conversation_id': conv['conversation_id'], 'deleted': {'$ne': True}}
+    # Apply per-user "cleared chat" cutoff — messages older than the
+    # user's clear-chat timestamp are hidden from them (but remain
+    # visible to the OTHER participant, matching Instagram's semantics).
+    cleared_map = conv.get('deleted_for') or {}
+    cleared_at = cleared_map.get(user['user_id']) if isinstance(cleared_map, dict) else None
+    if isinstance(cleared_at, datetime):
+        q['created_at'] = {**q.get('created_at', {}), '$gt': cleared_at}
     if before:
         try:
             before_dt = datetime.fromisoformat(before.replace('Z', '+00:00'))
-            q['created_at'] = {'$lt': before_dt}
+            existing = q.get('created_at') if isinstance(q.get('created_at'), dict) else {}
+            q['created_at'] = {**existing, '$lt': before_dt}
         except Exception:
             pass
     limit = max(1, min(limit, 100))
@@ -4980,6 +4999,46 @@ async def messages_with(other_user_id: str, before: Optional[str] = None,
         'i_blocked': i_blocked,
         'they_blocked': they_blocked,
     }
+
+
+@api_router.delete('/messages/with/{other_user_id}')
+async def clear_conversation_for_me(other_user_id: str, user: dict = Depends(get_current_user)):
+    """Instagram-style "delete chat" — hides all messages with `other_user_id`
+    from the CURRENT user's inbox by writing a per-user cutoff on the
+    conversation. The other participant keeps full history.
+
+    If a new message arrives after the cutoff the conversation re-appears
+    naturally in the inbox (the list_conversations filter compares the
+    cutoff against last_message_at).
+    """
+    if user.get('is_anonymous') or user.get('auth_provider') == 'anonymous':
+        raise HTTPException(status_code=403, detail="Gli utenti anonimi non possono usare la chat")
+    if other_user_id == user['user_id']:
+        raise HTTPException(status_code=400, detail='Nessuna chat con te stesso')
+    conv = await db.conversations.find_one(
+        {'conversation_id': _conv_key(user['user_id'], other_user_id)},
+        {'_id': 0, 'conversation_id': 1},
+    )
+    if not conv:
+        # Nothing to delete — treat as idempotent success so the UI can
+        # still remove the row without erroring out.
+        return {'ok': True, 'cleared_at': None}
+    now = now_utc()
+    await db.conversations.update_one(
+        {'conversation_id': conv['conversation_id']},
+        {'$set': {f'deleted_for.{user["user_id"]}': now}},
+    )
+    # Mark all inbound messages from the other user as read so the
+    # unread badge doesn't linger after clearing.
+    await db.messages.update_many(
+        {
+            'conversation_id': conv['conversation_id'],
+            'recipient_id': user['user_id'],
+            'read_at': None,
+        },
+        {'$set': {'read_at': now}},
+    )
+    return {'ok': True, 'cleared_at': _iso_utc(now)}
 
 
 @api_router.post('/messages/send')
@@ -5919,19 +5978,23 @@ async def reply_to_story(story_id: str, body: StoryReplyBody, user: dict = Depen
 
 
 async def _send_dm_internal(sender_id: str, recipient_id: str, text: str) -> dict:
-    """Backend-only helper mirroring the public `POST /messages` route
-    behaviour so story replies share the exact same delivery, blocking
-    and moderation rules as regular DMs. Kept private because we don't
-    want /api callers to bypass rate-limit gates.
+    """Backend-only helper mirroring the public `POST /messages/send`
+    route behaviour so story replies share the exact same delivery,
+    blocking, moderation AND CONVERSATION-INDEX rules as regular DMs.
+
+    The earlier version of this helper wrote directly to `db.messages`
+    without touching `db.conversations`. Because
+    `GET /api/messages/conversations` lists rooms out of the conversation
+    index (not by scanning messages), story replies never showed up in
+    the recipient's inbox — they were silently dropped from the UI.
     """
-    # Check block relationship in either direction.
-    blocked = await db.user_blocks.find_one({
-        '$or': [
-            {'blocker_id': recipient_id, 'blocked_id': sender_id},
-            {'blocker_id': sender_id, 'blocked_id': recipient_id},
-        ]
-    })
-    if blocked:
+    if sender_id == recipient_id:
+        raise HTTPException(status_code=400, detail='Non puoi rispondere alla tua stessa storia')
+    # Both users must be registered (matches the public DM endpoint —
+    # story replies cannot reach anonymous accounts and vice-versa).
+    await _both_registered(sender_id, recipient_id)
+    # Block relationship in either direction.
+    if await _is_blocked_pair(sender_id, recipient_id):
         raise HTTPException(status_code=403, detail='Impossibile inviare il messaggio')
     clean, flagged = _moderate_text(text)
     if flagged:
@@ -5939,24 +6002,64 @@ async def _send_dm_internal(sender_id: str, recipient_id: str, text: str) -> dic
     ai_safe, _ = await _ai_moderate_comment(clean)
     if not ai_safe:
         raise HTTPException(status_code=400, detail='Messaggio non consentito')
-    msg = {
+    # Create / touch the conversation FIRST so `list_conversations`
+    # picks this reply up right away. Without this the DM ends up
+    # orphaned in the collection.
+    conv = await _ensure_conversation(sender_id, recipient_id)
+    now = now_utc()
+    doc = {
         'message_id': new_id('msg'),
+        'conversation_id': conv['conversation_id'],
         'sender_id': sender_id,
         'recipient_id': recipient_id,
         'text': clean,
-        'created_at': now_utc(),
+        'image_data': None,
+        'shared_feud': None,
+        'kind': 'text',
+        'reactions': {},
+        'created_at': now,
         'read_at': None,
+        'deleted': False,
     }
-    await db.messages.insert_one(msg)
-    msg.pop('_id', None)
-    msg['created_at'] = _iso_utc(msg['created_at'])
-    # Best-effort websocket push — do not fail the request if it errors.
+    await db.messages.insert_one(doc)
+    preview = _preview_text(clean, False, None)
+    await db.conversations.update_one(
+        {'conversation_id': conv['conversation_id']},
+        {'$set': {
+            'last_message_at': now,
+            'last_message_preview': preview,
+            'last_sender_id': sender_id,
+        }},
+    )
+    payload = _serialize_message(doc)
+    # Real-time delivery (best-effort). Errors here shouldn't kill the
+    # request — the message is already persisted.
     try:
-        await _ws_send(recipient_id, {'type': 'message.new', 'message': msg})
-        await _ws_send(sender_id, {'type': 'message.sent', 'message': msg})
+        await _ws_send(recipient_id, {'type': 'message.new', 'message': payload})
+        await _ws_send(sender_id, {'type': 'message.sent', 'message': payload})
     except Exception:
         pass
-    return msg
+    # Push notification if the recipient is offline (mirrors send_message).
+    try:
+        if not _user_is_online(recipient_id):
+            recip = await db.users.find_one(
+                {'user_id': recipient_id, '$or': [{'push_notifications': True}, {'push_notifications': {'$exists': False}}]},
+                {'_id': 0, 'user_id': 1, 'nickname': 1},
+            )
+            if recip:
+                sender_doc = await db.users.find_one({'user_id': sender_id}, {'_id': 0, 'nickname': 1})
+                sender_nick = (sender_doc or {}).get('nickname') or 'Utente'
+                await send_push(
+                    recipients=[recipient_id],
+                    data={
+                        'title': f'Risposta alla tua storia da @{sender_nick}',
+                        'message': preview or 'Ti ha risposto',
+                        'action_url': f"/messages/{sender_id}",
+                    },
+                )
+    except Exception as e:
+        logger.warning(f"push (story reply) failed: {e}")
+    return payload
 
 
 

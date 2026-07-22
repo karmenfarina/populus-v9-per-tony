@@ -8,6 +8,7 @@ import {
   StyleSheet,
   ActivityIndicator,
   RefreshControl,
+  Modal,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
@@ -39,6 +40,30 @@ export default function MessagesListScreen() {
   const [convs, setConvs] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  // Long-press → confirm-delete modal. Holds the conversation the user
+  // is about to clear so we can show the target nickname and pass the
+  // right id to the API. `null` means the modal is closed.
+  const [confirmDelete, setConfirmDelete] = useState<Conversation | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  const deleteChat = useCallback(async () => {
+    if (!confirmDelete || deleting) return;
+    setDeleting(true);
+    const target = confirmDelete.other_user.user_id;
+    // Optimistic: remove the row immediately so the UI feels snappy.
+    // If the request fails we re-load to restore the true state.
+    setConvs((prev) => prev.filter((c) => c.other_user.user_id !== target));
+    try {
+      await api.clearConversation(target);
+      await refreshBadge();
+    } catch {
+      // Restore on failure.
+      await load();
+    } finally {
+      setDeleting(false);
+      setConfirmDelete(null);
+    }
+  }, [confirmDelete, deleting, refreshBadge, load]);
 
   const load = useCallback(async () => {
     try {
@@ -160,6 +185,8 @@ export default function MessagesListScreen() {
           renderItem={({ item }) => (
             <Pressable
               onPress={() => router.push({ pathname: "/messages/[userId]", params: { userId: item.other_user.user_id, from: "/messages" } })}
+              onLongPress={() => setConfirmDelete(item)}
+              delayLongPress={350}
               style={styles.row}
               testID={`convo-${item.other_user.user_id}`}
             >
@@ -204,6 +231,48 @@ export default function MessagesListScreen() {
           )}
         />
       )}
+
+      {/* Long-press delete confirmation. Cross-platform Modal instead of
+          Alert.alert so the same UX works on React Native Web without
+          the well-known button-callback quirks. */}
+      <Modal
+        visible={confirmDelete !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setConfirmDelete(null)}
+      >
+        <Pressable style={styles.modalBackdrop} onPress={() => !deleting && setConfirmDelete(null)}>
+          <Pressable style={styles.modalSheet} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.modalTitle}>ELIMINA CHAT</Text>
+            <Text style={styles.modalBody}>
+              Tutti i messaggi con @{confirmDelete?.other_user.nickname || "questo utente"} spariranno dalla tua lista.
+              La chat resterà visibile all&apos;altro utente. Se ricevi un nuovo messaggio, la chat ricomparirà.
+            </Text>
+            <View style={styles.modalActions}>
+              <Pressable
+                onPress={() => setConfirmDelete(null)}
+                disabled={deleting}
+                style={[styles.modalBtn, styles.modalBtnCancel]}
+                testID="delete-chat-cancel"
+              >
+                <Text style={styles.modalBtnCancelTxt}>ANNULLA</Text>
+              </Pressable>
+              <Pressable
+                onPress={deleteChat}
+                disabled={deleting}
+                style={[styles.modalBtn, styles.modalBtnDanger]}
+                testID="delete-chat-confirm"
+              >
+                {deleting ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <Text style={styles.modalBtnDangerTxt}>ELIMINA</Text>
+                )}
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -259,4 +328,64 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
   },
   badgeTxt: { color: colors.onBrandPrimary, fontSize: 11, fontWeight: "700" },
+  // Confirm-delete modal.
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: spacing.lg,
+  },
+  modalSheet: {
+    width: "100%",
+    maxWidth: 360,
+    backgroundColor: colors.surface,
+    borderWidth: 2,
+    borderColor: colors.border,
+    padding: spacing.lg,
+    gap: spacing.md,
+  },
+  modalTitle: {
+    fontSize: font.sizes.lg,
+    fontWeight: "700",
+    letterSpacing: 2,
+    color: colors.onSurface,
+  },
+  modalBody: {
+    fontSize: font.sizes.base,
+    color: colors.muted,
+    lineHeight: 20,
+  },
+  modalActions: {
+    flexDirection: "row",
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+  },
+  modalBtn: {
+    flex: 1,
+    paddingVertical: spacing.md,
+    borderWidth: 2,
+    borderColor: colors.border,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  modalBtnCancel: {
+    backgroundColor: colors.surfaceSecondary,
+  },
+  modalBtnCancelTxt: {
+    fontSize: font.sizes.sm,
+    letterSpacing: 1,
+    fontWeight: "600",
+    color: colors.onSurface,
+  },
+  modalBtnDanger: {
+    backgroundColor: colors.error,
+    borderColor: colors.error,
+  },
+  modalBtnDangerTxt: {
+    fontSize: font.sizes.sm,
+    letterSpacing: 1,
+    fontWeight: "700",
+    color: "#FFFFFF",
+  },
 });

@@ -214,6 +214,8 @@ export const api = {
   messagesUnreadCount: () => request('/messages/unread-count'),
   messagesMarkAllRead: () => request('/messages/mark-all-read', { method: 'POST' }),
   conversations: () => request('/messages/conversations'),
+  clearConversation: (otherUserId: string) =>
+    request(`/messages/with/${otherUserId}`, { method: 'DELETE' }),
   messagesWith: (userId: string, before?: string, limit = 50) => {
     const p = new URLSearchParams();
     if (before) p.set('before', before);
