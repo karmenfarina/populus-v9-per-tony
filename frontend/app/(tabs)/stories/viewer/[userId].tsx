@@ -321,16 +321,26 @@ export default function StoriesViewer() {
   // wouldn't refresh otherwise and the viewer would stay stuck on
   // the previous user's stories. Same trick handles the case where
   // `useLocalSearchParams` hydrates AFTER first render on native.
+  //
+  // IMPORTANT: only depend on `initialUserId`. If we also depended on
+  // `currentUserId`, an internal jumpToUser() call (which mutates
+  // currentUserId to the next user) would trigger this effect, see
+  // that `initialUserId !== currentUserId`, and forcibly RESET
+  // currentUserId back to the stale route param — causing a black
+  // flash and an immediate "return to first user" bounce.
   useEffect(() => {
     const nextId = String(initialUserId || "");
-    if (!nextId || nextId === currentUserId) return;
-    setCurrentUserId(nextId);
-    setInitialLoading(true);
-    setProgress(0);
-    autoCloseFiredRef.current = false;
-    // External navigation — allow the load effect below to run.
-    internalNavRef.current = false;
-  }, [initialUserId, currentUserId]);
+    if (!nextId) return;
+    setCurrentUserId((prev) => {
+      if (prev === nextId) return prev;
+      setInitialLoading(true);
+      setProgress(0);
+      autoCloseFiredRef.current = false;
+      // External navigation — force the next load effect to run.
+      internalNavRef.current = false;
+      return nextId;
+    });
+  }, [initialUserId]);
 
   // Load whenever currentUserId changes (fresh mount OR external
   // route change). Internal jumps (jumpToUser) skip this via the
