@@ -631,23 +631,52 @@ export default function StoriesViewer() {
           ))}
         </View>
 
-        {/* Author header */}
+        {/* Author header. The avatar + nickname block is tappable —
+            opens the author's public profile (or my own profile tab
+            when the current story is mine). Placed BEFORE the fullscreen
+            body-press wrapper's onPress registers so this tap wins. */}
         <View style={styles.headerRow}>
-          <View style={styles.headerAvatarWrap}>
-            {author?.avatar ? (
-              <Image source={{ uri: author.avatar }} style={styles.headerAvatar} />
-            ) : (
-              <View style={[styles.headerAvatar, styles.headerAvatarFallback]}>
-                <Ionicons name="person" size={16} color={colors.muted} />
-              </View>
-            )}
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.headerNick} numberOfLines={1}>
-              {author?.nickname || author?.display_name || "utente"}
-            </Text>
-            <Text style={styles.headerTime}>{timeAgo(currentStory.created_at)}</Text>
-          </View>
+          <Pressable
+            onPress={() => {
+              // Freeze the auto-advance timer BEFORE navigating away so
+              // the story doesn't tick to the next one while the user
+              // is on the profile screen (and land back on a different
+              // story on return).
+              autoCloseFiredRef.current = true;
+              if (isOwnStory) {
+                // Own story — jump to the Profile tab. `replace` avoids
+                // stacking multiple viewers behind Profile.
+                router.push("/profile" as any);
+              } else if (currentStory.user_id) {
+                router.push({
+                  pathname: "/user/[id]",
+                  params: {
+                    id: currentStory.user_id,
+                    from: `/stories/viewer/${currentUserId}`,
+                  },
+                } as any);
+              }
+            }}
+            hitSlop={8}
+            style={styles.headerAuthorPressable}
+            testID="story-open-author"
+          >
+            <View style={styles.headerAvatarWrap}>
+              {author?.avatar ? (
+                <Image source={{ uri: author.avatar }} style={styles.headerAvatar} />
+              ) : (
+                <View style={[styles.headerAvatar, styles.headerAvatarFallback]}>
+                  <Ionicons name="person" size={16} color={colors.muted} />
+                </View>
+              )}
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.headerNick} numberOfLines={1}>
+                {author?.nickname || author?.display_name || "utente"}
+              </Text>
+              <Text style={styles.headerTime}>{timeAgo(currentStory.created_at)}</Text>
+            </View>
+          </Pressable>
           {isOwnStory ? (
             <Pressable onPress={confirmDelete} style={styles.headerBtn} testID="story-delete">
               <Ionicons name="trash-outline" size={20} color="#fff" />
@@ -834,6 +863,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
+    gap: spacing.sm,
+  },
+  headerAuthorPressable: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
     gap: spacing.sm,
   },
   headerAvatarWrap: {

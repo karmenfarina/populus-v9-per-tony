@@ -5754,15 +5754,31 @@ async def _hydrate_story_row(story: dict, viewer_id: Optional[str]) -> dict:
     # Author profile — minimal projection to keep the payload light.
     author = await db.users.find_one(
         {'user_id': story['user_id']},
-        {'_id': 0, 'user_id': 1, 'nickname': 1, 'display_name': 1, 'photos': 1},
+        {'_id': 0, 'user_id': 1, 'nickname': 1, 'display_name': 1, 'photos': 1, 'primary_photo_id': 1},
     )
     if author:
         photos = author.get('photos') or []
+        primary_id = author.get('primary_photo_id')
+        # Pick the primary photo when set, otherwise the first one. The
+        # frontend expects `avatar` to be a data URI string, NOT a photo
+        # object — passing an object silently breaks <Image source>.
+        chosen = None
+        if primary_id:
+            chosen = next((p for p in photos if p.get('photo_id') == primary_id), None)
+        if not chosen and photos:
+            chosen = photos[0]
+        avatar_uri = None
+        if chosen and chosen.get('data'):
+            data = chosen['data']
+            # Users sometimes store the full data-URL, sometimes just the
+            # base64 payload — normalise to a real URL either way so the
+            # <Image> component can render it directly.
+            avatar_uri = data if data.startswith('data:') else f"data:image/jpeg;base64,{data}"
         out['author'] = {
             'user_id': author['user_id'],
             'nickname': author.get('nickname'),
             'display_name': author.get('display_name'),
-            'avatar': photos[0] if photos else None,
+            'avatar': avatar_uri,
         }
     # Viewed flag — true if the viewer already saw this specific story.
     viewers = story.get('viewers') or []
