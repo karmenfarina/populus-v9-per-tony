@@ -9,6 +9,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { api, ApiError } from "@/src/api";
 import { colors, spacing, font } from "@/src/theme";
 import { useAuth } from "@/src/auth/AuthContext";
+import { useSmartBack } from "@/src/utils/useSmartBack";
 
 const CATEGORIES = [
   { id: "Bug", label: "Bug o malfunzionamento" },
@@ -40,6 +41,11 @@ const DEVICES = ["iOS", "Android", "Web / Browser"];
 
 export default function SupportScreen() {
   const router = useRouter();
+  // The support screen is opened from the Profile tab. `router.back()`
+  // in a Tabs layout is unreliable on web — it collapses back to "/".
+  // `useSmartBack` walks the tracked nav stack and falls back to the
+  // owning tab ("/profile") when there's nothing else to pop.
+  const goBack = useSmartBack("/profile");
   const { user, logout } = useAuth();
   const isAnonymous = !!user && user.auth_provider === "anonymous";
   const [category, setCategory] = useState<string | null>(null);
@@ -92,7 +98,7 @@ export default function SupportScreen() {
     return (
       <SafeAreaView style={styles.safe} edges={["top"]} testID="support-anon-lock">
         <View style={styles.headerBar}>
-          <Pressable onPress={() => router.back()} style={styles.backBtn} testID="support-back">
+          <Pressable onPress={goBack} style={styles.backBtn} testID="support-back">
             <Ionicons name="chevron-back" size={22} color={colors.brandSecondary} />
           </Pressable>
           <Text style={styles.title}>ASSISTENZA</Text>
@@ -125,7 +131,7 @@ export default function SupportScreen() {
     return (
       <SafeAreaView style={styles.safe} edges={["top"]} testID="support-sent">
         <View style={styles.headerBar}>
-          <Pressable onPress={() => router.back()} style={styles.backBtn} testID="support-back">
+          <Pressable onPress={goBack} style={styles.backBtn} testID="support-back">
             <Ionicons name="chevron-back" size={22} color={colors.brandSecondary} />
           </Pressable>
           <Text style={styles.title}>ASSISTENZA</Text>
@@ -145,7 +151,7 @@ export default function SupportScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={["top"]} testID="support-screen">
       <View style={styles.headerBar}>
-        <Pressable onPress={() => router.back()} style={styles.backBtn} testID="support-back">
+        <Pressable onPress={goBack} style={styles.backBtn} testID="support-back">
           <Ionicons name="chevron-back" size={22} color={colors.brandSecondary} />
         </Pressable>
         <View style={{ flex: 1 }}>
