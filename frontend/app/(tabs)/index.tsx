@@ -254,11 +254,8 @@ export default function HomeFeed() {
         )}
       </View>
 
-      {/* Instagram-style stories strip — placed directly below the
-          header and above the category chips. Renders empty for
-          anonymous accounts. */}
-      <StoriesBar />
-
+      {/* Category chips first — they anchor the primary navigation
+          of the home feed. */}
       <View style={styles.chipRowWrap}>
         <ScrollView
           ref={chipScrollRef}
@@ -286,6 +283,12 @@ export default function HomeFeed() {
           ))}
         </ScrollView>
       </View>
+
+      {/* Stories strip — placed AFTER the category chips so it doesn't
+          hijack the top of the screen. Collapsed by default; opens
+          into the full ring strip when tapped. Empty for anonymous
+          accounts. */}
+      <StoriesBar />
 
       {(pullRefreshing || pullProgress > 0) && (
         <View

@@ -1,0 +1,23 @@
+{
+  "summary": "StoriesBar collapse/expand feature fully verified. Pill (collapsed) renders by default under the chip row, highlight variant shows 'Nuove storie' + badge '1' + chevron-down for user chat_a@test.it (has 1 unseen story from chatUserB). Tap pill -> expands to horizontal ring strip with header 'NUOVE STORIE' (red brand) + chevron-up + my ring + otherGroups. Collapse button collapses back to pill. AsyncStorage persistence via key 'faide_stories_bar_collapsed' works: '0' after expand (persisted across reload = expanded restored), '1' after collapse (persisted across reload = pill restored). DOM order confirmed: chip row precedes pill (pillFollowsChip=true). Anonymous user hits ToS acceptance flow before home is reachable — code inspection confirms StoriesBar returns null when isAnon (line 198), so anon behavior remains unchanged. No red-screen / no runtime errors. Feature ships as-designed.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "StoriesBar.tsx: `hydratedCollapsed` is loaded from AsyncStorage but only 'v === \"0\"' flips to expanded. Any legacy/corrupted value silently keeps the default collapsed — behavior is acceptable and documented in the comment. No action needed.",
+    "Consider adding a testID on the pillCountBadge for future assertions about the badge count value (currently only text is asserted)."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (frontend-only)", "frontend": "100%"},
+  "seed_data_creation": "None. Used existing pre-verified user chat_a@test.it (has 1 unseen story from chatUserB producing highlight variant).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "To auth in tests: POST /api/auth/login, then localStorage.setItem('faide_token', JSON.stringify(token)), then page.goto(BASE + '/') (not reload from /auth). AsyncStorage on web = plain window.localStorage. StoriesBar testIDs: stories-bar-pill (collapsed pill), stories-bar-collapsed (wrapper), stories-bar (expanded container), stories-bar-collapse-btn (collapse header), stories-bar-mine (my ring), stories-bar-{user_id} (other rings). Persistence key: faide_stories_bar_collapsed. Values: '0' expanded, '1' or missing = collapsed default.",
+  "rca_of_issue": "N/A — feature works as intended."
+}

@@ -10,6 +10,9 @@ import {
   Modal,
 } from "react-native";
 import { useRouter, useFocusEffect } from "expo-router";
+import { LinearGradient } from "expo-linear-gradient";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Ionicons } from "@expo/vector-icons";
 import { api } from "@/src/api";
 import { useAuth } from "@/src/auth/AuthContext";
 import { colors, spacing } from "@/src/theme";
@@ -45,7 +48,11 @@ type StoryAuthor = {
   avatar?: string | null;
 };
 
-type StoryGroup = {
+// Local shape helper — kept lightweight in sync with the `StoryGroup`
+// exported from `src/api.ts` (we intentionally do not re-import it
+// here to avoid a circular type dependency while StoriesBar owns its
+// fetch call).
+type LocalStoryGroup = {
   user_id: string;
   author: StoryAuthor | null;
   has_unseen: boolean;
@@ -60,10 +67,15 @@ export const STORIES_BAR_HEIGHT = 108;
 const CIRCLE_SIZE = 66;
 const RING_WIDTH = 3;
 
+// Persistence key for the "did the user collapse the strip?" preference.
+// Kept per-device (AsyncStorage) so the choice survives cold starts but
+// doesn't leak between accounts you might sign in with on the same box.
+const COLLAPSED_STORAGE_KEY = "faide_stories_bar_collapsed";
+
 export default function StoriesBar() {
   const router = useRouter();
   const { user } = useAuth();
-  const [groups, setGroups] = useState<StoryGroup[]>([]);
+  const [groups, setGroups] = useState<LocalStoryGroup[]>([]);
   const [loading, setLoading] = useState(true);
   // Set to true the moment the FIRST load resolves (regardless of
   // success). Prevents the visible flash where the "my" circle shows
@@ -91,6 +103,50 @@ export default function StoriesBar() {
   const [helpOpen, setHelpOpen] = useState(false);
   const isAnon = user?.is_anonymous === true || (user as any)?.auth_provider === "anonymous";
 
+  // Collapsed / expanded state for the whole stories strip.
+  //   collapsed = only the thin pill "Nuove storie" / "Storie" is shown
+  //   expanded  = the full horizontal ring strip (previous default)
+  //
+  // Default = collapsed (the point of this UI: keep the home feed
+  // uncluttered until the user WANTS to peek). We hydrate the choice
+  // from AsyncStorage once, on mount, so it persists across app cold
+  // starts. `hydratedCollapsed` gates the very first render so we
+  // don't briefly flash the expanded state before we know what the
+  // user preferred.
+  const [collapsed, setCollapsed] = useState<boolean>(true);
+  const [hydratedCollapsed, setHydratedCollapsed] = useState<boolean>(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const v = await AsyncStorage.getItem(COLLAPSED_STORAGE_KEY);
+        if (cancelled) return;
+        // Anything explicitly "0" (user tapped to expand) wins. Any
+        // other value (null, "1", legacy) → keep the default collapsed
+        // state. This makes "collapsed" the sticky default while still
+        // remembering an explicit expand.
+        if (v === "0") setCollapsed(false);
+      } catch {
+        /* ignore — storage failures fall back to collapsed default */
+      } finally {
+        if (!cancelled) setHydratedCollapsed(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const toggleCollapsed = useCallback(() => {
+    setCollapsed((prev) => {
+      const next = !prev;
+      // Best-effort persist; ignore write errors.
+      AsyncStorage.setItem(COLLAPSED_STORAGE_KEY, next ? "1" : "0").catch(() => {});
+      return next;
+    });
+  }, []);
+
   const load = useCallback(async (opts?: { silent?: boolean }) => {
     if (!user?.user_id || isAnon) {
       setGroups([]);
@@ -107,7 +163,7 @@ export default function StoriesBar() {
     if (!opts?.silent) setRingLoading(true);
     try {
       const r: any = await api.storiesFeed();
-      setGroups((r?.groups || []) as StoryGroup[]);
+      setGroups((r?.groups || []) as LocalStoryGroup[]);
     } catch {
       // Silent failure — the strip is a secondary UI element and we
       // don't want to blow up the whole home screen if it flakes.
@@ -183,8 +239,110 @@ export default function StoriesBar() {
   // out would drop chats-with-context the user still wants to see.
   const otherGroups = groups.filter((g) => !g.is_mine);
 
+  // How many OTHER users have at least one story I haven't watched
+  // yet. Drives the "Nuove storie" highlight on the collapsed pill.
+  // My own group is intentionally excluded — a story I just published
+  // shouldn't shout "new" back at me.
+  const unseenCount = otherGroups.filter((g) => g.has_unseen).length;
+  const hasUnseen = unseenCount > 0;
+
+  // ------------------------------------------------------------------
+  // COLLAPSED VIEW — thin pill, tap to expand.
+  // Rendered when:
+  //   * hydration of the persisted preference is done, AND
+  //   * user chose to keep the strip collapsed (default).
+  // The very first render (before hydration finishes) always shows
+  // the pill too, so we never briefly flash the tall expanded strip.
+  // ------------------------------------------------------------------
+  if (collapsed || !hydratedCollapsed) {
+    return (
+      <View style={styles.collapsedContainer} testID="stories-bar-collapsed">
+        <Pressable
+          onPress={toggleCollapsed}
+          style={styles.pillPressable}
+          testID="stories-bar-pill"
+          accessibilityRole="button"
+          accessibilityLabel={
+            hasUnseen
+              ? `Nuove storie disponibili (${unseenCount}). Tocca per espandere.`
+              : "Storie. Tocca per espandere."
+          }
+        >
+          {hasUnseen ? (
+            // Highlight variant: gradient border + gradient fill hint
+            // to make the pill glow. Uses the same brand-red/brand-secondary
+            // pair as the unseen story ring so the visual language is
+            // consistent.
+            <LinearGradient
+              colors={[colors.brandPrimary, colors.brandSecondary]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.pillGradient}
+            >
+              <View style={styles.pillInner}>
+                <View style={styles.pillDot} />
+                <Text style={styles.pillLabelHighlight} numberOfLines={1}>
+                  Nuove storie
+                </Text>
+                <View style={styles.pillCountBadge}>
+                  <Text style={styles.pillCountText} allowFontScaling={false}>
+                    {unseenCount}
+                  </Text>
+                </View>
+                <View style={{ flex: 1 }} />
+                <Ionicons
+                  name="chevron-down"
+                  size={18}
+                  color={colors.brandPrimary}
+                />
+              </View>
+            </LinearGradient>
+          ) : (
+            // Neutral variant: no new stories worth interrupting the
+            // feed for. Muted background, no glow.
+            <View style={styles.pillNeutral}>
+              <Ionicons
+                name="albums-outline"
+                size={16}
+                color={colors.muted}
+                style={{ marginRight: 8 }}
+              />
+              <Text style={styles.pillLabelNeutral} numberOfLines={1}>
+                Storie
+              </Text>
+              <View style={{ flex: 1 }} />
+              <Ionicons name="chevron-down" size={18} color={colors.muted} />
+            </View>
+          )}
+        </Pressable>
+      </View>
+    );
+  }
+
+  // ------------------------------------------------------------------
+  // EXPANDED VIEW — original horizontal ring strip.
+  // Adds a small "collapse" header on top so the user can hide the
+  // strip again without going into settings.
+  // ------------------------------------------------------------------
   return (
     <View style={styles.container} testID="stories-bar">
+      <Pressable
+        onPress={toggleCollapsed}
+        style={styles.expandedHeader}
+        testID="stories-bar-collapse-btn"
+        accessibilityRole="button"
+        accessibilityLabel="Nascondi storie"
+      >
+        <Text
+          style={[
+            styles.expandedHeaderLabel,
+            hasUnseen && styles.expandedHeaderLabelHighlight,
+          ]}
+        >
+          {hasUnseen ? "Nuove storie" : "Storie"}
+        </Text>
+        <Ionicons name="chevron-up" size={16} color={colors.muted} />
+      </Pressable>
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
@@ -339,16 +497,106 @@ export default function StoriesBar() {
 
 const styles = StyleSheet.create({
   container: {
-    height: STORIES_BAR_HEIGHT,
+    // Expanded strip. Height = header (~28) + original strip (108).
+    // We stop hard-coding a single fixed height here so the header
+    // can breathe without cropping the circles below.
     backgroundColor: colors.surface,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
+    paddingTop: 4,
+  },
+  expandedHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: spacing.md,
+    paddingBottom: 4,
+  },
+  expandedHeaderLabel: {
+    color: colors.muted,
+    fontSize: 11,
+    fontWeight: "600",
+    letterSpacing: 0.4,
+    textTransform: "uppercase",
+  },
+  expandedHeaderLabelHighlight: {
+    color: colors.brandPrimary,
+  },
+  // -------- Collapsed pill --------
+  // Same visual band as the expanded strip, but drastically shorter.
+  // Sits directly below the category chips.
+  collapsedContainer: {
+    backgroundColor: colors.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  pillPressable: {
+    width: "100%",
+  },
+  // Gradient wrapper acts as the 1.5px "glowing" border. The inner
+  // View paints the actual pill background on top of it.
+  pillGradient: {
+    borderRadius: 20,
+    padding: 1.5,
+  },
+  pillInner: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderRadius: 18.5,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  pillDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: colors.brandPrimary,
+    marginRight: 10,
+  },
+  pillLabelHighlight: {
+    color: colors.brandPrimary,
+    fontSize: 13,
+    fontWeight: "700",
+    letterSpacing: 0.3,
+  },
+  pillCountBadge: {
+    marginLeft: 8,
+    minWidth: 20,
+    height: 20,
+    paddingHorizontal: 6,
+    borderRadius: 10,
+    backgroundColor: colors.brandPrimary,
+    alignItems: "center",
     justifyContent: "center",
+  },
+  pillCountText: {
+    color: "#fff",
+    fontSize: 11,
+    fontWeight: "700",
+    lineHeight: 13,
+  },
+  pillNeutral: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: colors.surfaceSecondary || colors.surfaceTertiary,
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  pillLabelNeutral: {
+    color: colors.muted,
+    fontSize: 13,
+    fontWeight: "600",
+    letterSpacing: 0.3,
   },
   scrollBody: {
     paddingHorizontal: spacing.md,
     alignItems: "center",
     gap: spacing.md,
+    paddingBottom: 8,
   },
   item: {
     width: CIRCLE_SIZE + 12,
