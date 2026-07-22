@@ -63,6 +63,13 @@ export default function StoriesBar() {
   const { user } = useAuth();
   const [groups, setGroups] = useState<StoryGroup[]>([]);
   const [loading, setLoading] = useState(true);
+  // Set to true the moment the FIRST load resolves (regardless of
+  // success). Prevents the visible flash where the "my" circle shows
+  // the "Le tue storie" + "+" configuration for a split second before
+  // flipping to "Tua storia" when the API returns data. Until we know
+  // for sure whether the user has active stories we render a stable
+  // neutral state (avatar only, no label change, no add badge).
+  const [firstLoadDone, setFirstLoadDone] = useState(false);
   // Cross-platform info sheet — Alert.alert was causing subtle state
   // corruption on React Native Web (subsequent tab taps briefly showed
   // their content, then bounced back to home). A plain <Modal> is
@@ -74,6 +81,7 @@ export default function StoriesBar() {
     if (!user?.user_id || isAnon) {
       setGroups([]);
       setLoading(false);
+      setFirstLoadDone(true);
       return;
     }
     try {
@@ -85,6 +93,7 @@ export default function StoriesBar() {
       setGroups([]);
     } finally {
       setLoading(false);
+      setFirstLoadDone(true);
     }
   }, [user?.user_id, isAnon]);
 
@@ -133,7 +142,13 @@ export default function StoriesBar() {
           style={styles.item}
           testID="stories-bar-mine"
         >
-          <View style={[styles.ring, myGroup?.has_unseen ? styles.ringUnseen : styles.ringMine]}>
+          <View style={[
+            styles.ring,
+            // Also hold the ring style neutral until first load — the
+            // "unseen" (colored) ring appearing after the fetch is part
+            // of the same visible flash the label and "+" badge cause.
+            firstLoadDone && myGroup?.has_unseen ? styles.ringUnseen : styles.ringMine,
+          ]}>
             <View style={styles.avatarWrap}>
               {user?.photos && user.photos[0]?.data ? (
                 <Image source={{ uri: user.photos[0].data }} style={styles.avatar} />
@@ -142,7 +157,10 @@ export default function StoriesBar() {
                   <Ionicons name="person" size={26} color={colors.muted} />
                 </View>
               )}
-              {(!myGroup || myGroup.stories.length === 0) && (
+              {/* Only reveal the "+" affordance AFTER first load resolved
+                  and we know for sure the user has no active story yet.
+                  Otherwise it flashes on then off during initial render. */}
+              {firstLoadDone && (!myGroup || myGroup.stories.length === 0) && (
                 <View style={styles.plusBadge}>
                   <Ionicons name="add" size={14} color="#fff" />
                 </View>
@@ -150,7 +168,13 @@ export default function StoriesBar() {
             </View>
           </View>
           <Text style={styles.label} numberOfLines={1}>
-            {myGroup && myGroup.stories.length > 0 ? "Tua storia" : "Le tue storie"}
+            {/* Hold a neutral fallback until first load so the label
+                doesn't visibly flip from "Le tue storie" → "Tua storia". */}
+            {!firstLoadDone
+              ? "Le tue storie"
+              : myGroup && myGroup.stories.length > 0
+              ? "Tua storia"
+              : "Le tue storie"}
           </Text>
         </Pressable>
 

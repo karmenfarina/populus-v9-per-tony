@@ -433,6 +433,21 @@ export type SharedFeud = {
   category_label?: string | null;
 };
 
+// Snapshot of a story the DM refers to. Attached by the backend when
+// a user replies to a story so the chat can render a tappable preview
+// that reopens the original story viewer as long as expires_at > now.
+export type StoryRef = {
+  story_id: string;
+  author_id: string;
+  feud_id?: string | null;
+  feud_title?: string | null;
+  feud_image_url?: string | null;
+  category_label?: string | null;
+  comment?: string | null;
+  created_at?: string | null;
+  expires_at?: string | null;
+};
+
 export type ChatMessage = {
   message_id: string;
   conversation_id: string;
@@ -441,7 +456,8 @@ export type ChatMessage = {
   text: string | null;
   image_data: string | null;
   shared_feud?: SharedFeud | null;
-  kind: 'text' | 'image' | 'mixed' | 'shared_feud';
+  story_ref?: StoryRef | null;
+  kind: 'text' | 'image' | 'mixed' | 'shared_feud' | 'story_reply';
   reactions: Record<string, string>;
   created_at: string;
   read_at: string | null;

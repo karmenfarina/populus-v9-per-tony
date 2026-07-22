@@ -453,6 +453,62 @@ export default function ChatScreen() {
                 </Text>
               ) : (
                 <>
+                  {item.story_ref ? (
+                    (() => {
+                      const s = item.story_ref!;
+                      const expiresAt = s.expires_at ? new Date(s.expires_at).getTime() : 0;
+                      const stillActive = expiresAt > Date.now();
+                      const openStory = () => {
+                        if (!stillActive) return;
+                        router.push({
+                          pathname: "/stories/viewer/[userId]",
+                          params: {
+                            userId: s.author_id,
+                            from: "messages",
+                            messagesUserId: String(userId || ""),
+                          },
+                        } as any);
+                      };
+                      return (
+                        <Pressable
+                          onPress={openStory}
+                          disabled={!stillActive}
+                          style={[styles.sharedFeudCard, !stillActive && { opacity: 0.55 }]}
+                          testID={`msg-story-ref-${bubbleId}`}
+                        >
+                          {s.feud_image_url ? (
+                            <Image
+                              source={{ uri: s.feud_image_url }}
+                              style={styles.sharedFeudImg}
+                            />
+                          ) : (
+                            <View style={[styles.sharedFeudImg, { backgroundColor: colors.surfaceSecondary, alignItems: "center", justifyContent: "center" }]}>
+                              <Ionicons name="images-outline" size={40} color={colors.muted} />
+                            </View>
+                          )}
+                          <View style={styles.sharedFeudBody}>
+                            <Text style={styles.sharedFeudCat} numberOfLines={1}>
+                              {stillActive ? "RISPOSTA A STORIA" : "STORIA SCADUTA"}
+                            </Text>
+                            <Text style={styles.sharedFeudTitle} numberOfLines={3}>
+                              {s.feud_title || "Storia"}
+                            </Text>
+                            {stillActive ? (
+                              <View style={styles.sharedFeudCta}>
+                                <Ionicons name="play-circle-outline" size={14} color={colors.brandPrimary} />
+                                <Text style={styles.sharedFeudCtaTxt}>RIVEDI LA STORIA</Text>
+                              </View>
+                            ) : (
+                              <View style={styles.sharedFeudCta}>
+                                <Ionicons name="time-outline" size={14} color={colors.muted} />
+                                <Text style={[styles.sharedFeudCtaTxt, { color: colors.muted }]}>NON PIÙ DISPONIBILE</Text>
+                              </View>
+                            )}
+                          </View>
+                        </Pressable>
+                      );
+                    })()
+                  ) : null}
                   {item.shared_feud ? (
                     <Pressable
                       onPress={() => router.push({

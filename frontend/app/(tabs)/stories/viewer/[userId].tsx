@@ -79,14 +79,22 @@ type Story = {
 };
 
 function timeAgo(iso: string): string {
+  // Backend serialises timestamps via `_iso_utc` which appends 'Z' for
+  // naive datetimes stripped by Mongo, so `new Date(iso).getTime()`
+  // correctly interprets them as UTC. Diff is in local time zone-agnostic
+  // milliseconds.
+  if (!iso) return "";
   const then = new Date(iso).getTime();
+  if (!Number.isFinite(then)) return "";
   const diff = Math.max(0, Date.now() - then);
+  const secs = Math.floor(diff / 1000);
+  if (secs < 45) return "adesso";
   const mins = Math.floor(diff / 60000);
-  if (mins < 1) return "adesso";
-  if (mins < 60) return `${mins}m`;
+  if (mins < 60) return `${mins} min fa`;
   const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h`;
-  return `${Math.floor(hours / 24)}g`;
+  if (hours < 24) return `${hours}h fa`;
+  const days = Math.floor(hours / 24);
+  return `${days}g fa`;
 }
 
 export default function StoriesViewer() {

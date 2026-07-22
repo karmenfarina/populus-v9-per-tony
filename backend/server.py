@@ -4503,6 +4503,17 @@ def _serialize_message(m: dict) -> dict:
         out['created_at'] = _iso_utc(out['created_at'])
     if isinstance(out.get('read_at'), datetime):
         out['read_at'] = _iso_utc(out['read_at'])
+    # story_ref timestamps live nested — normalize them too so the
+    # frontend can decide whether the referenced story is still
+    # viewable (expires_at > now) or has already faded.
+    sref = out.get('story_ref')
+    if isinstance(sref, dict):
+        exp = sref.get('expires_at')
+        if isinstance(exp, datetime):
+            sref['expires_at'] = _iso_utc(exp)
+        created = sref.get('created_at')
+        if isinstance(created, datetime):
+            sref['created_at'] = _iso_utc(created)
     out.pop('_id', None)
     return out
 
@@ -5952,10 +5963,9 @@ async def toggle_hidden_viewer(viewer_id: str, body: dict, user: dict = Depends(
 
 @api_router.post('/stories/{story_id}/reply')
 async def reply_to_story(story_id: str, body: StoryReplyBody, user: dict = Depends(get_current_user)):
-    """Send a DM to the story author with a pre-formatted preamble
-    referencing the story's feud. This is the "answer to a story" flow
-    familiar from Instagram — the reply lands directly in the author's
-    inbox with attached context.
+    """Send a DM to the story author. The reply message carries a
+    `story_ref` snapshot so the recipient's chat renders a tappable
+    preview linking back to the story (as long as it's still active).
     """
     story = await db.stories.find_one({'story_id': story_id}, {'_id': 0})
     if not story:
@@ -5966,27 +5976,42 @@ async def reply_to_story(story_id: str, body: StoryReplyBody, user: dict = Depen
         raise HTTPException(status_code=403, detail='Non puoi rispondere a questa storia')
     if story['user_id'] == user['user_id']:
         raise HTTPException(status_code=400, detail='Non puoi rispondere alla tua stessa storia')
-    # Reuse the existing DM pipeline. The message text carries a small
-    # inline reference so the recipient sees "risposta alla tua storia".
-    feud = await db.feuds.find_one({'feud_id': story.get('feud_id')}, {'_id': 0, 'title': 1})
-    ref_title = (feud or {}).get('title') or 'una tua storia'
-    dm_text = f"[Risposta alla storia: {ref_title}]\n\n{body.text.strip()}"
-    # Delegate to the same send_message logic. Rather than duplicating
-    # the moderation + throttle code we import via a tiny helper.
-    result = await _send_dm_internal(sender_id=user['user_id'], recipient_id=story['user_id'], text=dm_text)
+    # Build the story snapshot the recipient will see in chat. Server-
+    # side lookup so the client can't spoof title/image.
+    feud = await db.feuds.find_one(
+        {'feud_id': story.get('feud_id')},
+        {'_id': 0, 'feud_id': 1, 'title': 1, 'image_url': 1, 'category': 1, 'category_label': 1},
+    )
+    story_ref = {
+        'story_id': story['story_id'],
+        'author_id': story['user_id'],
+        'feud_id': story.get('feud_id'),
+        'feud_title': (feud or {}).get('title'),
+        'feud_image_url': (feud or {}).get('image_url'),
+        'category_label': (feud or {}).get('category_label'),
+        'comment': story.get('comment') or '',
+        'created_at': story.get('created_at'),
+        'expires_at': story.get('expires_at'),
+    }
+    result = await _send_dm_internal(
+        sender_id=user['user_id'],
+        recipient_id=story['user_id'],
+        text=body.text.strip(),
+        story_ref=story_ref,
+    )
     return {'ok': True, 'message': result}
 
 
-async def _send_dm_internal(sender_id: str, recipient_id: str, text: str) -> dict:
+async def _send_dm_internal(sender_id: str, recipient_id: str, text: str,
+                            story_ref: Optional[dict] = None) -> dict:
     """Backend-only helper mirroring the public `POST /messages/send`
     route behaviour so story replies share the exact same delivery,
     blocking, moderation AND CONVERSATION-INDEX rules as regular DMs.
 
-    The earlier version of this helper wrote directly to `db.messages`
-    without touching `db.conversations`. Because
-    `GET /api/messages/conversations` lists rooms out of the conversation
-    index (not by scanning messages), story replies never showed up in
-    the recipient's inbox — they were silently dropped from the UI.
+    Optional `story_ref` attaches a snapshot of the story the reply
+    refers to (story_id, feud_id, feud_title, image, comment, timestamps)
+    so the chat UI can render a tappable preview that opens the original
+    story viewer while it's still available.
     """
     if sender_id == recipient_id:
         raise HTTPException(status_code=400, detail='Non puoi rispondere alla tua stessa storia')
@@ -6015,7 +6040,8 @@ async def _send_dm_internal(sender_id: str, recipient_id: str, text: str) -> dic
         'text': clean,
         'image_data': None,
         'shared_feud': None,
-        'kind': 'text',
+        'story_ref': story_ref,
+        'kind': 'story_reply' if story_ref else 'text',
         'reactions': {},
         'created_at': now,
         'read_at': None,
@@ -6023,6 +6049,11 @@ async def _send_dm_internal(sender_id: str, recipient_id: str, text: str) -> dic
     }
     await db.messages.insert_one(doc)
     preview = _preview_text(clean, False, None)
+    if story_ref:
+        # Nicer inbox preview: prefix with a small hint the reply refers
+        # to a story.
+        base = '💬 Risposta alla storia'
+        preview = (clean.strip() + ' · ' + base)[:120] if clean.strip() else base
     await db.conversations.update_one(
         {'conversation_id': conv['conversation_id']},
         {'$set': {
