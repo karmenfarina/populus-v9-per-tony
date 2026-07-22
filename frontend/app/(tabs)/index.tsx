@@ -12,40 +12,6 @@ import { useAuth } from "@/src/auth/AuthContext";
 import { colors, spacing, font } from "@/src/theme";
 import FeudCard from "@/src/components/FeudCard";
 import StoriesBar from "@/src/components/StoriesBar";
-import AdBanner from "@/src/ads/AdBanner";
-
-// How many feud cards between two consecutive in-feed banners. 5 is
-// the industry sweet-spot (Instagram ~7, Twitter ~5, Reddit ~4) —
-// dense enough to matter for eCPM, sparse enough to feel editorial
-// rather than spammy.
-const AD_INTERVAL = 5;
-
-// Discriminated union used by the FlatList once we interleave banners
-// into the feud list. Keeping it local so it doesn't leak into other
-// feeds that use the raw `Feud` type unchanged.
-type FeedRow =
-  | { kind: "feud"; feud: Feud }
-  | { kind: "ad"; adId: string };
-
-/**
- * Interleave AdMob banner rows into the feud list every AD_INTERVAL
- * items. The first ad appears AFTER position AD_INTERVAL so the top
- * of the feed is always editorial (better first-impression + Google
- * policy: no ad-only content above the fold).
- */
-function withAds(feuds: Feud[]): FeedRow[] {
-  const rows: FeedRow[] = [];
-  feuds.forEach((f, i) => {
-    rows.push({ kind: "feud", feud: f });
-    // Only insert an ad AFTER we've shown at least AD_INTERVAL feuds
-    // AND there's still content coming below it — never end the feed
-    // with a dangling ad.
-    if ((i + 1) % AD_INTERVAL === 0 && i !== feuds.length - 1) {
-      rows.push({ kind: "ad", adId: `ad-${i + 1}` });
-    }
-  });
-  return rows;
-}
 
 const ALL_CAT = { id: "all", label: "Tutte" };
 const HYPE_CAT = { id: "hype", label: "🔥 Hype" };
@@ -341,8 +307,8 @@ export default function HomeFeed() {
       ) : (
         <View style={{ flex: 1 }} {...(isWeb ? webPan.panHandlers : {})}>
         <FlatList
-          data={withAds(feuds)}
-          keyExtractor={(row) => (row.kind === "feud" ? row.feud.feud_id : row.adId)}
+          data={feuds}
+          keyExtractor={(f) => f.feud_id}
           contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xxxl }}
           ItemSeparatorComponent={() => <View style={{ height: spacing.lg }} />}
           refreshControl={<RefreshControl refreshing={pullRefreshing} onRefresh={onRefresh} tintColor={colors.brandSecondary} colors={[colors.brandSecondary]} />}
@@ -360,21 +326,9 @@ export default function HomeFeed() {
               <Text style={styles.empty}>NESSUNA FAIDA IN QUESTA CATEGORIA.</Text>
             </View>
           }
-          renderItem={({ item }) =>
-            item.kind === "feud" ? (
-              <FeudCard feud={item.feud} onPress={() => router.push(`/feud/${item.feud.feud_id}`)} />
-            ) : Platform.OS === "web" ? (
-              // Skip the whole disclosure slot on web — there's no
-              // AdMob banner underneath so the label would sit alone
-              // as visual noise.
-              null
-            ) : (
-              <View style={styles.adSlot} testID={`ad-slot-${item.adId}`}>
-                <Text style={styles.adSlotLabel}>PUBBLICITÀ</Text>
-                <AdBanner placement={`home-feed-${item.adId}`} />
-              </View>
-            )
-          }
+          renderItem={({ item }) => (
+            <FeudCard feud={item} onPress={() => router.push(`/feud/${item.feud_id}`)} />
+          )}
         />
         </View>
       )}
@@ -408,23 +362,4 @@ const styles = StyleSheet.create({
   chipTextActive: { color: colors.onBrandSecondary, fontWeight: "500" },
   center: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.xxl },
   empty: { fontSize: font.sizes.xl, color: colors.onSurface, letterSpacing: 1 },
-  // In-feed ad slot. AdMob policy requires a clear disclosure label
-  // ("PUBBLICITÀ") directly adjacent to the ad so users can
-  // distinguish editorial from commercial content.
-  adSlot: {
-    borderTopWidth: 1,
-    borderBottomWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
-    paddingVertical: spacing.xs,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  adSlotLabel: {
-    fontSize: 9,
-    fontWeight: "700",
-    letterSpacing: 1.5,
-    color: colors.muted,
-    marginBottom: 2,
-  },
 });

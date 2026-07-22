@@ -16,6 +16,7 @@ import FeudStatsModal from "@/src/components/FeudStatsModal";
 import AiFactionSummaryModal from "@/src/components/AiFactionSummaryModal";
 import ShareSheet from "@/src/components/ShareSheet";
 import InAppShareSheet from "@/src/components/InAppShareSheet";
+import AdBanner from "@/src/ads/AdBanner";
 import { useUIPrefs } from "@/src/ui/UIPrefs";
 import { useAuth } from "@/src/auth/AuthContext";
 
@@ -480,9 +481,18 @@ export default function FeudDetail() {
             </View>
           )}
 
-          {/* Category-mapped sponsors moved back to the home feed
-              intercalation. On feud detail we keep a lean layout —
-              no full-width banner between the article and the poll. */}
+          {/* In-feud ad slot — roughly mid-way through the article,
+              right before the poll. This is where the original mock
+              "sponsor" box sat in the previous design. Web: whole slot
+              is skipped (no banner would render underneath and the
+              disclosure label would sit alone as visual noise). */}
+          {Platform.OS !== "web" && (
+            <View style={styles.inFeudAdSlot} testID="ad-slot-feud-detail">
+              <Text style={styles.inFeudAdLabel}>PUBBLICITÀ</Text>
+              <AdBanner placement="feud-detail" />
+            </View>
+          )}
+
           <View style={styles.pollWrap}>
             <Text style={styles.question}>{feud.question}</Text>
             <View style={styles.pollSplit}>
@@ -907,6 +917,25 @@ const styles = StyleSheet.create({
   sponsorHeadline: { fontSize: font.sizes.lg, color: colors.onBrandSecondary, lineHeight: 22 },
   sponsorCta: { alignSelf: "flex-start", borderWidth: 2, borderColor: colors.border, backgroundColor: colors.surfaceInverse, paddingVertical: spacing.xs, paddingHorizontal: spacing.md, marginTop: spacing.xs },
   sponsorCtaTxt: { color: colors.onSurfaceInverse, fontSize: font.sizes.sm, letterSpacing: 2, fontWeight: "500" },
+  // In-feud ad slot — full-width band sandwiched between the article
+  // body and the poll. AdMob policy requires a visible disclosure
+  // ("PUBBLICITÀ") directly adjacent to the ad.
+  inFeudAdSlot: {
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    paddingVertical: spacing.xs,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  inFeudAdLabel: {
+    fontSize: 9,
+    fontWeight: "700",
+    letterSpacing: 1.5,
+    color: colors.muted,
+    marginBottom: 2,
+  },
   pollWrap: { padding: spacing.lg, backgroundColor: colors.surfaceInverse, borderBottomWidth: 2, borderColor: colors.border },
   question: { color: colors.onSurfaceInverse, fontSize: font.sizes.xl, letterSpacing: 0.5, marginBottom: spacing.md, textAlign: "center" },
   pollSplit: { flexDirection: "row", borderWidth: 2, borderColor: colors.border },
