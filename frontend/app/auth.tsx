@@ -204,8 +204,20 @@ export default function AuthScreen() {
                 <Text style={styles.verifyBody}>
                   Ti abbiamo inviato un link di verifica a{"\n"}
                   <Text style={{ fontWeight: "700" }}>{pendingVerify}</Text>{"\n\n"}
-                  Clicca sul link per attivare l&apos;account. Se non lo trovi, controlla la cartella spam.
+                  Clicca sul link per attivare l&apos;account.
                 </Text>
+                <View style={styles.spamWarning} testID="verify-spam-warning">
+                  <Ionicons name="warning" size={20} color={colors.brandPrimary} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.spamTitle}>NON TROVI L&apos;EMAIL?</Text>
+                    <Text style={styles.spamBody}>
+                      Controlla la cartella <Text style={{ fontWeight: "700" }}>Spam</Text> o{" "}
+                      <Text style={{ fontWeight: "700" }}>Promozioni</Text>. Il mittente è{" "}
+                      <Text style={{ fontWeight: "700" }}>noreply@populus-1f567.firebaseapp.com</Text>.
+                      Segnala come &quot;Non spam&quot; per ricevere le prossime email.
+                    </Text>
+                  </View>
+                </View>
                 {error && <Text style={styles.error}>{error}</Text>}
                 <Pressable
                   onPress={doResend}
@@ -284,6 +296,16 @@ export default function AuthScreen() {
                   onChangeText={setConfirmPassword}
                   secureTextEntry
                 />
+              )}
+              {isSignup && (
+                <View style={styles.signupHint} testID="signup-spam-hint">
+                  <Ionicons name="information-circle" size={16} color={colors.brandPrimary} />
+                  <Text style={styles.signupHintTxt}>
+                    Dopo la registrazione riceverai un&apos;email di verifica.{" "}
+                    <Text style={{ fontWeight: "700" }}>Controlla anche lo spam</Text>{" "}
+                    o le promozioni se non la trovi in posta.
+                  </Text>
+                </View>
               )}
             </View>
           )}
@@ -381,4 +403,43 @@ const styles = StyleSheet.create({
   ctaTxt: { color: colors.onBrandPrimary, letterSpacing: 2, fontWeight: "500", textAlign: "center" },
   verifyBack: { marginTop: spacing.sm, alignItems: "center" },
   verifyBackTxt: { color: colors.muted, fontSize: font.sizes.sm, textDecorationLine: "underline" },
+  spamWarning: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: spacing.sm,
+    borderWidth: 2,
+    borderColor: colors.brandPrimary,
+    backgroundColor: colors.surface,
+    padding: spacing.md,
+    marginTop: spacing.md,
+    marginBottom: spacing.sm,
+  },
+  spamTitle: {
+    color: colors.brandPrimary,
+    fontSize: font.sizes.sm,
+    letterSpacing: 1,
+    fontWeight: "700",
+    marginBottom: 4,
+  },
+  spamBody: {
+    color: colors.onSurface,
+    fontSize: font.sizes.xs,
+    lineHeight: 18,
+  },
+  signupHint: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: spacing.xs,
+    padding: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceSecondary,
+    marginTop: spacing.xs,
+  },
+  signupHintTxt: {
+    flex: 1,
+    color: colors.onSurface,
+    fontSize: font.sizes.xs,
+    lineHeight: 16,
+  },
 });
