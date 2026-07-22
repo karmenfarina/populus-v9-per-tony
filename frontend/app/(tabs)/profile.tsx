@@ -90,6 +90,13 @@ export default function Profile() {
   // Category badges collection modal — opens when the user taps the
   // main alignment badge (or its label) on the profile.
   const [badgesOpen, setBadgesOpen] = useState(false);
+
+  // Scroll-position preservation across tab focus changes. The
+  // ScrollView resets to top by default when the Profile tab is
+  // re-focused — we track the last offset in a ref and restore it
+  // via `useFocusEffect` after Layout is done.
+  const scrollRef = useRef<ScrollView>(null);
+  const scrollYRef = useRef(0);
   const [photos, setPhotos] = useState<UserPhoto[]>([]);
   const [loadingPhotos, setLoadingPhotos] = useState(false);
   const [bio, setBio] = useState<string>("");
@@ -203,6 +210,22 @@ export default function Profile() {
     useCallback(() => {
       if (uid && !isAnon) loadBlocked();
     }, [uid, isAnon, loadBlocked])
+  );
+
+  // On tab re-focus, restore the ScrollView to the exact offset the
+  // user had before leaving. React Native's ScrollView loses its
+  // internal offset on unmount (which happens when a tab is swapped
+  // out of the view tree), so we push it back manually. Small delay
+  // via requestAnimationFrame ensures layout has committed first.
+  useFocusEffect(
+    useCallback(() => {
+      const y = scrollYRef.current;
+      if (y > 0) {
+        requestAnimationFrame(() => {
+          scrollRef.current?.scrollTo({ y, animated: false });
+        });
+      }
+    }, []),
   );
 
   // Mount / auth-ready refresh: if the user was still loading when the
@@ -715,7 +738,14 @@ export default function Profile() {
 
   return (
     <SafeAreaView style={styles.safe} edges={["top"]} testID="profile-screen">
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView
+        ref={scrollRef}
+        contentContainerStyle={styles.content}
+        onScroll={(e) => { scrollYRef.current = e.nativeEvent.contentOffset.y; }}
+        // 16ms throttle is enough to persist the offset without
+        // adding perceptible lag to the scroll gesture.
+        scrollEventThrottle={16}
+      >
         <View style={styles.header}>
           <View style={styles.headerRow}>
             {isAnonymous ? (

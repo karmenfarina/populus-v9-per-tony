@@ -11,10 +11,12 @@ import {
   KeyboardAvoidingView,
   Platform,
   Modal,
+  Dimensions,
+  type GestureResponderEvent,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
 import { api } from "@/src/api";
 import { useAuth } from "@/src/auth/AuthContext";
 import { colors, spacing, font } from "@/src/theme";
@@ -167,43 +169,46 @@ export default function StoriesViewer() {
   }, [userId]);
 
   // Single global interval that ticks 20 times a second, driving the
-  // progress bar of the CURRENT story and auto-advancing when it
-  // reaches 100%. Because everything reads from refs, we never need
-  // to restart the interval on story change.
-  useEffect(() => {
-    if (loading || stories.length === 0) return;
-    const TICK_MS = 50;
-    const INCREMENT = TICK_MS / STORY_DURATION_MS;
-    const timer = setInterval(() => {
-      // If the interval already scheduled an auto-close on the final
-      // story, freeze — otherwise every tick would schedule ANOTHER
-      // close and stack navigation would get flooded.
-      if (autoCloseFiredRef.current) {
-        clearInterval(timer);
-        return;
-      }
-      if (pausedRef.current) return;
-      setProgress((p) => {
-        const next = p + INCREMENT;
-        if (next >= 1) {
-          // Time's up — auto-advance to the next story in the queue.
-          const currentIdx = idxRef.current;
-          if (currentIdx + 1 >= storiesRef.current.length) {
-            // End of queue → close viewer, but ONLY once.
-            autoCloseFiredRef.current = true;
-            clearInterval(timer);
-            closeViewer();
-            return 1;
-          }
-          setIdx(currentIdx + 1);
-          return 0;
+  // progress bar of the CURRENT story. Uses `useFocusEffect` (not
+  // useEffect) so the timer PAUSES when the user leaves this screen
+  // (e.g. taps into a feud detail page) and RESUMES cleanly on
+  // return — otherwise the progress bar would appear frozen after
+  // coming back from a feud because either (a) the interval was
+  // torn down and never re-started, or (b) it kept running while
+  // the viewer was off-screen and closed the viewer prematurely.
+  useFocusEffect(
+    useCallback(() => {
+      if (loading || stories.length === 0) return;
+      // Reset the auto-close guard whenever the screen regains focus
+      // so a viewer we came back to can still complete + close.
+      autoCloseFiredRef.current = false;
+      const TICK_MS = 50;
+      const INCREMENT = TICK_MS / STORY_DURATION_MS;
+      const timer = setInterval(() => {
+        if (autoCloseFiredRef.current) {
+          clearInterval(timer);
+          return;
         }
-        return next;
-      });
-    }, TICK_MS);
-    return () => clearInterval(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, stories.length]);
+        if (pausedRef.current) return;
+        setProgress((p) => {
+          const next = p + INCREMENT;
+          if (next >= 1) {
+            const currentIdx = idxRef.current;
+            if (currentIdx + 1 >= storiesRef.current.length) {
+              autoCloseFiredRef.current = true;
+              clearInterval(timer);
+              closeViewer();
+              return 1;
+            }
+            setIdx(currentIdx + 1);
+            return 0;
+          }
+          return next;
+        });
+      }, TICK_MS);
+      return () => clearInterval(timer);
+    }, [loading, stories.length, closeViewer]),
+  );
 
   // Reset progress every time the user manually navigates to a new
   // story (either via tap or after auto-advance).
@@ -223,6 +228,17 @@ export default function StoriesViewer() {
     if (idx === 0) { setProgress(0); return; }
     setIdx(idx - 1);
     setProgress(0);
+  };
+
+  // Tap on the body decides prev/next based on the horizontal
+  // position of the touch. Nested Pressables (the "APRI LA FAIDA"
+  // CTA) claim their own taps first via RN's responder hierarchy, so
+  // this ONLY fires when the user tapped somewhere OTHER than the
+  // CTA button — i.e. the story visual area or the empty side space.
+  const onBodyPress = (e: GestureResponderEvent) => {
+    const screenW = Dimensions.get("window").width;
+    const x = e.nativeEvent.pageX;
+    if (x < screenW / 2) goPrev(); else goNext();
   };
 
   const goNext = () => {
@@ -366,36 +382,25 @@ export default function StoriesViewer() {
           </Pressable>
         </View>
 
-        {/* Body — tap zones layered underneath the interactive card */}
-        <View style={styles.body}>
-          {/* Invisible tap zones on left/right thirds for prev/next */}
-          <Pressable
-            onPress={goPrev}
-            onLongPress={onLongPressStart}
-            onPressOut={onLongPressEnd}
-            style={[styles.tapZone, { left: 0 }]}
-            testID="story-tap-prev"
-          />
-          <Pressable
-            onPress={goNext}
-            onLongPress={onLongPressStart}
-            onPressOut={onLongPressEnd}
-            style={[styles.tapZone, { right: 0 }]}
-            testID="story-tap-next"
-          />
-
-          {/* Feud card — pure visual, pointer-events disabled so taps
-              anywhere on it fall through to the underlying prev/next
-              tap zones. The "APRI LA FAIDA" button is rendered as a
-              SIBLING outside the card so it can still grab its own
-              touches. This structure guarantees identical behaviour
-              on both web and native, unlike box-none which has subtle
-              cross-platform differences. */}
+        {/* Body wraps everything in a single Pressable that decides
+            prev/next based on the tap X coordinate. Nested Pressables
+            inside (the "APRI LA FAIDA" CTA) intercept their own taps
+            first thanks to React Native's native touch responder
+            hierarchy — the outer onPress only fires when NO nested
+            Pressable claimed the touch. This design guarantees taps
+            anywhere on the screen advance the story, EXCEPT on the
+            explicit "APRI LA FAIDA" button. */}
+        <Pressable
+          onPress={onBodyPress}
+          onLongPress={onLongPressStart}
+          onPressOut={onLongPressEnd}
+          style={styles.body}
+          testID="story-body"
+        >
           {/* Card + CTA wrapped in a container that has the horizontal
               padding — the outer `body` deliberately has NO padding so
-              the tap zones underneath extend all the way to the screen
-              edges. */}
-          <View style={styles.cardWrap} pointerEvents="box-none">
+              taps at the very edges of the screen still register. */}
+          <View style={styles.cardWrap}>
           <View style={[styles.card, { pointerEvents: "none" as any }]}>
             {currentStory.feud ? (
               <>
