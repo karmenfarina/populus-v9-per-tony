@@ -63,8 +63,8 @@ type LocalStoryGroup = {
 // Bar dims kept in constants so the parent screen can compute paddings
 // without duplicating magic numbers.
 export const STORIES_BAR_HEIGHT = 108;
-const CIRCLE_SIZE = 56;
-const RING_WIDTH = 2.5;
+const CIRCLE_SIZE = 66;
+const RING_WIDTH = 3;
 
 // NOTE: we intentionally do NOT persist the collapsed/expanded choice
 // across app launches. Product decision: every fresh app session
@@ -261,7 +261,7 @@ export default function StoriesBar() {
                 <View style={{ flex: 1 }} />
                 <Ionicons
                   name="chevron-down"
-                  size={18}
+                  size={16}
                   color={colors.brandPrimary}
                 />
               </View>
@@ -272,15 +272,15 @@ export default function StoriesBar() {
             <View style={styles.pillNeutral}>
               <Ionicons
                 name="albums-outline"
-                size={16}
+                size={14}
                 color={colors.muted}
-                style={{ marginRight: 8 }}
+                style={{ marginRight: 6 }}
               />
               <Text style={styles.pillLabelNeutral} numberOfLines={1}>
                 Storie
               </Text>
               <View style={{ flex: 1 }} />
-              <Ionicons name="chevron-down" size={18} color={colors.muted} />
+              <Ionicons name="chevron-down" size={16} color={colors.muted} />
             </View>
           )}
         </Pressable>
@@ -466,24 +466,24 @@ export default function StoriesBar() {
 
 const styles = StyleSheet.create({
   container: {
-    // Expanded strip. Slimmer than the original: circle 56 px + tight
-    // padding. The header still sits on top so the user can spot the
-    // "Nuove storie" cue and toggle the collapse.
+    // Expanded strip. Height derived from padding + circle + label.
+    // Left untouched: user asked to slim the COLLAPSED pill only,
+    // not the expanded strip with the story circles.
     backgroundColor: colors.surface,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
-    paddingTop: 2,
+    paddingTop: 4,
   },
   expandedHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: spacing.md,
-    paddingBottom: 2,
+    paddingBottom: 4,
   },
   expandedHeaderLabel: {
     color: colors.muted,
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: "600",
     letterSpacing: 0.4,
     textTransform: "uppercase",
@@ -493,79 +493,81 @@ const styles = StyleSheet.create({
   },
   // -------- Collapsed pill --------
   // Same visual band as the expanded strip, but drastically shorter.
-  // Sits directly below the category chips.
+  // Product ask: keep this pill as slim as possible so it doesn't
+  // steal vertical real estate from the feed. The expanded strip
+  // above uses its original circle/padding sizes untouched.
   collapsedContainer: {
     backgroundColor: colors.surface,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
+    paddingVertical: 6,
   },
   pillPressable: {
     width: "100%",
   },
-  // Gradient wrapper acts as the 1.5px "glowing" border. The inner
+  // Gradient wrapper acts as the 1px "glowing" border. The inner
   // View paints the actual pill background on top of it.
   pillGradient: {
-    borderRadius: 20,
-    padding: 1.5,
+    borderRadius: 16,
+    padding: 1,
   },
   pillInner: {
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: colors.surface,
-    borderRadius: 18.5,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    borderRadius: 15,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
   },
   pillDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+    width: 6,
+    height: 6,
+    borderRadius: 3,
     backgroundColor: colors.brandPrimary,
-    marginRight: 10,
+    marginRight: 8,
   },
   pillLabelHighlight: {
     color: colors.brandPrimary,
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: "700",
     letterSpacing: 0.3,
   },
   pillCountBadge: {
-    marginLeft: 8,
-    minWidth: 20,
-    height: 20,
-    paddingHorizontal: 6,
-    borderRadius: 10,
+    marginLeft: 6,
+    minWidth: 18,
+    height: 18,
+    paddingHorizontal: 5,
+    borderRadius: 9,
     backgroundColor: colors.brandPrimary,
     alignItems: "center",
     justifyContent: "center",
   },
   pillCountText: {
     color: "#fff",
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: "700",
-    lineHeight: 13,
+    lineHeight: 12,
   },
   pillNeutral: {
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: colors.surfaceSecondary || colors.surfaceTertiary,
-    borderRadius: 20,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
   },
   pillLabelNeutral: {
     color: colors.muted,
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: "600",
     letterSpacing: 0.3,
   },
   scrollBody: {
     paddingHorizontal: spacing.md,
     alignItems: "center",
-    gap: spacing.sm + 2,
-    paddingBottom: 6,
+    gap: spacing.md,
+    paddingBottom: 8,
   },
   item: {
     width: CIRCLE_SIZE + 12,
@@ -619,18 +621,19 @@ const styles = StyleSheet.create({
   },
   avatarInitials: {
     color: colors.onSurface,
-    // Scales with the smaller CIRCLE_SIZE (was 22 for 66 px). Keep
-    // the same ratio so the letters still visually center.
-    fontSize: 18,
+    fontSize: 22,
     fontWeight: "700",
     letterSpacing: 0.5,
-    lineHeight: 20,
+    // Keep the letters visually centered even when the descender is
+    // taller than the ascender (works around the RN-Web baseline
+    // being higher than native).
+    lineHeight: 24,
     textAlign: "center",
     includeFontPadding: false,
   },
   label: {
-    marginTop: 3,
-    fontSize: 10,
+    marginTop: 4,
+    fontSize: 11,
     color: colors.onSurface,
     maxWidth: CIRCLE_SIZE + 12,
     textAlign: "center",
