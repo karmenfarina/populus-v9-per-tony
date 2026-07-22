@@ -7,7 +7,7 @@ import {
   Image,
   StyleSheet,
   ActivityIndicator,
-  Alert,
+  Modal,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter, useFocusEffect } from "expo-router";
@@ -63,6 +63,11 @@ export default function StoriesBar() {
   const { user } = useAuth();
   const [groups, setGroups] = useState<StoryGroup[]>([]);
   const [loading, setLoading] = useState(true);
+  // Cross-platform info sheet — Alert.alert was causing subtle state
+  // corruption on React Native Web (subsequent tab taps briefly showed
+  // their content, then bounced back to home). A plain <Modal> is
+  // deterministic on both web and native.
+  const [helpOpen, setHelpOpen] = useState(false);
   const isAnon = user?.is_anonymous === true || (user as any)?.auth_provider === "anonymous";
 
   const load = useCallback(async () => {
@@ -99,22 +104,15 @@ export default function StoriesBar() {
 
   const openComposerOrMine = () => {
     // If I have any active story, open the viewer over my own strip
-    // so I can rewatch/delete. Otherwise show a short explainer alert
-    // — stories are ALWAYS created from a specific feud via the share
-    // sheet, so there's nothing meaningful to do from this button
-    // beyond pointing the user to that flow.
+    // so I can rewatch/delete. Otherwise show a small, custom help
+    // sheet — stories are ALWAYS created from a specific feud via
+    // the share sheet, so there's nothing meaningful to do from this
+    // button beyond pointing the user to that flow.
     const myGroup = groups.find((g) => g.is_mine);
     if (myGroup && myGroup.stories.length > 0) {
       openViewer(myGroup.user_id);
     } else {
-      // Explain the flow rather than dumping the user into /archive
-      // (which was misleading — the user had to also find the share
-      // button on a feud). One informative alert is friendlier.
-      Alert.alert(
-        "Come pubblicare una storia",
-        "Apri una faida che ti interessa, tocca il pulsante Condividi e scegli \"Aggiungi alla tua storia\".",
-        [{ text: "Ho capito" }],
-      );
+      setHelpOpen(true);
     }
   };
 
@@ -186,6 +184,32 @@ export default function StoriesBar() {
           </Pressable>
         ))}
       </ScrollView>
+
+      {/* Explainer sheet for the "no stories yet" case. Uses a normal
+          Modal instead of Alert.alert to avoid the RN-Web edge case
+          where subsequent tab taps flicker back to home. */}
+      <Modal
+        visible={helpOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setHelpOpen(false)}
+      >
+        <Pressable style={styles.helpBackdrop} onPress={() => setHelpOpen(false)}>
+          <Pressable style={styles.helpSheet} onPress={() => { /* consume */ }}>
+            <Text style={styles.helpTitle}>Come pubblicare una storia</Text>
+            <Text style={styles.helpBody}>
+              Apri una faida che ti interessa, tocca il pulsante Condividi e scegli &quot;Aggiungi alla tua storia&quot;.
+            </Text>
+            <Pressable
+              onPress={() => setHelpOpen(false)}
+              style={styles.helpOkBtn}
+              testID="stories-help-ok"
+            >
+              <Text style={styles.helpOkTxt}>HO CAPITO</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -268,5 +292,44 @@ const styles = StyleSheet.create({
     color: colors.onSurface,
     maxWidth: CIRCLE_SIZE + 12,
     textAlign: "center",
+  },
+  helpBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: spacing.lg,
+  },
+  helpSheet: {
+    backgroundColor: colors.surface,
+    borderRadius: 12,
+    padding: spacing.lg,
+    maxWidth: 360,
+    width: "100%",
+  },
+  helpTitle: {
+    color: colors.onSurface,
+    fontSize: 16,
+    fontWeight: "700",
+    marginBottom: spacing.sm,
+  },
+  helpBody: {
+    color: colors.muted,
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: spacing.md,
+  },
+  helpOkBtn: {
+    alignSelf: "flex-end",
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    backgroundColor: colors.brandPrimary,
+    borderRadius: 6,
+  },
+  helpOkTxt: {
+    color: colors.onBrandPrimary,
+    fontSize: 12,
+    fontWeight: "700",
+    letterSpacing: 1.5,
   },
 });
