@@ -105,6 +105,27 @@ export default function StoriesViewer() {
   // multiple buttons does NOT render properly on React Native Web.
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
 
+  // Ref set the moment we start closing the viewer — every timer /
+  // interval callback checks this and short-circuits so we never
+  // schedule a second `router.back()` (which used to pile up dozens
+  // of GO_BACK calls when auto-advancing the last story).
+  const closedRef = useRef(false);
+
+  const closeViewer = useCallback(() => {
+    if (closedRef.current) return;
+    closedRef.current = true;
+    // Use router.replace on web where GO_BACK is broken for tab
+    // screens with href:null (RN Web logs "GO_BACK was not handled").
+    // On native `router.back()` is the right call.
+    if (Platform.OS === "web") {
+      router.replace("/" as any);
+    } else if ((router as any).canGoBack?.()) {
+      router.back();
+    } else {
+      router.replace("/" as any);
+    }
+  }, [router]);
+
   // Stories ref keeps the latest array reachable from the interval
   // callback without stale-closure captures.
   const storiesRef = useRef<Story[]>([]);
@@ -124,7 +145,7 @@ export default function StoriesViewer() {
       const r: any = await api.storiesByUser(userId as string);
       const rows: Story[] = r?.stories || [];
       if (!rows.length) {
-        setTimeout(() => router.back(), 100);
+        setTimeout(() => closeViewer(), 100);
         return;
       }
       setStories(rows);
@@ -133,11 +154,11 @@ export default function StoriesViewer() {
       setProgress(0);
     } catch (e: any) {
       Alert.alert("Errore", e?.message || "Impossibile caricare le storie");
-      router.back();
+      closeViewer();
     } finally {
       setLoading(false);
     }
-  }, [userId, router]);
+  }, [userId, closeViewer]);
 
   useEffect(() => {
     load();
@@ -153,6 +174,13 @@ export default function StoriesViewer() {
     const TICK_MS = 50;
     const INCREMENT = TICK_MS / STORY_DURATION_MS;
     const timer = setInterval(() => {
+      // If the viewer is already being torn down, do NOT process any
+      // more ticks — otherwise setState + router calls pile up and
+      // corrupt the navigation history.
+      if (closedRef.current) {
+        clearInterval(timer);
+        return;
+      }
       if (pausedRef.current) return;
       setProgress((p) => {
         const next = p + INCREMENT;
@@ -160,8 +188,10 @@ export default function StoriesViewer() {
           // Time's up — auto-advance to the next story in the queue.
           const currentIdx = idxRef.current;
           if (currentIdx + 1 >= storiesRef.current.length) {
-            // End of queue → close viewer.
-            setTimeout(() => router.back(), 30);
+            // End of queue → close viewer. Guard against multiple
+            // scheduled closes with `closedRef` inside `closeViewer`.
+            clearInterval(timer);
+            closeViewer();
             return 1;
           }
           setIdx(currentIdx + 1);
@@ -196,7 +226,7 @@ export default function StoriesViewer() {
 
   const goNext = () => {
     if (idx + 1 >= stories.length) {
-      router.back();
+      closeViewer();
       return;
     }
     setIdx(idx + 1);
@@ -250,7 +280,7 @@ export default function StoriesViewer() {
     try {
       await api.deleteStory(currentStory.story_id);
       if (remaining <= 0) {
-        router.back();
+        closeViewer();
         return;
       }
       setStories((prev) => prev.filter((_, i) => i !== toDeleteIdx));
@@ -330,7 +360,7 @@ export default function StoriesViewer() {
               <Ionicons name="trash-outline" size={20} color="#fff" />
             </Pressable>
           ) : null}
-          <Pressable onPress={() => router.back()} style={styles.headerBtn} testID="story-close">
+          <Pressable onPress={closeViewer} style={styles.headerBtn} testID="story-close">
             <Ionicons name="close" size={26} color="#fff" />
           </Pressable>
         </View>
@@ -360,7 +390,7 @@ export default function StoriesViewer() {
               touches. This structure guarantees identical behaviour
               on both web and native, unlike box-none which has subtle
               cross-platform differences. */}
-          <View style={styles.card} pointerEvents="none">
+          <View style={[styles.card, { pointerEvents: "none" as any }]}>
             {currentStory.feud ? (
               <>
                 {currentStory.feud.image_url ? (
