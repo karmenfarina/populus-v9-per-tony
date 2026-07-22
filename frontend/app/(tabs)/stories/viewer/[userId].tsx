@@ -142,7 +142,26 @@ export default function StoriesViewer() {
   // those must always work even after an auto-advance close attempt.
   const autoCloseFiredRef = useRef(false);
 
-  const closeViewer = useCallback(() => {
+  // Track in-flight view-mark promises so the close handler can wait
+  // for them to settle before releasing navigation — Home's refetch
+  // would otherwise race the DB write and keep showing "unseen" for a
+  // story we just watched.
+  const pendingViewMarksRef = useRef<Set<Promise<any>>>(new Set());
+
+  const closeViewer = useCallback(async () => {
+    // Give any pending mark-viewed writes up to 400ms to hit the DB.
+    // We DON'T want to freeze the UI indefinitely on a bad network,
+    // hence the timeout race — 400ms is enough for the local backend
+    // in practice and imperceptible to users.
+    try {
+      const pending = Array.from(pendingViewMarksRef.current);
+      if (pending.length > 0) {
+        await Promise.race([
+          Promise.all(pending),
+          new Promise((resolve) => setTimeout(resolve, 400)),
+        ]);
+      }
+    } catch { /* ignore */ }
     // On web `router.back()` for tabs with `href:null` prints a
     // GO_BACK-not-handled warning and does nothing, so we use replace.
     // On native `router.back()` is preferred to keep the natural nav
@@ -505,12 +524,22 @@ export default function StoriesViewer() {
   // story (either via tap or after auto-advance).
   useEffect(() => { setProgress(0); }, [idx]);
 
-  // Fire the view-mark exactly once per story. Fire-and-forget — no
-  // error handling because a missed mark just means the author's
-  // "seen by" count is one lower, no user-visible impact.
+  // Track in-flight view-mark promises so the close/back handler can
+  // wait for them to settle before letting the Home tab refetch its
+  // stories feed. Without this the ring on Home could still say
+  // "unseen" for a story we JUST watched — the mark-view request
+  // hadn't hit the DB yet when `list_stories_feed` was queried.
+  // (Ref itself is declared next to `closeViewer` further up.)
+
+  // Fire the view-mark exactly once per story. Fire-and-forget from
+  // the UI's perspective but tracked in a ref so `closeViewer` can
+  // await pending marks and guarantee the strip refreshes with
+  // up-to-date has_unseen flags.
   useEffect(() => {
     if (!currentStory || currentStory.viewed) return;
-    api.markStoryViewed(currentStory.story_id).catch(() => { /* noop */ });
+    const p = api.markStoryViewed(currentStory.story_id).catch(() => { /* noop */ });
+    pendingViewMarksRef.current.add(p);
+    p.finally(() => pendingViewMarksRef.current.delete(p));
     setStories((prev) => prev.map((s, i) => (i === idxRef.current ? { ...s, viewed: true } : s)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentStory?.story_id]);
