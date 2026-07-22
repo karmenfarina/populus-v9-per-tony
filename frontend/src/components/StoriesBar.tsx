@@ -9,7 +9,6 @@ import {
   ActivityIndicator,
   Modal,
 } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
 import { useRouter, useFocusEffect } from "expo-router";
 import { api } from "@/src/api";
 import { useAuth } from "@/src/auth/AuthContext";
@@ -223,14 +222,13 @@ export default function StoriesBar() {
                 const raw = myGroup?.author?.avatar
                   ?? (user?.photos && user.photos[0]?.data ? user.photos[0].data : null);
                 if (!raw) {
-                  // No profile picture and no active story avatar. A
-                  // plain empty gray circle read as a "broken image
-                  // placeholder" to users, especially next to the "+"
-                  // add badge. Render initials from the user's display
-                  // name / nickname instead — same pattern used by
-                  // Instagram, WhatsApp and Gmail when there's no
-                  // avatar. Never crashes: `getInitials` degrades to
-                  // "?" for unknown labels.
+                  // No profile picture and no active story avatar.
+                  // A plain empty gray circle read as a "broken image
+                  // placeholder" to users. Render initials from the
+                  // user's display name / nickname instead — same
+                  // pattern used by Instagram, WhatsApp and Gmail
+                  // when there's no avatar. Never crashes:
+                  // `getInitials` degrades to "?" for unknown labels.
                   const initials = getInitials(
                     (user as any)?.display_name || user?.nickname || "?"
                   );
@@ -245,14 +243,12 @@ export default function StoriesBar() {
                 const uri = raw.startsWith("data:") ? raw : `data:image/jpeg;base64,${raw}`;
                 return <Image source={{ uri }} style={styles.avatar} />;
               })()}
-              {/* Only reveal the "+" affordance AFTER first load resolved
-                  and we know for sure the user has no active story yet.
-                  Otherwise it flashes on then off during initial render. */}
-              {firstLoadDone && (!myGroup || myGroup.stories.length === 0) && (
-                <View style={styles.plusBadge}>
-                  <Ionicons name="add" size={14} color="#fff" />
-                </View>
-              )}
+              {/* Removed the red "+" badge overlay — user feedback:
+                  it read as visual noise, especially over the initials
+                  fallback. The affordance is now carried by the label
+                  underneath ("Aggiungi storia" when the user has none,
+                  "Tua storia" when they do), matching the modern
+                  Instagram pattern. */}
             </View>
           </AnimatedStoryRing>
           <Text style={styles.label} numberOfLines={1}>
@@ -262,7 +258,7 @@ export default function StoriesBar() {
               ? "Le tue storie"
               : myGroup && myGroup.stories.length > 0
               ? "Tua storia"
-              : "Le tue storie"}
+              : "Aggiungi storia"}
           </Text>
         </Pressable>
 
@@ -294,9 +290,7 @@ export default function StoriesBar() {
                 ) : (
                   // Initials fallback — same pattern as the "my ring"
                   // case above. Empty gray circles read as broken
-                  // image placeholders and looked especially wrong on
-                  // circles owned by other users where there's no "+"
-                  // badge to explain them.
+                  // image placeholders.
                   <View style={[styles.avatar, styles.avatarFallback]}>
                     <Text style={styles.avatarInitials} allowFontScaling={false}>
                       {getInitials(
@@ -402,8 +396,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     // Slightly warmer tone than `surfaceTertiary` so the initials
-    // pop and the circle no longer reads as an empty image
-    // placeholder next to the red "+" badge.
+    // pop and the circle reads as an intentional avatar placeholder,
+    // not a broken image.
     backgroundColor: colors.surfaceSecondary || colors.surfaceTertiary,
   },
   avatarInitials: {
@@ -417,19 +411,6 @@ const styles = StyleSheet.create({
     lineHeight: 24,
     textAlign: "center",
     includeFontPadding: false,
-  },
-  plusBadge: {
-    position: "absolute",
-    right: 0,
-    bottom: 0,
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: colors.brandPrimary,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 2,
-    borderColor: colors.surface,
   },
   label: {
     marginTop: 4,
