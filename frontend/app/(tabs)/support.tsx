@@ -12,13 +12,31 @@ import { useAuth } from "@/src/auth/AuthContext";
 
 const CATEGORIES = [
   { id: "Bug", label: "Bug o malfunzionamento" },
-  { id: "Contenuto inappropriato", label: "Contenuto inappropriato" },
-  { id: "Suggerimento", label: "Suggerimento" },
+  { id: "Login o verifica email", label: "Login o verifica email" },
+  { id: "Contenuto inappropriato", label: "Contenuto inappropriato o segnalazione" },
+  { id: "Cerchia del Gossip", label: "Problema con la Cerchia" },
+  { id: "Stories o Spille", label: "Problema con Stories o Spille" },
+  { id: "Pubblicità", label: "Problema con la pubblicità" },
+  { id: "Suggerimento", label: "Suggerimento o richiesta" },
   { id: "Account", label: "Problema con l'account" },
+  { id: "Privacy", label: "Privacy o dati personali" },
   { id: "Altro", label: "Altro" },
 ];
-const FREQUENCIES = ["Prima volta", "Occasionale", "Frequente"];
-const SECTIONS = ["Home", "Faida", "Profilo", "Notifiche", "Archivio", "Altro"];
+const FREQUENCIES = ["Prima volta", "Occasionale", "Frequente", "Blocca l'app"];
+const SECTIONS = [
+  "Home / Faide del giorno",
+  "Dettaglio faida (chat, voto, HYPE)",
+  "Stories",
+  "Cerchia del Gossip",
+  "Spille (Badges)",
+  "Profilo",
+  "Ricerca",
+  "Notifiche",
+  "Archivio",
+  "Login / Registrazione",
+  "Altro",
+];
+const DEVICES = ["iOS", "Android", "Web / Browser"];
 
 export default function SupportScreen() {
   const router = useRouter();
@@ -27,6 +45,9 @@ export default function SupportScreen() {
   const [category, setCategory] = useState<string | null>(null);
   const [frequency, setFrequency] = useState<string | null>(null);
   const [section, setSection] = useState<string | null>(null);
+  // Device chip row helps triage bugs quickly — iOS/Android/Web behave
+  // very differently for AdMob, Firebase Auth redirects and Stories.
+  const [device, setDevice] = useState<string | null>(null);
   const [description, setDescription] = useState("");
   const [contactEmail, setContactEmail] = useState("");
   const [sending, setSending] = useState(false);
@@ -37,6 +58,7 @@ export default function SupportScreen() {
     if (!category) return "Seleziona una categoria del problema.";
     if (!frequency) return "Indica la frequenza del problema.";
     if (!section) return "Indica la sezione dell'app in cui si verifica.";
+    if (!device) return "Indica su quale dispositivo hai riscontrato il problema.";
     if (description.trim().length < 10) return "Descrivi il problema con almeno 10 caratteri.";
     if (contactEmail.trim() && !/^\S+@\S+\.\S+$/.test(contactEmail.trim())) {
       return "L'email di contatto non è valida.";
@@ -49,9 +71,13 @@ export default function SupportScreen() {
     if (v) { setErr(v); return; }
     setErr(null); setSending(true);
     try {
+      // Prepend device tag to the description so the support admin sees
+      // it in the email/ticket even though the backend schema doesn't
+      // have a dedicated device field.
+      const descWithDevice = `[Dispositivo: ${device}]\n\n${description.trim()}`;
       await api.submitSupport({
         category: category!,
-        description: description.trim(),
+        description: descWithDevice,
         frequency: frequency!,
         section: section!,
         contact_email: contactEmail.trim() || undefined,
@@ -172,6 +198,30 @@ export default function SupportScreen() {
             ))}
           </View>
 
+          <Text style={styles.label}>Su quale dispositivo?</Text>
+          <View style={styles.chipsWrap}>
+            {DEVICES.map((d) => (
+              <Pressable
+                key={d}
+                testID={`support-dev-${d}`}
+                onPress={() => setDevice(d)}
+                style={[styles.chip, device === d && styles.chipOn]}
+              >
+                <Text style={[styles.chipTxt, device === d && styles.chipTxtOn]}>{d}</Text>
+              </Pressable>
+            ))}
+          </View>
+
+          {category === "Login o verifica email" && (
+            <View style={styles.tipBox} testID="support-tip-verify">
+              <Ionicons name="information-circle" size={16} color={colors.brandPrimary} />
+              <Text style={styles.tipTxt}>
+                Se non ricevi l&apos;email di verifica, controlla la cartella
+                spam/promozioni. Le email arrivano da &quot;noreply@populus-1f567.firebaseapp.com&quot;.
+              </Text>
+            </View>
+          )}
+
           <Text style={styles.label}>Descrivi il problema</Text>
           <TextInput
             value={description}
@@ -247,4 +297,20 @@ const styles = StyleSheet.create({
   homeBtnTxt: { color: colors.onBrandPrimary, letterSpacing: 2, fontWeight: "500" },
   anonLockCircle: { width: 120, height: 120, borderRadius: 60, borderWidth: 2, borderColor: colors.brandSecondary, alignItems: "center", justifyContent: "center", backgroundColor: colors.surfaceInverse, marginBottom: spacing.sm },
   anonSecondaryTxt: { color: colors.muted, fontSize: font.sizes.xs, letterSpacing: 1, marginTop: spacing.sm, textDecorationLine: "underline" },
+  tipBox: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: spacing.xs,
+    borderWidth: 2,
+    borderColor: colors.brandPrimary,
+    backgroundColor: colors.surfaceSecondary,
+    padding: spacing.sm,
+    marginTop: spacing.xs,
+  },
+  tipTxt: {
+    flex: 1,
+    color: colors.onSurface,
+    fontSize: font.sizes.xs,
+    lineHeight: 18,
+  },
 });
