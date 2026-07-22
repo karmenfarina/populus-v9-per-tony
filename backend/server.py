@@ -906,10 +906,21 @@ async def google_session(body: GoogleSessionBody, authorization: Optional[str] =
         }
         await db.users.insert_one(user)
 
-    await db.user_sessions.insert_one({
-        'session_token': session_token, 'user_id': user_id,
-        'created_at': now_utc(), 'expires_at': now_utc() + timedelta(days=7),
-    })
+    # Upsert instead of insert to gracefully handle the same session_token being
+    # returned twice by Emergent OAuth (which triggers a DuplicateKeyError and
+    # crashes the login flow with a 500 for the user).
+    await db.user_sessions.update_one(
+        {'session_token': session_token},
+        {
+            '$set': {
+                'session_token': session_token,
+                'user_id': user_id,
+                'created_at': now_utc(),
+                'expires_at': now_utc() + timedelta(days=7),
+            }
+        },
+        upsert=True,
+    )
     return {'token': session_token, 'user': _public_user(user)}
 
 

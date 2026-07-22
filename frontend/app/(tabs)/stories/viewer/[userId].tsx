@@ -19,6 +19,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
 import { api } from "@/src/api";
 import { useAuth } from "@/src/auth/AuthContext";
+import { useStoryUpload } from "@/src/stories/StoryUploadContext";
 import { colors, spacing, font } from "@/src/theme";
 
 /**
@@ -101,6 +102,7 @@ export default function StoriesViewer() {
   const router = useRouter();
   const { userId: initialUserId, startAt: initialStartAt } = useLocalSearchParams<{ userId: string; startAt?: string }>();
   const { user: me } = useAuth();
+  const { notifyStoryViewed } = useStoryUpload();
   // Current user whose stories are being played. Initialised from the
   // route param but then swapped INTERNALLY when the user reaches the
   // end of a chain (goes to next user) or taps back from story 0
@@ -537,7 +539,16 @@ export default function StoriesViewer() {
   // up-to-date has_unseen flags.
   useEffect(() => {
     if (!currentStory || currentStory.viewed) return;
-    const p = api.markStoryViewed(currentStory.story_id).catch(() => { /* noop */ });
+    const p = api.markStoryViewed(currentStory.story_id)
+      .then(() => {
+        // Notify globally so the Home strip refetches and the ring
+        // transitions from "unseen" (colored) to "seen" (grey) right
+        // after the viewer closes — even if the tab focus event
+        // never fires (which happens with certain nested nav stacks
+        // where the parent tab stays mounted the whole time).
+        notifyStoryViewed();
+      })
+      .catch(() => { /* noop */ });
     pendingViewMarksRef.current.add(p);
     p.finally(() => pendingViewMarksRef.current.delete(p));
     setStories((prev) => prev.map((s, i) => (i === idxRef.current ? { ...s, viewed: true } : s)));

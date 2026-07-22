@@ -83,7 +83,7 @@ export default function StoriesBar() {
   // composer via context. While true my ring keeps spinning even
   // after the feed itself finished loading — that's the whole point
   // of the loading state (Instagram-style).
-  const { isUploading } = useStoryUpload();
+  const { isUploading, viewedTick } = useStoryUpload();
   // Cross-platform info sheet — Alert.alert was causing subtle state
   // corruption on React Native Web (subsequent tab taps briefly showed
   // their content, then bounced back to home). A plain <Modal> is
@@ -91,7 +91,7 @@ export default function StoriesBar() {
   const [helpOpen, setHelpOpen] = useState(false);
   const isAnon = user?.is_anonymous === true || (user as any)?.auth_provider === "anonymous";
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (opts?: { silent?: boolean }) => {
     if (!user?.user_id || isAnon) {
       setGroups([]);
       setLoading(false);
@@ -99,10 +99,12 @@ export default function StoriesBar() {
       setRingLoading(false);
       return;
     }
-    // Reset the ring-loading gate at the start of every fetch so a
-    // manual refresh (or focus-triggered re-fetch) also plays the
-    // spinner animation for its minimum visible duration.
-    setRingLoading(true);
+    // Reset the ring-loading gate at the start of every FIRST fetch
+    // (or explicit user-initiated refresh) so the spinner animation
+    // plays for its minimum visible duration. Silent refreshes
+    // (e.g. after a story-view) do NOT reset it — otherwise the ring
+    // would re-animate every time and never reach the "loaded" state.
+    if (!opts?.silent) setRingLoading(true);
     try {
       const r: any = await api.storiesFeed();
       setGroups((r?.groups || []) as StoryGroup[]);
@@ -113,10 +115,9 @@ export default function StoriesBar() {
     } finally {
       setLoading(false);
       setFirstLoadDone(true);
-      // Hold the loading ring animation for a minimum visible time
-      // AFTER the fetch resolves — this is what makes the "loading
-      // then loaded" transition perceivable on fast connections.
-      setTimeout(() => setRingLoading(false), 900);
+      if (!opts?.silent) {
+        setTimeout(() => setRingLoading(false), 900);
+      }
     }
   }, [user?.user_id, isAnon]);
 
@@ -125,6 +126,16 @@ export default function StoriesBar() {
       load();
     }, [load]),
   );
+
+  // Refetch the feed EVERY TIME a story is viewed anywhere in the app
+  // (viewer marks it via context). This is what actually flips the
+  // ring from "unseen" → "seen" without waiting for a focus event
+  // that might never fire in nested-nav situations. Silent so the
+  // loading spinner animation doesn't kick in again.
+  useEffect(() => {
+    if (viewedTick === 0) return; // Skip the initial value.
+    load({ silent: true });
+  }, [viewedTick, load]);
 
   // Anonymous users don't see the bar at all — no publishing, no
   // reading. Keeps the home screen cleaner for that account type.
