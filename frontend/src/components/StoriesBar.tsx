@@ -222,11 +222,14 @@ export default function StoriesBar() {
                 const raw = myGroup?.author?.avatar
                   ?? (user?.photos && user.photos[0]?.data ? user.photos[0].data : null);
                 if (!raw) {
-                  return (
-                    <View style={[styles.avatar, styles.avatarFallback]}>
-                      <Ionicons name="person" size={26} color={colors.muted} />
-                    </View>
-                  );
+                  // Plain colored circle instead of an <Ionicons> glyph.
+                  // The icon font hasn't necessarily loaded yet on the
+                  // very first frame, so the browser briefly renders a
+                  // fallback missing-glyph character (looks like an X
+                  // or a stylised hourglass) — the user reported this
+                  // as a "flash before the avatar shows". A neutral
+                  // View avoids that race entirely.
+                  return <View style={[styles.avatar, styles.avatarFallback]} />;
                 }
                 const uri = raw.startsWith("data:") ? raw : `data:image/jpeg;base64,${raw}`;
                 return <Image source={{ uri }} style={styles.avatar} />;
@@ -278,9 +281,10 @@ export default function StoriesBar() {
                 {g.author?.avatar ? (
                   <Image source={{ uri: g.author.avatar }} style={styles.avatar} />
                 ) : (
-                  <View style={[styles.avatar, styles.avatarFallback]}>
-                    <Ionicons name="person" size={26} color={colors.muted} />
-                  </View>
+                  // Plain colored circle (no icon font glyph) — same
+                  // reasoning as the my-ring fallback above: avoids
+                  // the missing-glyph flash before Ionicons loads.
+                  <View style={[styles.avatar, styles.avatarFallback]} />
                 )}
               </View>
             </AnimatedStoryRing>
