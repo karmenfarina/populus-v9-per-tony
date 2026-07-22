@@ -712,34 +712,39 @@ export default function Profile() {
       >
         <View style={styles.header}>
           <View style={styles.headerRow}>
-            {isAnonymous ? (
-              <View style={styles.avatarWrap}>
-                {primaryPhotoUri ? (
-                  <Image source={{ uri: primaryPhotoUri }} style={styles.avatarImg} />
-                ) : primaryPhotoData ? (
-                  <Image source={{ uri: `data:image/jpeg;base64,${primaryPhotoData}` }} style={styles.avatarImg} />
-                ) : (
-                  <View style={[styles.avatarImg, styles.avatarPlaceholder]}>
-                    <Ionicons name="person" size={40} color={colors.brandSecondary} />
-                  </View>
-                )}
-              </View>
-            ) : (
-              <Pressable onPress={openProfileEdit} testID="profile-avatar" style={styles.avatarWrap}>
-                {primaryPhotoUri ? (
-                  <Image source={{ uri: primaryPhotoUri }} style={styles.avatarImg} />
-                ) : primaryPhotoData ? (
-                  <Image source={{ uri: `data:image/jpeg;base64,${primaryPhotoData}` }} style={styles.avatarImg} />
-                ) : (
-                  <View style={[styles.avatarImg, styles.avatarPlaceholder]}>
-                    <Ionicons name="person" size={40} color={colors.brandSecondary} />
-                  </View>
-                )}
-                <View style={styles.avatarEditBadge}>
-                  <Ionicons name="camera" size={12} color={colors.onBrandPrimary} />
+            {/* Immediate avatar source that survives the async
+                `myPhotos()` roundtrip: use `user.primary_photo`
+                hydrated by /auth/me on the very first render. This
+                eliminates the "empty circle → initials → real photo"
+                flash the user was seeing when opening the profile
+                page. */}
+            {(() => {
+              const authPhoto = user?.primary_photo?.data
+                ? `data:${user.primary_photo.mime || "image/jpeg"};base64,${user.primary_photo.data}`
+                : null;
+              const avatarSrc = primaryPhotoUri
+                || (primaryPhotoData ? `data:image/jpeg;base64,${primaryPhotoData}` : null)
+                || authPhoto;
+
+              const inner = avatarSrc ? (
+                <Image source={{ uri: avatarSrc }} style={styles.avatarImg} />
+              ) : (
+                <View style={[styles.avatarImg, styles.avatarPlaceholder]}>
+                  <Ionicons name="person" size={40} color={colors.brandSecondary} />
                 </View>
-              </Pressable>
-            )}
+              );
+
+              return isAnonymous ? (
+                <View style={styles.avatarWrap}>{inner}</View>
+              ) : (
+                <Pressable onPress={openProfileEdit} testID="profile-avatar" style={styles.avatarWrap}>
+                  {inner}
+                  <View style={styles.avatarEditBadge}>
+                    <Ionicons name="camera" size={12} color={colors.onBrandPrimary} />
+                  </View>
+                </Pressable>
+              );
+            })()}
             <View style={{ flex: 1 }}>
               <Text style={styles.nickname} testID="profile-nickname" numberOfLines={1} ellipsizeMode="tail">
                 @{(user.nickname || "").replace(/\s+/g, "")}

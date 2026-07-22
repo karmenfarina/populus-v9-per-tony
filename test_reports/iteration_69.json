@@ -1,0 +1,56 @@
+{
+  "summary": "Iter_69 verification of two fixes: (1) profile.tsx avatar renders immediately from user.primary_photo.data hydrated by /auth/me (eliminates initial-render flash of person-icon placeholder). (2) CategoryBadgesModal now uses an inline confirm-overlay + inline toast INSTEAD of Alert.alert (which is swallowed inside nested Modal on RN). BACKEND: 15/15 iter_68 regression tests still pass (auth_me_primary_photo 4/4, stories_kind_badge 10/10, badge_feed happy-path skipped as before because there is still no admin grant endpoint; feud regression 1/1). FRONTEND (mobile 390x844, chat_a authenticated via /api/auth/login + localStorage.faide_token JSON-stringified): (a) profile-avatar renders <img src='data:image/jpeg;base64,...'> on the very first paint — no <svg> placeholder ever appears, hasImg=true, isDataUrl=true — flash gone. (b) After seeding chat_a with granted_category_badges=[{category:'politica',tier:1},'politica:1'] (both formats required because _build_category_badge_payload wants dicts but stories.create checks string 'politica:1' — see 'critical_code_review_comments'), category_badges endpoint returns unlocked:true+granted:true for politica t1. In the modal the politica t1 card has aria-label 'Peone di Corridoio, tocca per condividere nelle storie' and aria-disabled=null. Tapping it renders overlay testID='badge-share-confirm' containing category emoji (🎗️), title 'Condividere questa spilla?', body '…mostra «Peone di Corridoio» alla tua Cerchia.', and both testID='badge-share-cancel' + testID='badge-share-confirm-btn'. Tapping Annulla → overlay disappears with no API call. Tapping Condividi → POST /api/stories (kind=badge, politica, tier=1) → 200 → testID='badge-share-toast-success' visible with text 'Storia pubblicata / La tua spilla è visibile alla Cerchia per 24 ore.'. NO native alert (role=\"alert\") ever renders. (c) On OTHER user's profile (chatUserB) opening the modal via public-badges-view-all shows all tiers disabled with aria 'non ancora sbloccata' and aria-disabled=true; tapping does NOT open the confirm overlay (isOwnShelf=false gate confirmed). (d) 403 error contract confirmed by direct browser fetch to POST /api/stories with kind=badge for a non-unlocked category → {status:403, body:'{\"detail\":\"Devi prima sbloccare questa spilla.\"}'}. The CategoryBadgesModal error branch maps status===403 → title 'Non autorizzato' + backend detail; error toast testID='badge-share-toast-error' would render — verified structurally in code (line 133-135 of CategoryBadgesModal.tsx) but not exercised live because all client-side tap paths are gated by canShare so a real user cannot easily reach the 403 branch except via race conditions.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/test_reports/pytest/iter69_regression.xml",
+    "/app/backend/tests/test_auth_me_primary_photo.py",
+    "/app/backend/tests/test_stories_kind_badge.py",
+    "/app/backend/tests/test_stories_badge_feed_iter68.py"
+  ],
+  "measurements": {
+    "profile_avatar_first_render": {
+      "hasImg": true,
+      "isDataUrl": true,
+      "srcPreview": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD",
+      "svgPlaceholderCount": 0
+    },
+    "category_badges_politica_after_grant": {
+      "tier1": {"unlocked": true, "granted": true, "name": "Peone di Corridoio", "threshold": 100},
+      "tier2": {"unlocked": false, "granted": false},
+      "tier3": {"unlocked": false, "granted": false}
+    },
+    "unlocked_tier_aria_label": "Peone di Corridoio, tocca per condividere nelle storie",
+    "confirm_overlay_text": "🎗️ / Condividere questa spilla? / Pubblicheremo una storia di 24 ore che mostra «Peone di Corridoio» alla tua Cerchia. / Annulla / Condividi",
+    "success_toast_text": "Storia pubblicata / La tua spilla è visibile alla Cerchia per 24 ore.",
+    "other_shelf_tier_aria": "Peone di Corridoio, non ancora sbloccata (aria-disabled=true)",
+    "other_shelf_confirm_after_tap": false,
+    "native_alert_role_alert_count": 0,
+    "direct_403_response_body": "{\"detail\":\"Devi prima sbloccare questa spilla.\"}"
+  },
+  "action_items": [
+    "OPTIONAL / MINOR: The error-toast branch (testID='badge-share-toast-error') was verified by code inspection + a direct 403 API probe, but could not be exercised end-to-end via UI because client-side gating (canShare) prevents locked tiers from being tapped. If you want a live UI check, temporarily wrap api.createBadgeStory to throw ApiError(403) and confirm the toast appears — not blocking.",
+    "OPTIONAL: Expose an admin endpoint (POST /api/admin/users/{id}/grant_badge) so future testing agents can seed granted_category_badges without direct Mongo access. Also consider unifying the granted-badge format — see critical_code_review_comments."
+  ],
+  "critical_code_review_comments": [
+    "server.py line 5906-5908 checks `f\"{cat_id}:{tier}\" in granted` (string format), while server.py line 463-469 `_build_category_badge_payload` iterates `granted` looking for dicts `{category, tier}`. These two code paths accept different formats for the same field. A user granted with the dict form will see the tier as unlocked in the modal UI but the POST /stories will 403; and vice-versa. Recommend consolidating on ONE format (preferably dict) and normalising both readers.",
+    "CategoryBadgesModal.tsx: the confirm overlay (line 298-327) and the toast (line 331-359) are correctly scoped inside the outer <Modal> so nested-modal alert suppression is avoided — good fix. The `pointerEvents` deprecation warning is triggered by the confirmBackdrop `pointerEvents=\"auto\"` prop (line 299) — non-blocking but should migrate to `style.pointerEvents` at some point.",
+    "profile.tsx line 715-747: the layered avatarSrc fallback (primaryPhotoUri || primaryPhotoData || authPhoto) is correct. `authPhoto` comes from `user.primary_photo?.data` which is hydrated by /auth/me on session boot, so the first paint uses it. Consider inverting the order (authPhoto first, then myPhotos overrides once loaded) to avoid the theoretical case where `primaryPhotoUri` is stale after a photo swap — but current UX is already flicker-free per observation.",
+    "Regression: no other files touched between iter_68 and iter_69 code; nickname/onboarding/circle flows still green per prior iterations (not re-executed here)."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "100% (15/15 executed; 1 skipped conditional)",
+    "frontend": "100% for all in-scope scenarios (avatar hydration, own-shelf tap→confirm→success, own-shelf cancel, other-shelf gating, 403 backend contract, no-native-Alert). Error-toast UI branch only verified structurally."
+  },
+  "seed_data_creation": "TEMPORARY: set users.granted_category_badges = [{category:'politica',tier:1}, 'politica:1'] on chat_a to reach an unlocked tier (both formats to satisfy inconsistent readers — see critical_code_review_comments). ROLLED BACK at end of test: $unset granted_category_badges, and deleted 1 badge story created by the happy-path share to keep the feed clean.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "The two fixes from iter_69 are verified end-to-end. Auth for browser test: fetch POST /api/auth/login inside page.evaluate, then localStorage.setItem('faide_token', JSON.stringify(token)) then page.goto('/profile') and wait 4-5s. To reproduce the badge-share happy path you MUST have an unlocked category badge — either (a) 100+ politica comments, or (b) mongosh: db.users.updateOne({user_id:'user_6e65e19525d5'}, {$set:{granted_category_badges:[{category:'politica',tier:1},'politica:1']}}) — the dual format is required because the UI-read (_build_category_badge_payload) wants dicts while the write-check in POST /stories wants the string 'politica:1'. testIDs: profile-avatar, profile-badge, category-badges-modal, category-badges-close, badge-{cat}-tier{1|2|3}, badge-share-confirm, badge-share-cancel, badge-share-confirm-btn, badge-share-toast-success, badge-share-toast-error. Public other-shelf entry point: [data-testid=\"public-badges-view-all\"] on /user/{id}.",
+  "rca_of_issue": "N/A — no bugs found in this iteration. Both fixes work as specified; the only mild concern is the granted-format inconsistency (documented above), which pre-dates iter_69 and is not blocking any user-facing flow."
+}

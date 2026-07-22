@@ -7,7 +7,6 @@ import {
   ActivityIndicator,
   ScrollView,
   StyleSheet,
-  Alert,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { api, ApiError } from "@/src/api";
@@ -75,54 +74,72 @@ export default function CategoryBadgesModal({ visible, userId, displayName, onCl
   // Which tier the user is currently sharing — used to disable the
   // tap and show an inline spinner without blocking the whole modal.
   const [sharingKey, setSharingKey] = useState<string | null>(null);
+  // Inline confirmation state. We can't use `Alert.alert` here
+  // because this whole component IS a <Modal>, and on RN nested
+  // Modal contexts frequently swallow the native Alert popup — so
+  // the user's tap looks like it does nothing. Rendering our own
+  // confirm sheet inside this modal is the only 100% reliable
+  // feedback path.
+  const [pendingShare, setPendingShare] = useState<
+    | { key: string; categoryId: string; tier: 1 | 2 | 3; tierName: string; color: string; emoji: string }
+    | null
+  >(null);
+  // In-modal toast for post-share feedback (success or error). Same
+  // reasoning as the pendingShare dialog above.
+  const [toast, setToast] = useState<
+    | { kind: "success" | "error"; title: string; message: string }
+    | null
+  >(null);
 
   const shareBadge = useCallback(
-    async (categoryId: string, tier: 1 | 2 | 3, tierName: string) => {
-      // Only owner can share their own badges — enforced on backend
-      // as well, but we don't even show the prompt on other profiles.
+    (categoryId: string, tier: 1 | 2 | 3, tierName: string, color: string, emoji: string) => {
       if (!isOwnShelf) return;
-      const key = `${categoryId}:${tier}`;
-      // Confirm dialog. Uses Alert.alert because this modal isn't
-      // itself nested inside another Modal — safe on iOS/Android/Web.
-      Alert.alert(
-        "Condividere questa spilla?",
-        `Pubblicheremo una storia di 24h che mostra "${tierName}" alla tua Cerchia.`,
-        [
-          { text: "Annulla", style: "cancel" },
-          {
-            text: "Condividi",
-            style: "default",
-            onPress: async () => {
-              setSharingKey(key);
-              try {
-                await api.createBadgeStory(categoryId, tier);
-                setSharingKey(null);
-                Alert.alert(
-                  "Storia pubblicata",
-                  "La tua spilla è ora visibile alla Cerchia per 24 ore.",
-                );
-              } catch (e: any) {
-                setSharingKey(null);
-                const status = e instanceof ApiError ? e.status : 0;
-                const detail = (e?.message || "").trim();
-                let title = "Impossibile pubblicare";
-                let message = detail || "Errore sconosciuto";
-                if (status === 429) {
-                  title = "Limite giornaliero raggiunto";
-                  message = detail || "Hai raggiunto il limite di storie di oggi. Riprova domani.";
-                } else if (status === 403) {
-                  title = "Non autorizzato";
-                  message = detail || "Non puoi condividere questa spilla.";
-                }
-                Alert.alert(title, message);
-              }
-            },
-          },
-        ],
-      );
+      setToast(null);
+      setPendingShare({
+        key: `${categoryId}:${tier}`,
+        categoryId,
+        tier,
+        tierName,
+        color,
+        emoji,
+      });
     },
     [isOwnShelf],
   );
+
+  const confirmShare = useCallback(async () => {
+    if (!pendingShare) return;
+    const { key, categoryId, tier } = pendingShare;
+    setSharingKey(key);
+    setPendingShare(null);
+    try {
+      await api.createBadgeStory(categoryId, tier);
+      setSharingKey(null);
+      setToast({
+        kind: "success",
+        title: "Storia pubblicata",
+        message: "La tua spilla è visibile alla Cerchia per 24 ore.",
+      });
+    } catch (e: any) {
+      setSharingKey(null);
+      const status = e instanceof ApiError ? e.status : 0;
+      const detail = (e?.message || "").trim();
+      let title = "Impossibile pubblicare";
+      let message = detail || "Errore sconosciuto";
+      if (status === 429) {
+        title = "Limite giornaliero raggiunto";
+        message =
+          detail || "Hai raggiunto il limite di storie di oggi. Riprova domani.";
+      } else if (status === 403) {
+        title = "Non autorizzato";
+        message = detail || "Non puoi condividere questa spilla.";
+      } else if (status === 0) {
+        title = "Connessione assente";
+        message = "Impossibile contattare il server. Controlla la connessione.";
+      }
+      setToast({ kind: "error", title, message });
+    }
+  }, [pendingShare]);
 
   const load = useCallback(async () => {
     if (!userId) return;
@@ -223,7 +240,7 @@ export default function CategoryBadgesModal({ visible, userId, displayName, onCl
                       return (
                         <Pressable
                           key={t.tier}
-                          onPress={canShare ? () => shareBadge(cat.category_id, t.tier, t.name) : undefined}
+                          onPress={canShare ? () => shareBadge(cat.category_id, t.tier, t.name, cat.color, t.emoji) : undefined}
                           disabled={!canShare || isSharing}
                           android_ripple={canShare ? { color: "rgba(255,255,255,0.25)", borderless: false } : undefined}
                           style={({ pressed }) => [
@@ -272,6 +289,73 @@ export default function CategoryBadgesModal({ visible, userId, displayName, onCl
               ))}
               <View style={{ height: spacing.xl }} />
             </ScrollView>
+          )}
+
+          {/* Inline confirm dialog — rendered ABOVE the modal content
+              via absolute positioning + backdrop. Using our own
+              overlay instead of Alert.alert because native alerts
+              are swallowed by nested Modals on RN. */}
+          {pendingShare && (
+            <View style={styles.confirmBackdrop} pointerEvents="auto">
+              <View style={styles.confirmSheet} testID="badge-share-confirm">
+                <View style={[styles.confirmEmojiWrap, { backgroundColor: pendingShare.color }]}>
+                  <Text style={styles.confirmEmoji}>{pendingShare.emoji}</Text>
+                </View>
+                <Text style={styles.confirmTitle}>Condividere questa spilla?</Text>
+                <Text style={styles.confirmBody}>
+                  Pubblicheremo una storia di 24 ore che mostra{" "}
+                  <Text style={{ fontWeight: "700" }}>«{pendingShare.tierName}»</Text> alla tua Cerchia.
+                </Text>
+                <View style={styles.confirmRow}>
+                  <Pressable
+                    onPress={() => setPendingShare(null)}
+                    style={[styles.confirmBtn, styles.confirmBtnSecondary]}
+                    testID="badge-share-cancel"
+                  >
+                    <Text style={styles.confirmBtnSecondaryTxt}>Annulla</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={confirmShare}
+                    style={[styles.confirmBtn, styles.confirmBtnPrimary]}
+                    testID="badge-share-confirm-btn"
+                  >
+                    <Text style={styles.confirmBtnPrimaryTxt}>Condividi</Text>
+                  </Pressable>
+                </View>
+              </View>
+            </View>
+          )}
+
+          {/* Post-share toast — same absolute-overlay pattern. Auto
+              dismisses when the user taps anywhere on the sheet. */}
+          {toast && (
+            <Pressable
+              onPress={() => setToast(null)}
+              style={styles.toastBackdrop}
+              testID={toast.kind === "success" ? "badge-share-toast-success" : "badge-share-toast-error"}
+            >
+              <View
+                style={[
+                  styles.toastSheet,
+                  toast.kind === "success" ? styles.toastSuccess : styles.toastError,
+                ]}
+              >
+                <Ionicons
+                  name={toast.kind === "success" ? "checkmark-circle" : "alert-circle"}
+                  size={22}
+                  color={toast.kind === "success" ? "#0F8F4B" : "#B71C1C"}
+                />
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.toastTitle, toast.kind === "error" && { color: "#7F1D1D" }]}>
+                    {toast.title}
+                  </Text>
+                  <Text style={[styles.toastMsg, toast.kind === "error" && { color: "#7F1D1D" }]}>
+                    {toast.message}
+                  </Text>
+                </View>
+                <Ionicons name="close" size={16} color={colors.muted} />
+              </View>
+            </Pressable>
           )}
         </View>
       </View>
@@ -467,5 +551,110 @@ const styles = StyleSheet.create({
     color: colors.brandPrimary,
     fontSize: font.sizes.xs,
     fontWeight: "600",
+  },
+  // ── Inline confirm sheet (Alert.alert replacement) ──
+  confirmBackdrop: {
+    position: "absolute",
+    top: 0, left: 0, right: 0, bottom: 0,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: spacing.lg,
+  },
+  confirmSheet: {
+    width: "100%",
+    maxWidth: 360,
+    backgroundColor: colors.surface,
+    borderRadius: 16,
+    padding: spacing.lg,
+    alignItems: "center",
+    gap: spacing.sm,
+  },
+  confirmEmojiWrap: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 4,
+  },
+  confirmEmoji: {
+    fontSize: 34,
+    lineHeight: 38,
+    textAlign: "center",
+  },
+  confirmTitle: {
+    color: colors.onSurface,
+    fontSize: font.sizes.md,
+    fontWeight: "800",
+    textAlign: "center",
+  },
+  confirmBody: {
+    color: colors.onSurface,
+    fontSize: font.sizes.sm,
+    textAlign: "center",
+    lineHeight: 20,
+  },
+  confirmRow: {
+    flexDirection: "row",
+    gap: spacing.sm,
+    marginTop: spacing.md,
+    width: "100%",
+  },
+  confirmBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 999,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  confirmBtnSecondary: {
+    backgroundColor: colors.surfaceSecondary || colors.surfaceTertiary,
+  },
+  confirmBtnSecondaryTxt: {
+    color: colors.onSurface,
+    fontSize: font.sizes.sm,
+    fontWeight: "700",
+  },
+  confirmBtnPrimary: {
+    backgroundColor: colors.brandPrimary,
+  },
+  confirmBtnPrimaryTxt: {
+    color: "#fff",
+    fontSize: font.sizes.sm,
+    fontWeight: "800",
+  },
+  // ── Inline toast ──
+  toastBackdrop: {
+    position: "absolute",
+    left: 0, right: 0, bottom: 0,
+    padding: spacing.md,
+  },
+  toastSheet: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    padding: spacing.sm + 2,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  toastSuccess: {
+    backgroundColor: "#E6F7EE",
+    borderColor: "#B5E5C6",
+  },
+  toastError: {
+    backgroundColor: "#FDECEA",
+    borderColor: "#F5C2C0",
+  },
+  toastTitle: {
+    color: "#0F5C2E",
+    fontSize: font.sizes.sm,
+    fontWeight: "700",
+    marginBottom: 2,
+  },
+  toastMsg: {
+    color: "#0F5C2E",
+    fontSize: font.sizes.xs,
+    lineHeight: 16,
   },
 });
