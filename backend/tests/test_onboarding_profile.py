@@ -4,7 +4,7 @@ import uuid
 import pytest
 import requests
 
-BASE_URL = "https://faide-poll.preview.emergentagent.com"
+BASE_URL = "https://cerchia-app.preview.emergentagent.com"
 
 
 @pytest.fixture

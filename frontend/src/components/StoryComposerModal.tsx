@@ -14,7 +14,7 @@ import {
   ScrollView,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { api } from "@/src/api";
+import { api, ApiError } from "@/src/api";
 import { useStoryUpload } from "@/src/stories/StoryUploadContext";
 import { colors, spacing, font } from "@/src/theme";
 
@@ -74,7 +74,41 @@ export default function StoryComposerModal({ visible, feud, onClose, onPublished
       // toast once we have a shared toast primitive.
       setTimeout(() => Alert.alert("Storia pubblicata", "La tua storia è ora visibile alla tua Cerchia."), 100);
     } catch (e: any) {
-      Alert.alert("Impossibile pubblicare", e?.message || "Errore sconosciuto");
+      // Map backend errors to human-readable Italian messages with a
+      // context-appropriate title. The `ApiError.status` is set by the
+      // request() helper in `src/api.ts` and mirrors the HTTP status
+      // returned by the server.
+      const status = e instanceof ApiError ? e.status : 0;
+      const detail = (e?.message || "").trim();
+      let title = "Impossibile pubblicare";
+      let message = detail || "Errore sconosciuto";
+      if (status === 429) {
+        // Daily quota exhausted (STORY_DAILY_QUOTA on backend, currently 20).
+        title = "Limite giornaliero raggiunto";
+        message =
+          detail && detail.toLowerCase().includes("limite")
+            ? `${detail}\n\nRiprova domani.`
+            : "Hai raggiunto il limite di storie che puoi pubblicare oggi. Riprova domani.";
+      } else if (status === 403) {
+        title = "Operazione non consentita";
+        message = detail || "Non puoi pubblicare storie con questo account.";
+      } else if (status === 404) {
+        title = "Faida non trovata";
+        message = "La faida che stai cercando di condividere non è più disponibile.";
+      } else if (status === 400) {
+        // Moderation-blocked comment or similar validation error.
+        title = "Contenuto non pubblicabile";
+        message = detail || "Il commento non rispetta le regole della community.";
+      } else if (status === 0) {
+        title = "Connessione assente";
+        message = "Impossibile contattare il server. Controlla la connessione e riprova.";
+      } else if (status >= 500) {
+        title = "Errore del server";
+        message = "Si è verificato un problema sul server. Riprova tra poco.";
+      }
+      // Keep the tech-side breadcrumb for local debug builds; harmless in prod.
+      console.warn("[StoryComposer] publish failed", { status, detail });
+      Alert.alert(title, message);
     } finally {
       setPublishing(false);
       endUpload();

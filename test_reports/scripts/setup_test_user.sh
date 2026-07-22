@@ -1,7 +1,7 @@
 #!/bin/bash
 # Helper to prepare a test user with votes for collapsible-section testing.
 set -e
-BASE="https://faide-poll.preview.emergentagent.com"
+BASE="https://cerchia-app.preview.emergentagent.com"
 EMAIL="TEST_collap_$(date +%s)@test.com"
 PASS="Passw0rd!"
 NICK="collap$(date +%s | tail -c 5)"

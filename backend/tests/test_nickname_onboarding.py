@@ -8,7 +8,7 @@ import uuid
 import pytest
 import requests
 
-BASE_URL = "https://faide-poll.preview.emergentagent.com"
+BASE_URL = "https://cerchia-app.preview.emergentagent.com"
 
 # Pre-verified email users from /app/memory/test_credentials.md
 USER_A = {"email": "chat_a@test.it", "password": "test123"}
