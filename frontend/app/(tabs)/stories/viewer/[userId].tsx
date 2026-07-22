@@ -397,6 +397,24 @@ export default function StoriesViewer() {
     });
   }, [currentUserId, feedOrder]);
 
+  // Prefetch adjacent stories' images so switching between them
+  // (either forward via auto-advance/goNext or backwards via goPrev)
+  // doesn't show a brief empty frame while the network loads the
+  // next feud picture — that was the "blink between posts" the user
+  // was complaining about. Uses RN's Image.prefetch which primes the
+  // cache without touching the current render.
+  useEffect(() => {
+    if (!stories.length) return;
+    const targets = [stories[idx + 1], stories[idx + 2], stories[idx - 1]]
+      .map((s) => s?.feud?.image_url)
+      .filter((u): u is string => !!u);
+    targets.forEach((uri) => {
+      // Image.prefetch is idempotent — hitting the same URL twice is
+      // effectively free once the OS/HTTP cache has the bytes.
+      try { (Image as any).prefetch?.(uri); } catch { /* ignore */ }
+    });
+  }, [stories, idx]);
+
   // Single global interval that ticks 20 times a second, driving the
   // progress bar of the CURRENT story. Uses `useFocusEffect` (not
   // useEffect) so the timer PAUSES when the user leaves this screen

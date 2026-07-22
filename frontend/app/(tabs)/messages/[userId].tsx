@@ -42,6 +42,23 @@ const REACTIONS = ["❤️", "😂", "😮", "😢", "😡", "👍", "👎", "�
  * within a session. Files are stored under expo cacheDirectory (auto-cleaned
  * by the OS).
  */
+/**
+ * Module-level cache of last-fetched messages per `other_user_id`.
+ *
+ * Opening a chat used to flash a full-screen loading spinner before
+ * the messages appeared — that "millisecond of something different"
+ * the user reported. By keeping the last-seen messages in memory (per
+ * session) we can render them INSTANTLY on re-mount and refresh in
+ * the background, matching Instagram/WhatsApp behaviour.
+ */
+type ChatCacheEntry = {
+  other_user: MiniUser;
+  messages: ChatMessage[];
+  i_blocked: boolean;
+  they_blocked: boolean;
+};
+const chatCache: Map<string, ChatCacheEntry> = new Map();
+
 const imageFileCache: Map<string, string> = new Map();
 
 async function resolveImageFile(messageId: string, base64: string): Promise<string> {
@@ -124,13 +141,20 @@ export default function ChatScreen() {
   // Standard back behaviour — respects `?from=…` and Android hardware back.
   const goBackToMessagesList = useSmartBack("/messages");
 
-  const [otherUser, setOtherUser] = useState<MiniUser | null>(null);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Boot from the in-memory cache if we've already fetched this chat
+  // during this session — makes re-opens instant instead of flashing a
+  // full-screen loading spinner.
+  const initialCache = userId ? chatCache.get(String(userId)) : null;
+  const [otherUser, setOtherUser] = useState<MiniUser | null>(initialCache?.other_user ?? null);
+  const [messages, setMessages] = useState<ChatMessage[]>(initialCache?.messages ?? []);
+  // `loading` only gates the full-page spinner. If we already have
+  // cached content we skip the spinner entirely — the background
+  // refetch below runs silently under the visible messages.
+  const [loading, setLoading] = useState(!initialCache);
   const [sending, setSending] = useState(false);
   const [text, setText] = useState("");
-  const [iBlocked, setIBlocked] = useState(false);
-  const [theyBlocked, setTheyBlocked] = useState(false);
+  const [iBlocked, setIBlocked] = useState(initialCache?.i_blocked ?? false);
+  const [theyBlocked, setTheyBlocked] = useState(initialCache?.they_blocked ?? false);
   const [reactTarget, setReactTarget] = useState<ChatMessage | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
@@ -183,6 +207,13 @@ export default function ChatScreen() {
       setMessages(r.messages || []);
       setIBlocked(!!r.i_blocked);
       setTheyBlocked(!!r.they_blocked);
+      // Populate the module cache so the next visit skips the spinner.
+      chatCache.set(String(userId), {
+        other_user: r.other_user,
+        messages: r.messages || [],
+        i_blocked: !!r.i_blocked,
+        they_blocked: !!r.they_blocked,
+      });
       // Mark all incoming as read immediately.
       try {
         await api.markConversationRead(userId);
@@ -200,7 +231,12 @@ export default function ChatScreen() {
     if (!user || user.is_anonymous || !userId) return;
     let mounted = true;
     (async () => {
-      setLoading(true);
+      // Only show the full-screen spinner when we have NOTHING to
+      // render (first-ever visit to this chat this session). If the
+      // cache primed our state we already show messages instantly and
+      // just refresh silently in the background.
+      const hasCached = chatCache.has(String(userId));
+      if (!hasCached) setLoading(true);
       await loadInitial();
       if (mounted) setLoading(false);
     })();
@@ -208,6 +244,19 @@ export default function ChatScreen() {
       mounted = false;
     };
   }, [user, userId, loadInitial]);
+
+  // Keep the module cache in sync with live-updated state so re-opens
+  // reflect any WS events (new messages, reactions, deletes) that
+  // arrived while the user was inside the chat.
+  useEffect(() => {
+    if (!userId || !otherUser) return;
+    chatCache.set(String(userId), {
+      other_user: otherUser,
+      messages,
+      i_blocked: iBlocked,
+      they_blocked: theyBlocked,
+    });
+  }, [userId, otherUser, messages, iBlocked, theyBlocked]);
 
   // Real-time updates for THIS conversation only.
   useEffect(() => {

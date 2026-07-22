@@ -4553,13 +4553,57 @@ async def _mini_user(uid: str) -> dict:
 # --- REST endpoints -----------------------------------------------------------
 @api_router.get('/messages/unread-count')
 async def messages_unread_count(user: dict = Depends(get_current_user)):
+    """Return the count of ACTIONABLE unread messages for the current user.
+
+    A message is actionable only if:
+      1. The user hasn't been blocked by / hasn't blocked the sender.
+      2. The user hasn't cleared the conversation past this message's
+         timestamp (deleted_for cutoff).
+    Messages that fail either test are "phantom" — the user can never
+    surface them in the UI, so counting them here would show a badge
+    the user can't dismiss. This is exactly the "numeretto senza chat"
+    the app was showing before this fix.
+    """
     if user.get('is_anonymous') or user.get('auth_provider') == 'anonymous':
         return {'count': 0}
-    n = await db.messages.count_documents({
-        'recipient_id': user['user_id'],
+    uid = user['user_id']
+    # 1) Collect the sender IDs the user has blocked or been blocked by.
+    blocked_ids: set[str] = set()
+    async for b in db.user_blocks.find(
+        {'$or': [{'blocker_id': uid}, {'blocked_id': uid}]},
+        {'_id': 0, 'blocker_id': 1, 'blocked_id': 1},
+    ):
+        blocked_ids.add(b.get('blocker_id') if b.get('blocked_id') == uid else b.get('blocked_id'))
+    # 2) Collect conversations the user has cleared, with the cutoff.
+    cleared_cutoffs: dict[str, datetime] = {}
+    async for c in db.conversations.find(
+        {'participants': uid, 'deleted_for.' + uid: {'$exists': True}},
+        {'_id': 0, 'conversation_id': 1, 'deleted_for': 1},
+    ):
+        cutoff = (c.get('deleted_for') or {}).get(uid)
+        if isinstance(cutoff, datetime):
+            cleared_cutoffs[c['conversation_id']] = cutoff
+    # 3) Build the base query and stream unread messages, filtering
+    #    on-the-fly so we get a truthful count.
+    base_q: dict = {
+        'recipient_id': uid,
         'read_at': None,
         'deleted': {'$ne': True},
-    })
+    }
+    if blocked_ids:
+        base_q['sender_id'] = {'$nin': list(blocked_ids)}
+    if not cleared_cutoffs:
+        # Fast path — no conversations have been cleared.
+        return {'count': await db.messages.count_documents(base_q)}
+    # Slow path — need per-message cutoff comparison.
+    n = 0
+    async for m in db.messages.find(base_q, {'_id': 0, 'conversation_id': 1, 'created_at': 1}):
+        cid = m.get('conversation_id')
+        created = m.get('created_at')
+        cutoff = cleared_cutoffs.get(cid) if cid else None
+        if isinstance(cutoff, datetime) and isinstance(created, datetime) and created <= cutoff:
+            continue
+        n += 1
     return {'count': n}
 
 

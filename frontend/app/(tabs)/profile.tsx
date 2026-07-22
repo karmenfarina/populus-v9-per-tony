@@ -126,12 +126,15 @@ export default function Profile() {
     } finally { setLoadingH(false); }
   }, []);
 
-  // Centralised logout. `router.dismissAll()` guarantees we escape any
-  // nested history built while browsing the tabs (e.g. Profile → Circle
-  // → back) so that pressing the hardware/software back button on the
-  // auth screen doesn't accidentally return the user into a still-
-  // mounted tab route. If dismissAll isn't available (old runtimes) we
-  // just fall through to `replace("/auth")`.
+  // Centralised logout. On web we hard-reload to /auth after clearing
+  // the token — that guarantees every context, component tree and
+  // navigation stack starts from a blank slate on the next login,
+  // avoiding the class of bugs that surface when a tab route stays
+  // mounted through an auth transition (stale providers, "POP_TO_TOP
+  // not handled" warnings from the router, red-screen on re-login,
+  // etc). On native we keep the SPA-style flow because deep-linked
+  // deep-linking + WebBrowser session results only survive if we
+  // don't tear the JS runtime down mid-flight.
   const doLogout = useCallback(async () => {
     try { await logout(); } catch { /* still navigate away */ }
     // Reset the custom nav stack so a re-login starts from a clean slate.
@@ -139,6 +142,16 @@ export default function Profile() {
       const { navStack } = await import("@/src/utils/navStack");
       navStack.clear();
     } catch { /* noop */ }
+    if (Platform.OS === "web" && typeof window !== "undefined") {
+      // Hard reload — nukes every provider + route + timer that may
+      // have been holding references to the previous user. Prevents
+      // the crash the user was seeing when logging in again right
+      // after signing out from a Google profile.
+      try {
+        window.location.replace("/auth");
+        return;
+      } catch { /* fall through to router.replace below */ }
+    }
     try { (router as any).dismissAll?.(); } catch { /* noop */ }
     router.replace("/auth");
   }, [logout, router]);
