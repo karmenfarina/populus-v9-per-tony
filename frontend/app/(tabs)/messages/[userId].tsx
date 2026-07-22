@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -323,6 +323,15 @@ export default function ChatScreen() {
     scrollToBottom(false);
   }, [messages.length, scrollToBottom]);
 
+  // Reversed copy of the messages array — the FlatList is rendered
+  // with `inverted` so the newest message sits at position 0 (which
+  // is visually the bottom of the screen). Memoized to avoid work on
+  // every render since messages is stable except on WS pushes.
+  const inverseMessages = useMemo(
+    () => messages.slice().reverse(),
+    [messages],
+  );
+
   const send = useCallback(async () => {
     if (sending) return;
     const t = text.trim();
@@ -479,8 +488,12 @@ export default function ChatScreen() {
   const renderMessage = useCallback(
     ({ item, index }: { item: ChatMessage; index: number }) => {
       const mine = user && item.sender_id === user.user_id;
-      const prev = index > 0 ? messages[index - 1] : null;
-      const showDay = !prev || !isSameDay(prev.created_at, item.created_at);
+      // In the inverted list, `index+1` is the CHRONOLOGICALLY OLDER
+      // message (rendered visually ABOVE this one). We show the day
+      // divider on top of any message whose older neighbour is either
+      // missing (oldest overall) or on a different calendar day.
+      const olderNeighbour = index + 1 < inverseMessages.length ? inverseMessages[index + 1] : null;
+      const showDay = !olderNeighbour || !isSameDay(olderNeighbour.created_at, item.created_at);
       const reactions = Object.values(item.reactions || {});
       // Snapshot the item locally so tap handlers can never reference a
       // different message due to FlatList row recycling.
@@ -653,7 +666,7 @@ export default function ChatScreen() {
         </View>
       );
     },
-    [user, messages, openViewerForMessage],
+    [user, inverseMessages, openViewerForMessage],
   );
 
   if (!user || user.is_anonymous) {
@@ -711,11 +724,25 @@ export default function ChatScreen() {
         ) : (
           <FlatList
             ref={listRef}
-            data={messages}
+            // We render the list INVERTED — newest message at the
+            // bottom of the screen, which is also position 0 in an
+            // inverted FlatList. This eliminates the "briefly at the
+            // top, then jump to bottom" glitch the user was seeing:
+            // there's no scroll animation to reach the last message
+            // because the list is already anchored there.
+            inverted
+            data={inverseMessages}
             keyExtractor={(m) => m.message_id}
             renderItem={renderMessage}
             contentContainerStyle={styles.list}
-            onContentSizeChange={() => scrollToBottom(false)}
+            // No scrollToBottom needed with inverted — new messages
+            // being prepended (from a WS push) will already appear
+            // at the bottom automatically. We still call it once on
+            // content size change to snap-to-bottom AFTER the user
+            // has sent a new message while scrolled up.
+            onContentSizeChange={() => {
+              try { listRef.current?.scrollToOffset({ offset: 0, animated: false }); } catch { /* ignore */ }
+            }}
             ListEmptyComponent={
               <View style={styles.emptyChat}>
                 <Ionicons name="chatbubble-outline" size={48} color={colors.muted} />

@@ -14,6 +14,7 @@ import { useRouter, useFocusEffect } from "expo-router";
 import { api } from "@/src/api";
 import { useAuth } from "@/src/auth/AuthContext";
 import { colors, spacing } from "@/src/theme";
+import AnimatedStoryRing from "@/src/components/AnimatedStoryRing";
 
 /**
  * Instagram-style stories strip.
@@ -142,21 +143,32 @@ export default function StoriesBar() {
           style={styles.item}
           testID="stories-bar-mine"
         >
-          <View style={[
-            styles.ring,
-            // Also hold the ring style neutral until first load — the
-            // "unseen" (colored) ring appearing after the fetch is part
-            // of the same visible flash the label and "+" badge cause.
-            firstLoadDone && myGroup?.has_unseen ? styles.ringUnseen : styles.ringMine,
-          ]}>
+          <AnimatedStoryRing
+            size={CIRCLE_SIZE + RING_WIDTH * 2}
+            ringWidth={RING_WIDTH}
+            variant={firstLoadDone && myGroup?.has_unseen ? "unseen" : "mine"}
+          >
             <View style={styles.avatarWrap}>
-              {user?.photos && user.photos[0]?.data ? (
-                <Image source={{ uri: user.photos[0].data }} style={styles.avatar} />
-              ) : (
-                <View style={[styles.avatar, styles.avatarFallback]}>
-                  <Ionicons name="person" size={26} color={colors.muted} />
-                </View>
-              )}
+              {(() => {
+                // Prefer the group's `author.avatar` from /stories/feed
+                // (already normalised to a full data URL on the server)
+                // so my own ring uses the SAME photo the other users
+                // see — the "primary" one, not just position 0. Fall
+                // back to `user.photos[0]?.data` when the feed hasn't
+                // arrived yet, prefixing the raw base64 with the data
+                // URL scheme so <Image source> can actually render it.
+                const raw = myGroup?.author?.avatar
+                  ?? (user?.photos && user.photos[0]?.data ? user.photos[0].data : null);
+                if (!raw) {
+                  return (
+                    <View style={[styles.avatar, styles.avatarFallback]}>
+                      <Ionicons name="person" size={26} color={colors.muted} />
+                    </View>
+                  );
+                }
+                const uri = raw.startsWith("data:") ? raw : `data:image/jpeg;base64,${raw}`;
+                return <Image source={{ uri }} style={styles.avatar} />;
+              })()}
               {/* Only reveal the "+" affordance AFTER first load resolved
                   and we know for sure the user has no active story yet.
                   Otherwise it flashes on then off during initial render. */}
@@ -166,7 +178,7 @@ export default function StoriesBar() {
                 </View>
               )}
             </View>
-          </View>
+          </AnimatedStoryRing>
           <Text style={styles.label} numberOfLines={1}>
             {/* Hold a neutral fallback until first load so the label
                 doesn't visibly flip from "Le tue storie" → "Tua storia". */}
@@ -191,7 +203,11 @@ export default function StoriesBar() {
             style={styles.item}
             testID={`stories-bar-${g.user_id}`}
           >
-            <View style={[styles.ring, g.has_unseen ? styles.ringUnseen : styles.ringSeen]}>
+            <AnimatedStoryRing
+              size={CIRCLE_SIZE + RING_WIDTH * 2}
+              ringWidth={RING_WIDTH}
+              variant={g.has_unseen ? "unseen" : "seen"}
+            >
               <View style={styles.avatarWrap}>
                 {g.author?.avatar ? (
                   <Image source={{ uri: g.author.avatar }} style={styles.avatar} />
@@ -201,7 +217,7 @@ export default function StoriesBar() {
                   </View>
                 )}
               </View>
-            </View>
+            </AnimatedStoryRing>
             <Text style={styles.label} numberOfLines={1}>
               {g.author?.nickname || g.author?.display_name || "utente"}
             </Text>

@@ -5754,25 +5754,31 @@ async def _hydrate_story_row(story: dict, viewer_id: Optional[str]) -> dict:
     # Author profile — minimal projection to keep the payload light.
     author = await db.users.find_one(
         {'user_id': story['user_id']},
-        {'_id': 0, 'user_id': 1, 'nickname': 1, 'display_name': 1, 'photos': 1, 'primary_photo_id': 1},
+        {'_id': 0, 'user_id': 1, 'nickname': 1, 'display_name': 1, 'primary_photo_id': 1},
     )
     if author:
-        photos = author.get('photos') or []
+        # Photos live in the SEPARATE `user_photos` collection — the
+        # `users` doc only carries `primary_photo_id`. Look up the
+        # primary photo row (fallback to any photo owned by the user).
         primary_id = author.get('primary_photo_id')
-        # Pick the primary photo when set, otherwise the first one. The
-        # frontend expects `avatar` to be a data URI string, NOT a photo
-        # object — passing an object silently breaks <Image source>.
-        chosen = None
+        photo_doc = None
         if primary_id:
-            chosen = next((p for p in photos if p.get('photo_id') == primary_id), None)
-        if not chosen and photos:
-            chosen = photos[0]
+            photo_doc = await db.user_photos.find_one(
+                {'photo_id': primary_id, 'user_id': author['user_id']},
+                {'_id': 0, 'data': 1},
+            )
+        if not photo_doc:
+            photo_doc = await db.user_photos.find_one(
+                {'user_id': author['user_id']},
+                {'_id': 0, 'data': 1},
+                sort=[('position', 1)],
+            )
         avatar_uri = None
-        if chosen and chosen.get('data'):
-            data = chosen['data']
-            # Users sometimes store the full data-URL, sometimes just the
-            # base64 payload — normalise to a real URL either way so the
-            # <Image> component can render it directly.
+        if photo_doc and photo_doc.get('data'):
+            data = photo_doc['data']
+            # Some payloads store the full data URL, others just the
+            # raw base64 body. Normalise so <Image source> works either
+            # way — passing an object silently breaks the loader.
             avatar_uri = data if data.startswith('data:') else f"data:image/jpeg;base64,{data}"
         out['author'] = {
             'user_id': author['user_id'],
