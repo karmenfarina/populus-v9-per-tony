@@ -15,6 +15,7 @@ import { api } from "@/src/api";
 import { useAuth } from "@/src/auth/AuthContext";
 import { colors, spacing } from "@/src/theme";
 import AnimatedStoryRing from "@/src/components/AnimatedStoryRing";
+import { useStoryUpload } from "@/src/stories/StoryUploadContext";
 
 /**
  * Instagram-style stories strip.
@@ -78,6 +79,11 @@ export default function StoriesBar() {
   // animation. We hold this true for at least 1500ms after mount so
   // the "loading → loaded" transition is actually noticeable.
   const [ringLoading, setRingLoading] = useState(true);
+  // Global "am I currently publishing a story?" flag driven by the
+  // composer via context. While true my ring keeps spinning even
+  // after the feed itself finished loading — that's the whole point
+  // of the loading state (Instagram-style).
+  const { isUploading } = useStoryUpload();
   // Cross-platform info sheet — Alert.alert was causing subtle state
   // corruption on React Native Web (subsequent tab taps briefly showed
   // their content, then bounced back to home). A plain <Modal> is
@@ -143,7 +149,11 @@ export default function StoriesBar() {
   };
 
   const myGroup = groups.find((g) => g.is_mine) || null;
-  const otherGroups = groups.filter((g) => !g.is_mine);
+  // Only show friends whose stories I haven't seen yet — matches the
+  // user requirement: "quando è stata guardata deve sparire". Users
+  // whose stories are all viewed disappear from the strip until they
+  // post something new (which flips has_unseen back to true).
+  const otherGroups = groups.filter((g) => !g.is_mine && g.has_unseen);
 
   return (
     <View style={styles.container} testID="stories-bar">
@@ -163,10 +173,14 @@ export default function StoriesBar() {
             size={CIRCLE_SIZE + RING_WIDTH * 2}
             ringWidth={RING_WIDTH}
             variant={firstLoadDone && myGroup?.has_unseen ? "unseen" : "mine"}
-            // Spin while the feed is still being fetched, freeze it
-            // afterwards. Gives the "story loading → story loaded"
-            // visual cue the user asked for (Instagram behaviour).
-            loading={ringLoading}
+            // Two conditions animate MY ring:
+            //   1. Very first fetch of the feed on app open — brief
+            //      but honest signal that the strip is still loading.
+            //   2. A publish-story request is in flight (user just
+            //      hit Pubblica in the composer). The ring keeps
+            //      spinning until the server confirms — matches
+            //      Instagram's "story being uploaded" state.
+            loading={ringLoading || isUploading}
           >
             <View style={styles.avatarWrap}>
               {(() => {
@@ -227,9 +241,9 @@ export default function StoriesBar() {
               size={CIRCLE_SIZE + RING_WIDTH * 2}
               ringWidth={RING_WIDTH}
               variant={g.has_unseen ? "unseen" : "seen"}
-              // Only spin while the feed itself is loading. When the
-              // strip has settled the ring becomes a static gradient
-              // so the user can tell "loading" from "ready to tap".
+              // Friends' stories arrive from the server already
+              // uploaded, so they never need the "loading" spinner —
+              // only the initial-fetch phase animates them.
               loading={ringLoading}
             >
               <View style={styles.avatarWrap}>

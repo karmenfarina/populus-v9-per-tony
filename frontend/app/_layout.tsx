@@ -12,6 +12,7 @@ import { AuthProvider } from "@/src/auth/AuthContext";
 import { UIPrefsProvider } from "@/src/ui/UIPrefs";
 import { NotificationsProvider } from "@/src/notifications/NotificationsContext";
 import { MessagingProvider } from "@/src/messaging/MessagingContext";
+import { StoryUploadProvider } from "@/src/stories/StoryUploadContext";
 
 LogBox.ignoreAllLogs(true);
 SplashScreen.preventAutoHideAsync();
@@ -81,7 +82,9 @@ export default function RootLayout() {
           <UIPrefsProvider>
             <NotificationsProvider>
               <MessagingProvider>
-                <Stack screenOptions={{ headerShown: false, animation: "fade" }} />
+                <StoryUploadProvider>
+                  <Stack screenOptions={{ headerShown: false, animation: "fade" }} />
+                </StoryUploadProvider>
               </MessagingProvider>
             </NotificationsProvider>
           </UIPrefsProvider>

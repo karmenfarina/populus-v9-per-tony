@@ -15,6 +15,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "@/src/api";
+import { useStoryUpload } from "@/src/stories/StoryUploadContext";
 import { colors, spacing, font } from "@/src/theme";
 
 /**
@@ -51,12 +52,19 @@ type Props = {
 export default function StoryComposerModal({ visible, feud, onClose, onPublished }: Props) {
   const [comment, setComment] = useState("");
   const [publishing, setPublishing] = useState(false);
+  const { beginUpload, endUpload } = useStoryUpload();
 
   const remaining = COMMENT_MAX - comment.length;
 
   const publish = async () => {
     if (!feud?.feud_id) return;
     setPublishing(true);
+    // Signal the global "story uploading" flag so the StoriesBar can
+    // animate the user's ring for the ENTIRE duration of the upload
+    // (from tap to server confirmation), matching the loading-state
+    // behaviour on Instagram. Local `publishing` continues to gate
+    // the modal's own submit button.
+    beginUpload();
     try {
       await api.createStory(feud.feud_id, comment.trim() || undefined);
       setComment("");
@@ -69,6 +77,7 @@ export default function StoryComposerModal({ visible, feud, onClose, onPublished
       Alert.alert("Impossibile pubblicare", e?.message || "Errore sconosciuto");
     } finally {
       setPublishing(false);
+      endUpload();
     }
   };
 
