@@ -52,12 +52,25 @@ type Props = {
 export default function StoryComposerModal({ visible, feud, onClose, onPublished }: Props) {
   const [comment, setComment] = useState("");
   const [publishing, setPublishing] = useState(false);
+  // In-modal error banner. We can't rely on `Alert.alert` here because
+  // this modal is opened INSIDE the InAppShareSheet's outer Modal — on
+  // React Native, nested Modal contexts frequently swallow Alert popups
+  // (they render behind the modal stack or, on Expo Web, don't show at
+  // all). A visible inline banner is the only 100% reliable feedback.
+  const [errorTitle, setErrorTitle] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const { beginUpload, endUpload } = useStoryUpload();
 
   const remaining = COMMENT_MAX - comment.length;
 
+  const clearError = () => {
+    setErrorTitle(null);
+    setErrorMessage(null);
+  };
+
   const publish = async () => {
     if (!feud?.feud_id) return;
+    clearError();
     setPublishing(true);
     // Signal the global "story uploading" flag so the StoriesBar can
     // animate the user's ring for the ENTIRE duration of the upload
@@ -87,7 +100,7 @@ export default function StoryComposerModal({ visible, feud, onClose, onPublished
         title = "Limite giornaliero raggiunto";
         message =
           detail && detail.toLowerCase().includes("limite")
-            ? `${detail}\n\nRiprova domani.`
+            ? `${detail} Riprova domani.`
             : "Hai raggiunto il limite di storie che puoi pubblicare oggi. Riprova domani.";
       } else if (status === 403) {
         title = "Operazione non consentita";
@@ -108,7 +121,8 @@ export default function StoryComposerModal({ visible, feud, onClose, onPublished
       }
       // Keep the tech-side breadcrumb for local debug builds; harmless in prod.
       console.warn("[StoryComposer] publish failed", { status, detail });
-      Alert.alert(title, message);
+      setErrorTitle(title);
+      setErrorMessage(message);
     } finally {
       setPublishing(false);
       endUpload();
@@ -118,6 +132,7 @@ export default function StoryComposerModal({ visible, feud, onClose, onPublished
   const handleClose = () => {
     if (publishing) return;
     setComment("");
+    clearError();
     onClose();
   };
 
@@ -147,6 +162,23 @@ export default function StoryComposerModal({ visible, feud, onClose, onPublished
               keyboardShouldPersistTaps="handled"
               showsVerticalScrollIndicator={false}
             >
+              {errorMessage ? (
+                <View style={styles.errorBanner} testID="story-composer-error">
+                  <View style={styles.errorIconWrap}>
+                    <Ionicons name="alert-circle" size={22} color="#B71C1C" />
+                  </View>
+                  <View style={styles.errorBody}>
+                    {errorTitle ? (
+                      <Text style={styles.errorTitle}>{errorTitle}</Text>
+                    ) : null}
+                    <Text style={styles.errorMsg}>{errorMessage}</Text>
+                  </View>
+                  <Pressable onPress={clearError} hitSlop={8} style={styles.errorCloseBtn}>
+                    <Ionicons name="close" size={18} color="#B71C1C" />
+                  </Pressable>
+                </View>
+              ) : null}
+
               {feud ? (
                 <View style={styles.preview}>
                   {feud.image_url ? (
@@ -256,6 +288,37 @@ const styles = StyleSheet.create({
   },
   body: {
     paddingBottom: spacing.md,
+  },
+  errorBanner: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    backgroundColor: "#FDECEA",
+    borderWidth: 1,
+    borderColor: "#F5C2C0",
+    borderRadius: 8,
+    padding: spacing.sm,
+    marginBottom: spacing.md,
+    gap: spacing.sm,
+  },
+  errorIconWrap: {
+    paddingTop: 1,
+  },
+  errorBody: {
+    flex: 1,
+  },
+  errorTitle: {
+    color: "#B71C1C",
+    fontSize: font.sizes.sm,
+    fontWeight: "700",
+    marginBottom: 2,
+  },
+  errorMsg: {
+    color: "#7F1D1D",
+    fontSize: font.sizes.xs,
+    lineHeight: 18,
+  },
+  errorCloseBtn: {
+    padding: 2,
   },
   preview: {
     flexDirection: "row",
