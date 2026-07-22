@@ -9,6 +9,36 @@ export const NICKNAME_HINT =
   "Solo lettere minuscole, numeri, punti e underscore (nessuno spazio).";
 
 /**
+ * Compact avatar-fallback initials extracted from whatever human-facing
+ * label we have for a user (display_name, nickname, or a generic "utente"
+ * placeholder). Always returns 1–2 uppercase alphanumeric characters.
+ *
+ * Rules:
+ *   - "Mario Rossi"  -> "MR"
+ *   - "mario_rossi"  -> "MR"  (splits on separators, not just spaces)
+ *   - "mario"        -> "M"
+ *   - "gli.ispettori"-> "GI"
+ *   - unknown/empty  -> "?"
+ *
+ * Used by StoriesBar, avatar chips, and anywhere else we need a stable
+ * placeholder when the user has no profile picture.
+ */
+export function getInitials(name?: string | null): string {
+  const raw = (name || "").trim();
+  if (!raw) return "?";
+  // Split on any run of non-alphanumeric characters — covers spaces,
+  // dots, underscores, dashes.
+  const parts = raw
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((p) => p.length > 0);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) {
+    return parts[0].charAt(0).toLocaleUpperCase();
+  }
+  return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toLocaleUpperCase();
+}
+
+/**
  * Strip anything a user types that isn't an allowed nickname character.
  * Auto-lowercases everything, removes leading '@' if present, and truncates
  * to NICKNAME_MAX to match the backend.

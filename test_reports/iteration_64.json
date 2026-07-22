@@ -1,0 +1,36 @@
+{
+  "summary": "Frontend-only verification of the StoriesBar avatar-fallback bug fix. All primary acceptance criteria PASS. (1) Logged into chat_a@test.it (no profile picture, no active stories) by injecting a valid JWT into localStorage['faide_token'] (JSON.stringify) via add_init_script and cold-reloading — session restored cleanly, no redirect to /auth. (2) The 'Le tue storie' circle now renders the initials 'MR' (Mario Rossi) inside a warm surfaceSecondary background with the red '+' badge overlaid on the bottom-right — exactly the Instagram/WhatsApp/Gmail pattern requested; the previous empty gray circle that looked like a broken image is gone. (3) The other group in the strip (chatUserB / display_name='Mario Rossi TEST', no avatar) now shows 'MT' initials and no '+' badge, confirming the same fallback path fires for otherGroups. (4) getInitials was validated against all 14 spec + edge cases (14/14 PASS) inline in the page: empty/null/undefined/blank → '?'; 'mario' → 'M'; 'Mario Rossi' → 'MR'; 'mario_rossi' → 'MR'; 'gli.ispettori' → 'GI'; 'MARIO ROSSI TEST' → 'MT'; also verified dash, dot, multiple-spaces, unicode-safe (splits on \\p{L}\\p{N}). (5) Session persistence (AuthContext) confirmed working — token in secureGet key 'faide_token' is picked up on cold reload, /auth/me returns 200, home renders with tabs bar. NOT tested this iteration: the story-composer 429 banner (would require pre-seeding 20 stories via API to exceed the daily quota — orthogonal to the avatar fix and already covered by backend iteration_63); and the 'user has an actual photo' branch (no available seed user has base64 photos exposed via /auth/me — but the code path is a straightforward Image render and unaffected by this diff). Deprecated packages / SafeAreaView issues: none newly introduced in the changed files.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/test_reports/iteration_64.json"
+  ],
+  "action_items": [
+    "No action required — the StoriesBar avatar-initials fallback and getInitials utility work as specified. Bug is fixed.",
+    "OPTIONAL follow-up (nice-to-have, not blocking): the initials fallback on OTHER users' circles uses g.author?.display_name || g.author?.nickname for the initials source, but the LABEL underneath the circle uses the reverse priority (nickname first, then display_name). In the observed test case this produced initials 'MT' (from 'Mario Rossi TEST') with label 'chatUserB' — visually consistent but the letters don't map to the name shown. Consider aligning both to use the same priority (probably nickname-first for both, since that's the label the user actually sees) so 'chatUserB' would show 'C' initials. This is a design polish, not a bug.",
+    "OPTIONAL: /api/auth/me does NOT return the photos[] array (only photos_count/primary_photo_id), so the fallback `user?.photos && user.photos[0]?.data` inside StoriesBar can NEVER hit on web after cold-reload for a user who has photos but no active story — they will incorrectly see initials instead of their profile picture on the 'my' ring. In practice the /stories/feed endpoint hydrates the avatar for the 'my' group when the user has active stories, so this only matters for the specific case of 'user with photos but no active stories'. Consider either (a) including a slim photos[0] in /auth/me, or (b) fetching /me/photos separately in AuthContext and merging it into `user.photos` — otherwise the initials fallback is slightly over-eager. Reference: StoriesBar.tsx:223-224."
+  ],
+  "critical_code_review_comments": [
+    "StoriesBar.tsx:311 label uses `g.author?.nickname || g.author?.display_name` (nickname preferred) whereas StoriesBar.tsx:303 initials use `g.author?.display_name || g.author?.nickname` (display_name preferred). Not a bug but the two lines will read from different fields for users who have both — see action item #2.",
+    "nickname.ts:32 uses `\\p{L}\\p{N}` with the /u flag which requires ES2018 regex — fine on modern browsers and Hermes but a helpful comment about the runtime requirement would future-proof it.",
+    "StoriesBar.tsx:224 the `user.photos[0]?.data` fallback path is dead on web after cold-reload since /api/auth/me does not populate photos[] (only photos_count) — see action item #3."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "N/A (frontend-only per review_request)",
+    "frontend": "100% (all primary acceptance criteria verified: 14/14 getInitials cases, my-ring initials + badge, other-group initials no-badge, session persistence)"
+  },
+  "seed_data_creation": "None. Reused seed user chat_a@test.it and chat_b@test.it from /app/memory/test_credentials.md. chat_b already had 3 active stories from prior iterations, which conveniently exercises the 'other user with stories but no avatar → initials fallback' branch without any new seeding.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "To login as a seed user in a headless browser without going through Google OAuth: (a) POST /api/auth/login with email+password to get a JWT, (b) use page.add_init_script to run localStorage.setItem('faide_token', JSON.stringify(token)) BEFORE page.goto — this is required because async-storage's web adapter uses window.localStorage directly with the key as-is (no prefix, no namespace). The AuthContext bootstrap reads secureGet('faide_token') which JSON-parses the stored value, so it must be stringified. After add_init_script + goto('/'), the home tabs render in ~4-5 seconds with the stories bar visible. If you see /auth after reload it means the token is either invalid or was not stringified. The StoriesBar exposes testIDs 'stories-bar', 'stories-bar-mine', and 'stories-bar-<user_id>' — very reliable selectors for future story-related tests.",
+  "rca_of_issue": "N/A — this iteration validated a frontend-only fix. The original bug: when a user had no profile picture AND no active stories, StoriesBar rendered `<View style={styles.avatar} />` — a plain gray circle. Combined with the red '+' badge overlaid at bottom-right, this read to users as a broken/missing image with a delete cross. The fix: when `raw` (the resolved avatar source) is null, render `<Text>{getInitials(display_name || nickname)}</Text>` inside a slightly warmer surfaceSecondary background — the same visual pattern Instagram/WhatsApp/Gmail use. The same treatment was correctly applied to otherGroups items (StoriesBar.tsx:292-307). A new pure utility `getInitials` in nickname.ts handles all name shapes (spaces, dots, underscores, dashes, unicode) and always returns 1–2 uppercase alphanumeric characters, degrading to '?' for empty/unknown labels."
+}

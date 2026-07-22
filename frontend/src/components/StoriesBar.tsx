@@ -16,6 +16,7 @@ import { useAuth } from "@/src/auth/AuthContext";
 import { colors, spacing } from "@/src/theme";
 import AnimatedStoryRing from "@/src/components/AnimatedStoryRing";
 import { useStoryUpload } from "@/src/stories/StoryUploadContext";
+import { getInitials } from "@/src/utils/nickname";
 
 /**
  * Instagram-style stories strip.
@@ -222,14 +223,24 @@ export default function StoriesBar() {
                 const raw = myGroup?.author?.avatar
                   ?? (user?.photos && user.photos[0]?.data ? user.photos[0].data : null);
                 if (!raw) {
-                  // Plain colored circle instead of an <Ionicons> glyph.
-                  // The icon font hasn't necessarily loaded yet on the
-                  // very first frame, so the browser briefly renders a
-                  // fallback missing-glyph character (looks like an X
-                  // or a stylised hourglass) — the user reported this
-                  // as a "flash before the avatar shows". A neutral
-                  // View avoids that race entirely.
-                  return <View style={[styles.avatar, styles.avatarFallback]} />;
+                  // No profile picture and no active story avatar. A
+                  // plain empty gray circle read as a "broken image
+                  // placeholder" to users, especially next to the "+"
+                  // add badge. Render initials from the user's display
+                  // name / nickname instead — same pattern used by
+                  // Instagram, WhatsApp and Gmail when there's no
+                  // avatar. Never crashes: `getInitials` degrades to
+                  // "?" for unknown labels.
+                  const initials = getInitials(
+                    (user as any)?.display_name || user?.nickname || "?"
+                  );
+                  return (
+                    <View style={[styles.avatar, styles.avatarFallback]}>
+                      <Text style={styles.avatarInitials} allowFontScaling={false}>
+                        {initials}
+                      </Text>
+                    </View>
+                  );
                 }
                 const uri = raw.startsWith("data:") ? raw : `data:image/jpeg;base64,${raw}`;
                 return <Image source={{ uri }} style={styles.avatar} />;
@@ -281,10 +292,18 @@ export default function StoriesBar() {
                 {g.author?.avatar ? (
                   <Image source={{ uri: g.author.avatar }} style={styles.avatar} />
                 ) : (
-                  // Plain colored circle (no icon font glyph) — same
-                  // reasoning as the my-ring fallback above: avoids
-                  // the missing-glyph flash before Ionicons loads.
-                  <View style={[styles.avatar, styles.avatarFallback]} />
+                  // Initials fallback — same pattern as the "my ring"
+                  // case above. Empty gray circles read as broken
+                  // image placeholders and looked especially wrong on
+                  // circles owned by other users where there's no "+"
+                  // badge to explain them.
+                  <View style={[styles.avatar, styles.avatarFallback]}>
+                    <Text style={styles.avatarInitials} allowFontScaling={false}>
+                      {getInitials(
+                        g.author?.display_name || g.author?.nickname || "?"
+                      )}
+                    </Text>
+                  </View>
                 )}
               </View>
             </AnimatedStoryRing>
@@ -382,6 +401,22 @@ const styles = StyleSheet.create({
   avatarFallback: {
     alignItems: "center",
     justifyContent: "center",
+    // Slightly warmer tone than `surfaceTertiary` so the initials
+    // pop and the circle no longer reads as an empty image
+    // placeholder next to the red "+" badge.
+    backgroundColor: colors.surfaceSecondary || colors.surfaceTertiary,
+  },
+  avatarInitials: {
+    color: colors.onSurface,
+    fontSize: 22,
+    fontWeight: "700",
+    letterSpacing: 0.5,
+    // Keep the letters visually centered even when the descender is
+    // taller than the ascender (works around the RN-Web baseline
+    // being higher than native).
+    lineHeight: 24,
+    textAlign: "center",
+    includeFontPadding: false,
   },
   plusBadge: {
     position: "absolute",
