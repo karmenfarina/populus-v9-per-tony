@@ -279,8 +279,17 @@ export default function StoriesViewer() {
   // Load takes an explicit `uid` argument (rather than closing over
   // `currentUserId`) so we never call it against a stale closure —
   // the effect below can pass the newly-updated user id directly.
+  //
+  // A monotonically-increasing "load token" gates state-updates so
+  // slower in-flight fetches from a PREVIOUS user id can never
+  // clobber the state of the CURRENT user id (that was the source
+  // of the intermittent "tapping my ring opens the next user"
+  // symptom: an older friendY fetch finishing after the my-story
+  // fetch would overwrite my stories with friendY's rows).
+  const loadTokenRef = useRef(0);
   const load = useCallback(async (uid: string, startFromLast: boolean) => {
     if (!uid) return;
+    const myToken = ++loadTokenRef.current;
     setInitialLoading(true);
     try {
       // Fetch this user's stories AND the full feed order in parallel.
@@ -290,6 +299,10 @@ export default function StoriesViewer() {
         api.storiesByUser(uid),
         api.storiesFeed().catch(() => ({ groups: [] })),
       ]);
+      // If a newer load() was started while we were awaiting, or the
+      // caller has moved on to another user, discard our results —
+      // otherwise we'd stomp on the CURRENT user's view.
+      if (myToken !== loadTokenRef.current) return;
       const rows: Story[] = r?.stories || [];
       const order = ((feed?.groups || []) as Array<{ user_id: string }>).map((g) => g.user_id);
       setFeedOrder(order);
@@ -313,10 +326,13 @@ export default function StoriesViewer() {
       // via autoCloseFiredRef=true to prevent a stale-user tick.
       autoCloseFiredRef.current = false;
     } catch (e: any) {
+      if (myToken !== loadTokenRef.current) return;
       Alert.alert("Errore", e?.message || "Impossibile caricare le storie");
       closeViewer();
     } finally {
-      setInitialLoading(false);
+      if (myToken === loadTokenRef.current) {
+        setInitialLoading(false);
+      }
     }
   }, [closeViewer]);
 
@@ -414,6 +430,29 @@ export default function StoriesViewer() {
       try { (Image as any).prefetch?.(uri); } catch { /* ignore */ }
     });
   }, [stories, idx]);
+
+  // Belt-and-braces synchronisation: whenever the viewer screen
+  // REGAINS focus (e.g. Expo Router restored it from the stack for
+  // a re-tap on a ring instead of re-mounting), verify our internal
+  // `currentUserId` still matches the URL param. If it drifted (an
+  // internal jumpToUser had moved it forward, or an old session
+  // never reset it), snap it back to `initialUserId` so the next
+  // paint reflects the ring the user just tapped.
+  useFocusEffect(
+    useCallback(() => {
+      const paramId = String(initialUserId || "");
+      if (!paramId) return;
+      if (paramId !== currentUserId) {
+        setCurrentUserId(paramId);
+        setInitialLoading(true);
+        setStories([]);
+        setIdx(0);
+        setProgress(0);
+        autoCloseFiredRef.current = true;
+        internalNavRef.current = false;
+      }
+    }, [initialUserId, currentUserId]),
+  );
 
   // Single global interval that ticks 20 times a second, driving the
   // progress bar of the CURRENT story. Uses `useFocusEffect` (not

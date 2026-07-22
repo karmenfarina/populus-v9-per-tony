@@ -23,6 +23,16 @@ export type AnimatedStoryRingProps = {
   size: number;
   ringWidth: number;
   variant: "unseen" | "seen" | "mine";
+  /**
+   * When true the ring runs its rotating gradient animation to signal
+   * that a new story is still LOADING (typical use: while the stories
+   * feed is being fetched). Once the caller flips this back to false
+   * the ring transitions to a static gradient — matches Instagram's
+   * "loading → loaded" distinction. Only applies to `variant='unseen'`.
+   * Defaults to `false` (static gradient) so pages that don't opt in
+   * keep the previous "always static" look.
+   */
+  loading?: boolean;
   children: React.ReactNode;
 };
 
@@ -30,26 +40,33 @@ export default function AnimatedStoryRing({
   size,
   ringWidth,
   variant,
+  loading = false,
   children,
 }: AnimatedStoryRingProps) {
   const spin = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    if (variant !== "unseen") return;
-    // Continuous slow rotation — 3s per full turn gives that
-    // "alive/loading" cadence Instagram uses without being distracting.
-    // useNativeDriver:true keeps the animation off the JS thread.
+    if (variant !== "unseen" || !loading) {
+      // Reset rotation so the transition from "loading" to "loaded"
+      // snaps the gradient back to its zero-degree resting state
+      // instead of freezing mid-turn.
+      spin.stopAnimation();
+      spin.setValue(0);
+      return;
+    }
+    // Continuous slow rotation while loading — 1.4s per full turn is
+    // fast enough to read as a spinner but not distracting.
     const loop = Animated.loop(
       Animated.timing(spin, {
         toValue: 1,
-        duration: 3000,
+        duration: 1400,
         easing: Easing.linear,
         useNativeDriver: true,
       }),
     );
     loop.start();
     return () => loop.stop();
-  }, [variant, spin]);
+  }, [variant, loading, spin]);
 
   const rotate = spin.interpolate({
     inputRange: [0, 1],

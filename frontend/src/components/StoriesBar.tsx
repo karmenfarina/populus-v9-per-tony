@@ -147,6 +147,10 @@ export default function StoriesBar() {
             size={CIRCLE_SIZE + RING_WIDTH * 2}
             ringWidth={RING_WIDTH}
             variant={firstLoadDone && myGroup?.has_unseen ? "unseen" : "mine"}
+            // Spin while the feed is still being fetched, freeze it
+            // afterwards. Gives the "story loading → story loaded"
+            // visual cue the user asked for (Instagram behaviour).
+            loading={!firstLoadDone}
           >
             <View style={styles.avatarWrap}>
               {(() => {
@@ -207,6 +211,10 @@ export default function StoriesBar() {
               size={CIRCLE_SIZE + RING_WIDTH * 2}
               ringWidth={RING_WIDTH}
               variant={g.has_unseen ? "unseen" : "seen"}
+              // Only spin while the feed itself is loading. When the
+              // strip has settled the ring becomes a static gradient
+              // so the user can tell "loading" from "ready to tap".
+              loading={!firstLoadDone}
             >
               <View style={styles.avatarWrap}>
                 {g.author?.avatar ? (
