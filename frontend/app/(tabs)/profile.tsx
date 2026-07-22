@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Modal, TextInput, Image, KeyboardAvoidingView, Platform, Switch, Alert } from "react-native";
+import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Image, Platform, Switch, Alert } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import * as ImageManipulator from "expo-image-manipulator";
 import * as FileSystem from "expo-file-system/legacy";
@@ -11,62 +11,14 @@ import { api, HistoryItem, UserPhoto } from "@/src/api";
 import { colors, spacing, font, sideColor } from "@/src/theme";
 import PhotoCropper from "@/src/components/PhotoCropper";
 import CategoryBadgesModal from "@/src/components/CategoryBadgesModal";
-import { sanitizeNicknameInput, validateNickname, NICKNAME_HINT, NICKNAME_MAX } from "@/src/utils/nickname";
-
-/**
- * Module-level cache mapping (photo_id + short data hash) → local file URI.
- *
- * Rendering multiple `data:image/jpeg;base64,<huge>` sources back-to-back in
- * the same view can push RN's Image loader into an out-of-memory state on
- * older devices — the error the user sees as a red-screen after saving many
- * photos. Writing each photo to disk once and referencing it by a file:// URI
- * lets the OS stream & cache the bitmap without holding the full base64 in
- * memory.
- */
-const photoUriCache: Map<string, string> = new Map();
-function _photoHash(data: string): string {
-  // Cheap fingerprint over the payload so a re-crop with different content
-  // busts the cache automatically.
-  let h = 0;
-  const step = Math.max(1, Math.floor(data.length / 128));
-  for (let i = 0; i < data.length; i += step) {
-    h = (h * 31 + data.charCodeAt(i)) | 0;
-  }
-  return `${data.length}_${(h >>> 0).toString(36)}`;
-}
-async function resolvePhotoUri(photo: UserPhoto): Promise<string> {
-  const key = `${photo.photo_id}_${_photoHash(photo.data)}`;
-  const hit = photoUriCache.get(key);
-  if (hit) return hit;
-  if (Platform.OS === "web") {
-    const uri = `data:image/jpeg;base64,${photo.data}`;
-    photoUriCache.set(key, uri);
-    return uri;
-  }
-  try {
-    const dir = (FileSystem as any).cacheDirectory || (FileSystem as any).documentDirectory;
-    const safe = photo.photo_id.replace(/[^a-zA-Z0-9_]/g, "_");
-    const uri = `${dir}profphoto_${safe}.jpg`;
-    await FileSystem.writeAsStringAsync(uri, photo.data, {
-      encoding: FileSystem.EncodingType.Base64,
-    });
-    photoUriCache.set(key, uri);
-    return uri;
-  } catch {
-    // Fallback to data URI if FS write fails — still shows the picture.
-    const uri = `data:image/jpeg;base64,${photo.data}`;
-    photoUriCache.set(key, uri);
-    return uri;
-  }
-}
+import ProfessionModal from "@/src/components/profile/ProfessionModal";
+import PrefsModal from "@/src/components/profile/PrefsModal";
+import EditProfileModal from "@/src/components/profile/EditProfileModal";
+import { validateNickname, sanitizeNicknameInput } from "@/src/utils/nickname";
+import { resolvePhotoUri } from "@/src/utils/photoCache";
+import { Socials, EMPTY_SOCIALS } from "@/src/utils/socials";
 
 type Filter = "all" | "majority" | "minority";
-type Socials = { instagram: string; tiktok: string; twitter: string; youtube: string; website: string };
-const EMPTY_SOCIALS: Socials = { instagram: "", tiktok: "", twitter: "", youtube: "", website: "" };
-const SOCIAL_KEYS: (keyof Socials)[] = ["instagram", "tiktok", "twitter", "youtube", "website"];
-const SOCIAL_LABELS: Record<keyof Socials, string> = {
-  instagram: "Instagram", tiktok: "TikTok", twitter: "X (Twitter)", youtube: "YouTube", website: "Sito web",
-};
 
 export default function Profile() {
   const { user, logout, refreshMe } = useAuth();
@@ -1177,199 +1129,43 @@ export default function Profile() {
         </Pressable>
       </ScrollView>
 
-      <Modal visible={prefsOpen} animationType="slide" transparent onRequestClose={() => setPrefsOpen(false)}>
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalSheet} testID="prefs-modal">
-            <View style={styles.modalHead}>
-              <Text style={styles.modalTitle}>MODIFICA ARGOMENTI</Text>
-              <Pressable onPress={() => setPrefsOpen(false)} testID="prefs-modal-close">
-                <Ionicons name="close" size={26} color={colors.onSurfaceInverse} />
-              </Pressable>
-            </View>
-            <ScrollView contentContainerStyle={styles.modalBody}>
-              <Pressable onPress={toggleAllEdit} testID="prefs-select-all" style={styles.prefsSelectAllRow}>
-                <Ionicons
-                  name={allSelected ? "checkbox" : "square-outline"}
-                  size={16}
-                  color={colors.onSurface}
-                />
-                <Text style={styles.prefsSelectAllTxt}>
-                  {allSelected ? "TOGLI TUTTE" : "SELEZIONA TUTTE"}
-                </Text>
-              </Pressable>
-              <View style={styles.prefsCatsGrid}>
-                {cats.map((c) => {
-                  const on = editSel.has(c.id);
-                  return (
-                    <Pressable
-                      key={c.id}
-                      onPress={() => toggleEdit(c.id)}
-                      testID={`prefs-cat-${c.id}`}
-                      style={[styles.prefsCatChip, on && styles.prefsCatChipOn]}
-                    >
-                      <Ionicons
-                        name={on ? "checkbox" : "square-outline"}
-                        size={20}
-                        color={on ? colors.onBrandPrimary : colors.onSurface}
-                      />
-                      <Text style={[styles.prefsCatTxt, on && styles.prefsCatTxtOn]}>{c.label}</Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-              {prefsError && <Text style={styles.prefsErr} testID="prefs-error">{prefsError}</Text>}
-            </ScrollView>
-            <Pressable onPress={savePrefs} disabled={savingPrefs} testID="prefs-save" style={styles.prefsSaveBtn}>
-              {savingPrefs ? (
-                <ActivityIndicator color={colors.onBrandPrimary} />
-              ) : (
-                <Text style={styles.prefsSaveTxt}>SALVA</Text>
-              )}
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
+      <PrefsModal
+        visible={prefsOpen}
+        onClose={() => setPrefsOpen(false)}
+        categories={cats}
+        selected={editSel}
+        onToggleOne={toggleEdit}
+        onToggleAll={toggleAllEdit}
+        allSelected={allSelected}
+        onSave={savePrefs}
+        saving={savingPrefs}
+        error={prefsError}
+      />
 
-      <Modal visible={profileOpen} animationType="slide" transparent onRequestClose={() => setProfileOpen(false)}>
-        <Pressable style={styles.modalBackdrop} onPress={() => setProfileOpen(false)}>
-          <Pressable style={[styles.modalSheet, styles.modalSheetTall]} onPress={(e) => e.stopPropagation()} testID="profile-edit-modal">
-            <View style={styles.modalHead}>
-              <Text style={styles.modalTitle}>MODIFICA PROFILO</Text>
-              <Pressable onPress={() => setProfileOpen(false)} testID="profile-edit-close" hitSlop={10}>
-                <Ionicons name="close" size={26} color={colors.onSurfaceInverse} />
-              </Pressable>
-            </View>
-            <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-              <ScrollView
-                style={{ flex: 1 }}
-                contentContainerStyle={styles.modalBody}
-                keyboardShouldPersistTaps="handled"
-                showsVerticalScrollIndicator={false}
-              >
-                <Text style={styles.editSectionTitle}>NICKNAME</Text>
-                <TextInput
-                  testID="edit-nickname-input"
-                  value={editNick}
-                  onChangeText={(t) => setEditNick(sanitizeNicknameInput(t))}
-                  placeholder="es. gossip_queen"
-                  placeholderTextColor={colors.muted}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  maxLength={NICKNAME_MAX}
-                  style={styles.identInput}
-                />
-                <Text style={styles.identHint}>2-24 caratteri. {NICKNAME_HINT} Deve essere unico.</Text>
-
-                <Text style={[styles.editSectionTitle, { marginTop: spacing.md }]}>NOME</Text>
-                <TextInput
-                  testID="edit-display-input"
-                  value={editDisplay}
-                  onChangeText={(t) => setEditDisplay(t.slice(0, 40))}
-                  placeholder="Es. Mario Rossi (opzionale)"
-                  placeholderTextColor={colors.muted}
-                  maxLength={40}
-                  style={styles.identInput}
-                />
-                <Text style={styles.identHint}>Nome visibile sotto al nickname. Lascia vuoto per rimuoverlo.</Text>
-
-                <Text style={[styles.editSectionTitle, { marginTop: spacing.md }]}>FOTO ({photos.length}/7)</Text>
-                <View style={styles.photosGrid}>
-                  {loadingPhotos ? (
-                    <ActivityIndicator color={colors.brandPrimary} />
-                  ) : (
-                    <>
-                      {photos.map((p) => {
-                        const isPrimary = p.photo_id === user.primary_photo_id;
-                        return (
-                          <View key={p.photo_id} style={styles.photoBox} testID={`photo-${p.photo_id}`}>
-                            <Image
-                              source={{ uri: photoUris[p.photo_id] || `data:image/jpeg;base64,${p.data}` }}
-                              style={styles.photoImg}
-                            />
-                            {isPrimary && (
-                              <View style={styles.primaryBadge}>
-                                <Ionicons name="star" size={12} color={colors.onBrandSecondary} />
-                              </View>
-                            )}
-                            <View style={styles.photoActions}>
-                              {!isPrimary && (
-                                <Pressable onPress={() => setPrimary(p.photo_id)} testID={`photo-set-primary-${p.photo_id}`} style={styles.photoAct}>
-                                  <Ionicons name="star-outline" size={14} color={colors.onSurface} />
-                                </Pressable>
-                              )}
-                              <Pressable onPress={() => recropPhoto(p)} disabled={openingRecrop === p.photo_id} testID={`photo-recrop-${p.photo_id}`} style={styles.photoAct}>
-                                {openingRecrop === p.photo_id ? (
-                                  <ActivityIndicator size="small" color={colors.onSurface} />
-                                ) : (
-                                  <Ionicons name="crop-outline" size={14} color={colors.onSurface} />
-                                )}
-                              </Pressable>
-                              <Pressable onPress={() => deletePhoto(p.photo_id)} testID={`photo-delete-${p.photo_id}`} style={[styles.photoAct, { backgroundColor: colors.brandPrimary }]}>
-                                <Ionicons name="trash" size={14} color={colors.onBrandPrimary} />
-                              </Pressable>
-                            </View>
-                          </View>
-                        );
-                      })}
-                      {photos.length < 7 && (
-                        <>
-                          <Pressable onPress={() => pickPhoto("library")} testID="photo-add-library" style={[styles.photoBox, styles.photoAdd]}>
-                            <Ionicons name="images-outline" size={30} color={colors.onSurface} />
-                            <Text style={styles.photoAddTxt}>GALLERIA</Text>
-                          </Pressable>
-                          <Pressable onPress={() => pickPhoto("camera")} testID="photo-add-camera" style={[styles.photoBox, styles.photoAdd]}>
-                            <Ionicons name="camera-outline" size={30} color={colors.onSurface} />
-                            <Text style={styles.photoAddTxt}>FOTOCAMERA</Text>
-                          </Pressable>
-                        </>
-                      )}
-                    </>
-                  )}
-                </View>
-
-                <Text style={[styles.editSectionTitle, { marginTop: spacing.md }]}>BIO ({bio.length}/200)</Text>
-                <TextInput
-                  value={bio}
-                  onChangeText={(t) => setBio(t.slice(0, 200))}
-                  placeholder="Racconta chi sei..."
-                  placeholderTextColor={colors.muted}
-                  multiline
-                  style={styles.bioInput}
-                  testID="bio-input"
-                />
-
-                <Text style={[styles.editSectionTitle, { marginTop: spacing.md }]}>SOCIAL</Text>
-                {SOCIAL_KEYS.map((k) => (
-                  <View key={k} style={styles.socialField}>
-                    <Text style={styles.socialFieldLabel}>{SOCIAL_LABELS[k]}</Text>
-                    <TextInput
-                      value={socials[k]}
-                      onChangeText={(t) => setSocials((s) => ({ ...s, [k]: t }))}
-                      placeholder={k === "website" ? "esempio.it" : `@handle o url`}
-                      placeholderTextColor={colors.muted}
-                      autoCapitalize="none"
-                      keyboardType="url"
-                      style={styles.socialInput}
-                      testID={`social-input-${k}`}
-                    />
-                  </View>
-                ))}
-
-                {detailsError && <Text style={styles.prefsErr} testID="details-error">{detailsError}</Text>}
-              </ScrollView>
-              {detailsError ? (
-                <View style={styles.saveErrorBar} testID="details-error-bar">
-                  <Ionicons name="alert-circle" size={16} color="#FFFFFF" />
-                  <Text style={styles.saveErrorTxt} numberOfLines={2}>{detailsError}</Text>
-                </View>
-              ) : null}
-              <Pressable onPress={saveDetails} disabled={savingDetails} testID="profile-edit-save" style={styles.prefsSaveBtn}>
-                {savingDetails ? <ActivityIndicator color={colors.onBrandPrimary} /> : <Text style={styles.prefsSaveTxt}>SALVA</Text>}
-              </Pressable>
-            </KeyboardAvoidingView>
-          </Pressable>
-        </Pressable>
-      </Modal>
+      <EditProfileModal
+        visible={profileOpen}
+        onClose={() => setProfileOpen(false)}
+        nickname={editNick}
+        onNicknameChange={setEditNick}
+        displayName={editDisplay}
+        onDisplayNameChange={setEditDisplay}
+        photos={photos}
+        loadingPhotos={loadingPhotos}
+        photoUris={photoUris}
+        primaryPhotoId={user.primary_photo_id}
+        onSetPrimary={setPrimary}
+        onRecropPhoto={recropPhoto}
+        openingRecropId={openingRecrop}
+        onDeletePhoto={deletePhoto}
+        onPickPhoto={pickPhoto}
+        bio={bio}
+        onBioChange={setBio}
+        socials={socials}
+        onSocialsChange={setSocials}
+        saving={savingDetails}
+        onSave={saveDetails}
+        error={detailsError}
+      />
 
       <PhotoCropper
         visible={cropperOpen}
@@ -1380,47 +1176,14 @@ export default function Profile() {
         onConfirm={uploadCroppedPhoto}
       />
 
-      <Modal
+      <ProfessionModal
         visible={professionOpen}
-        animationType="slide"
-        transparent
-        onRequestClose={() => setProfessionOpen(false)}
-      >
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalSheet} testID="profession-modal">
-            <View style={styles.modalHead}>
-              <Text style={styles.modalTitle}>PROFESSIONE</Text>
-              <Pressable onPress={() => setProfessionOpen(false)} testID="profession-modal-close" hitSlop={10}>
-                <Ionicons name="close" size={26} color={colors.onSurfaceInverse} />
-              </Pressable>
-            </View>
-            {savingProfession && (
-              <View style={styles.savingBar}>
-                <ActivityIndicator color={colors.brandPrimary} />
-              </View>
-            )}
-            <ScrollView contentContainerStyle={{ paddingBottom: spacing.lg }}>
-              {professionsList.map((p) => {
-                const isSel = user.profession === p;
-                return (
-                  <Pressable
-                    key={p}
-                    onPress={() => saveProfession(p)}
-                    disabled={savingProfession}
-                    style={[styles.professionItem, isSel && styles.professionItemOn]}
-                    testID={`profession-opt-${p.replace(/[^a-zA-Z0-9]/g, '-')}`}
-                  >
-                    <Text style={[styles.professionItemTxt, isSel && styles.professionItemTxtOn]}>
-                      {p}
-                    </Text>
-                    {isSel && <Ionicons name="checkmark" size={20} color={colors.onBrandPrimary} />}
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
+        onClose={() => setProfessionOpen(false)}
+        professions={professionsList}
+        currentValue={user.profession}
+        saving={savingProfession}
+        onSelect={saveProfession}
+      />
 
       {/* Category badges collection — full-screen shelf reachable by
           tapping the primary alignment badge above. Rendered here so

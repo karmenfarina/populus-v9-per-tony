@@ -21,6 +21,34 @@ from pydantic import BaseModel, Field, EmailStr
 from typing import List, Optional, Literal
 from datetime import datetime, timezone, timedelta
 from media_extractor import resolve_media as _resolve_media
+from moderation import moderate_text as _moderate_text, ai_moderate_comment as _ai_moderate_comment, BLOCKED_WORDS  # noqa: F401
+from helpers import (
+    now_utc,
+    iso_utc as _iso_utc,
+    new_id,
+    hash_password,
+    verify_password,
+    strip_data_url as _strip_data_url,
+    hashtag_norm as _hashtag_norm,
+    extract_subject_from_title as _extract_subject_from_title,
+    is_stance_party as _is_stance_party,
+    clean_subject as _clean_subject,
+    HASHTAG_STOPWORDS as _HASHTAG_STOPWORDS,
+)
+from models import (
+    # Pydantic bodies
+    SignupBody, LoginBody, AnonymousBody, GoogleSessionBody,
+    VerifyEmailBody, ResendVerificationBody,
+    ProfileBody, DetailsBody, PhotoUploadBody,
+    VoteBody, CommentBody, ReplyBody,
+    RegisterPushBody, PushToggleBody, SupportBody,
+    SendMessageBody, ShareToUsersBody, ReactMessageBody, ReportUserBody,
+    StoryCreateBody, StoryReplyBody,
+    # Constants shared with model Field(...) declarations
+    MAX_MSG_TEXT as _MODEL_MAX_MSG_TEXT,
+    MAX_MSG_IMAGE_BYTES as _MODEL_MAX_MSG_IMAGE_BYTES,
+    STORY_COMMENT_MAX as _MODEL_STORY_COMMENT_MAX,
+)
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -42,39 +70,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 
 
-def now_utc() -> datetime:
-    return datetime.now(timezone.utc)
-
-
-def _iso_utc(dt) -> str:
-    """Serialize a datetime as ISO 8601 with an explicit UTC marker.
-
-    Mongo strips tzinfo when it stores datetimes, so values read back are
-    typically NAIVE even though they represent UTC instants. Calling plain
-    `.isoformat()` on them yields a string that JavaScript interprets as
-    LOCAL time — off by the client's timezone offset. Always append `Z`
-    (or the aware offset) so clients get the correct absolute instant.
-    """
-    if not isinstance(dt, datetime):
-        return str(dt)
-    if dt.tzinfo is None:
-        return dt.isoformat() + 'Z'
-    return dt.isoformat()
-
-
-def new_id(prefix: str) -> str:
-    return f"{prefix}_{uuid.uuid4().hex[:12]}"
-
-
-def hash_password(pw: str) -> str:
-    return bcrypt.hashpw(pw.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-
-
-def verify_password(pw: str, hashed: str) -> bool:
-    try:
-        return bcrypt.checkpw(pw.encode('utf-8'), hashed.encode('utf-8'))
-    except Exception:
-        return False
+# now_utc, _iso_utc, new_id, hash_password, verify_password moved to backend/helpers.py
 
 
 def make_jwt(user_id: str) -> str:
@@ -263,64 +259,7 @@ def _normalize_and_validate_nickname(raw: Optional[str]) -> str:
     return n
 
 
-class SignupBody(BaseModel):
-    email: EmailStr
-    password: str = Field(min_length=6)
-    # Length + character rules are enforced by `_normalize_and_validate_nickname`
-    # so we can return specific Italian 400s instead of Pydantic 422s.
-    nickname: str
-
-
-class LoginBody(BaseModel):
-    email: EmailStr
-    password: str
-
-
-class AnonymousBody(BaseModel):
-    nickname: str
-
-
-class GoogleSessionBody(BaseModel):
-    session_id: str
-
-
-class ProfileBody(BaseModel):
-    age: int = Field(ge=13, le=120)
-    sex: Literal['F', 'M', 'other', 'na']
-    region: str = Field(min_length=2, max_length=40)
-    favorite_categories: List[str] = Field(min_length=1)
-    # New field (optional for back-compat with previously onboarded users).
-    profession: Optional[str] = Field(default=None, max_length=60)
-    # Nickname override — used by external-provider signups (Google) so the
-    # user can choose their own handle instead of inheriting the Google name.
-    # Optional to keep backwards compatibility with existing onboarding calls.
-    # Rules enforced in `_normalize_and_validate_nickname`, not by Pydantic.
-    nickname: Optional[str] = None
-    # Optional public "display name" shown in grey under the nickname on the
-    # profile. Free-form, doesn't need to be unique.
-    display_name: Optional[str] = Field(default=None, max_length=40)
-
-
-class DetailsBody(BaseModel):
-    bio: Optional[str] = Field(default=None, max_length=200)
-    social_links: Optional[dict] = None  # {instagram, tiktok, twitter, youtube, website}
-
-
-class PhotoUploadBody(BaseModel):
-    data: str = Field(min_length=40)  # cropped base64 (with or without prefix)
-    original_data: Optional[str] = Field(default=None, min_length=40)  # uncropped source, used to allow re-cropping (zoom-out)
-
-
-class VoteBody(BaseModel):
-    side: Literal['A', 'B']
-
-
-class CommentBody(BaseModel):
-    text: str = Field(min_length=1, max_length=500)
-
-
-class ReplyBody(BaseModel):
-    text: str = Field(min_length=1, max_length=500)
+# Pydantic bodies moved to backend/models.py — re-imported at top.
 
 
 def compute_badge(u: dict) -> Optional[dict]:
@@ -717,11 +656,7 @@ async def _send_verification_email(user_id: str, email: str, pending_migration_f
         logger.warning(f"Resend verification email exception: {e}")
 
 
-class VerifyEmailBody(BaseModel):
-    token: str
-
-class ResendVerificationBody(BaseModel):
-    email: str
+# VerifyEmailBody / ResendVerificationBody moved to backend/models.py
 
 # Simple in-memory rate limiter for resend-verification (per email + IP).
 _RESEND_RATE: dict = {}  # key -> [timestamps]
@@ -1158,12 +1093,7 @@ async def update_details(body: DetailsBody, user: dict = Depends(get_current_use
     return {'user': _public_user(updated)}
 
 
-def _strip_data_url(s: str) -> str:
-    if s.startswith('data:'):
-        idx = s.find(',')
-        if idx > 0:
-            return s[idx + 1:]
-    return s
+# _strip_data_url moved to backend/helpers.py
 
 
 @api_router.post('/auth/me/photos')
@@ -2039,97 +1969,8 @@ async def _recompute_user_alignment(user_id: str):
 
 
 # ----------------------- Moderation -----------------------
-
-BLOCKED_WORDS = {
-    # Slurs + hate — keep this list conservative but non-empty for MVP
-    'negro', 'frocio', 'finocchio', 'terrone', 'zingaro', 'ebreo di merda',
-    'checca', 'ricchione', 'crucco', 'polentone', 'marocchino di merda',
-    # Common Italian profanity/insults (strong)
-    'vaffanculo', 'stronzo', 'stronza', 'coglione', 'coglioni', 'puttana', 'troia',
-    'bastardo', 'bastarda', 'cazzo', 'cazzone', 'merda', 'porco dio', 'porca madonna',
-    'figlio di puttana', 'figlia di puttana', 'mongoloide', 'ritardato', 'handicappato',
-    'idiota di merda', 'schifoso', 'sfigato',
-    # Threats
-    'ti ammazzo', 'ti uccido', 'devi morire',
-}
-
-
-def _moderate_text(text: str) -> tuple[str, list[str]]:
-    """Return (cleaned_text, flagged_words). If flagged non-empty, caller should reject."""
-    original = (text or '').strip()
-    if not original:
-        return original, ['vuoto']
-    lower = original.lower()
-    hits = []
-    for word in BLOCKED_WORDS:
-        # match whole substring; use \b when word is single token to avoid false positives on unrelated substrings
-        if ' ' in word:
-            if word in lower:
-                hits.append(word)
-        else:
-            if re.search(r'\b' + re.escape(word) + r'\b', lower):
-                hits.append(word)
-    return original, hits
-
-
-async def _ai_moderate_comment(text: str) -> tuple[bool, Optional[str]]:
-    """AI-based moderation — catches hate speech, threats and violence
-    incitement that the keyword filter misses (paraphrased slurs, coded
-    language, insinuations, calls to harm etc.).
-
-    Returns (is_safe, reason). `reason` is a short Italian label for the
-    audit log when the text is unsafe.
-
-    Uses Claude Haiku 4.5 via emergentintegrations for latency (< 1s) and
-    cost. Falls back to `is_safe=True` on any provider error so the app
-    doesn't hard-fail moderation when the LLM is down — the keyword
-    filter already ran and caught the low-hanging fruit.
-    """
-    if not EMERGENT_LLM_KEY:
-        return True, None
-    original = (text or '').strip()
-    if not original or len(original) < 3:
-        return True, None
-    # Cap payload to keep latency low. Long rants are truncated but the
-    # first 800 chars are more than enough for a hate/violence classifier.
-    payload = original[:800]
-    try:
-        from emergentintegrations.llm.chat import LlmChat, UserMessage
-    except Exception as e:
-        logger.warning(f"ai-moderation: emergentintegrations import failed: {e}")
-        return True, None
-    try:
-        chat = LlmChat(
-            api_key=EMERGENT_LLM_KEY,
-            session_id=f"mod-{new_id('mod')}",
-            system_message=(
-                "Sei un moderatore di contenuti per una community italiana. "
-                "Il tuo compito: classificare un commento come SAFE o UNSAFE. "
-                "UNSAFE se e solo se contiene una di queste cose: "
-                "(1) hate speech verso una categoria protetta (razza, etnia, "
-                "religione, orientamento sessuale, identità di genere, disabilità); "
-                "(2) minaccia diretta o indiretta a una persona; "
-                "(3) incitamento alla violenza o al danno fisico/psicologico; "
-                "(4) molestia o doxxing (rivelazione di dati privati). "
-                "Le opinioni forti, la critica politica anche aspra, la satira, "
-                "il turpiloquio generico e i toni polemici sono SAFE. "
-                "Rispondi ESCLUSIVAMENTE con una riga in questo formato: "
-                "SAFE oppure UNSAFE|<categoria breve>. "
-                "Esempi validi di risposta UNSAFE: "
-                "UNSAFE|hate_speech, UNSAFE|minaccia, UNSAFE|incitamento_violenza."
-            ),
-        ).with_model('anthropic', 'claude-haiku-4-5-20251001')
-        reply = await chat.send_message(UserMessage(text=payload))
-        raw = (str(reply) if reply is not None else '').strip().upper()
-        if raw.startswith('UNSAFE'):
-            # Extract the short category after the pipe.
-            parts = raw.split('|', 1)
-            reason = parts[1].strip().lower() if len(parts) > 1 else 'unsafe'
-            return False, reason
-        return True, None
-    except Exception as e:
-        logger.warning(f"ai-moderation failed (allow-listing text): {e}")
-        return True, None
+# BLOCKED_WORDS, _moderate_text and _ai_moderate_comment now live in
+# backend/moderation.py and are re-imported at the top of this file.
 
 
 async def _log_flagged(user_id: str, feud_id: str, text: str, hits: list[str]):
@@ -2936,13 +2777,7 @@ _push_client = httpx.AsyncClient(
 )
 
 
-class RegisterPushBody(BaseModel):
-    platform: str
-    device_token: str
-
-
-class PushToggleBody(BaseModel):
-    enabled: bool
+# RegisterPushBody / PushToggleBody moved to backend/models.py
 
 
 @api_router.post('/register-push', status_code=201)
@@ -2995,12 +2830,7 @@ RESEND_API_KEY = os.environ.get('RESEND_API_KEY', '')
 SUPPORT_EMAIL = os.environ.get('SUPPORT_EMAIL', '')
 
 
-class SupportBody(BaseModel):
-    category: str = Field(min_length=1, max_length=40)
-    description: str = Field(min_length=10, max_length=2000)
-    frequency: str = Field(min_length=1, max_length=30)
-    section: str = Field(min_length=1, max_length=30)
-    contact_email: Optional[str] = None
+# SupportBody moved to backend/models.py
 
 
 @api_router.post('/support/submit')
@@ -4095,78 +3925,8 @@ def _load_hot_topics() -> List[str]:
     return topics
 
 
-def _extract_subject_from_title(title: str) -> str:
-    """Fallback: derive a single-subject slug from the feud title by taking the
-    leading proper-noun phrase (1-3 capitalized words)."""
-    m = re.match(
-        r"\s*([A-ZÀ-Ù][a-zà-ùÀ-Ù']+(?:\s+[A-ZÀ-Ù][a-zà-ùÀ-Ù']+){0,2})",
-        (title or '').strip(),
-    )
-    return m.group(1) if m else ''
-
-
-def _is_stance_party(name: str) -> bool:
-    """Detect if a party string represents a *position/stance* rather than a
-    named contender (used for legacy feuds without an explicit `subject`)."""
-    if not name:
-        return False
-    s = name.strip()
-    if len(s) > 30:
-        return True
-    lc = s.lower()
-    STANCE_PREFIXES = (
-        'chi ', 'difensori', 'contrari', 'sostenitori', 'critici', 'favorevoli',
-        'anti-', 'anti ', 'pro-', 'pro ', 'fan di', 'contro '
-    )
-    return any(lc.startswith(p) for p in STANCE_PREFIXES)
-
-
-def _hashtag_norm(name: str) -> str:
-    """Normalize a name to a compact alphanumeric slug."""
-    return re.sub(r'[^a-zA-Z0-9]+', '', (name or '').strip().lower())
-
-
-# Italian articles/prepositions/connectives that vary between feuds. Stripping
-# them lets "il Milan" and "Milan" collapse to the same hashtag bucket.
-_HASHTAG_STOPWORDS = {
-    'il', 'lo', 'la', 'i', 'gli', 'le',
-    'un', 'uno', 'una',
-    'di', 'a', 'da', 'in', 'con', 'su', 'per', 'tra', 'fra', 'e', 'ed',
-    'del', 'dello', 'della', 'dei', 'degli', 'delle',
-    'dal', 'dallo', 'dalla', 'dai', 'dagli', 'dalle',
-    'sul', 'sullo', 'sulla', 'sui', 'sugli', 'sulle',
-    'nel', 'nello', 'nella', 'nei', 'negli', 'nelle',
-    'al', 'allo', 'alla', 'ai', 'agli', 'alle',
-    'l', 'd', 'ch', 'che', 'chi',
-}
-
-
-def _clean_subject(name: str) -> str:
-    """Extract a canonical PascalCase form of a party/subject name.
-    - Drops parenthesised segments (e.g. "Milan (rimonta col PSG)" → "Milan")
-    - Removes emoji and punctuation
-    - Filters Italian articles / prepositions so variants collapse
-    - Capitalizes each surviving word
-    Returns "" if nothing usable remains.
-    """
-    if not name:
-        return ''
-    s = str(name)
-    # Drop anything inside parentheses (usually clarifying context)
-    s = re.sub(r'\([^)]*\)', ' ', s)
-    # Drop anything inside quotes ("…", '…', «…», “…”)
-    s = re.sub(r'[«»“”"\'\']+', ' ', s)
-    # Extract alphanumeric words (keep accented letters)
-    words = re.findall(r"[A-Za-zÀ-ÿ0-9]+", s)
-    kept: List[str] = []
-    for w in words:
-        if w.lower() in _HASHTAG_STOPWORDS:
-            continue
-        kept.append(w)
-    if not kept:
-        return ''
-    # PascalCase each token
-    return ''.join(w[0].upper() + w[1:].lower() for w in kept)[:40]
+# _extract_subject_from_title, _is_stance_party, _hashtag_norm,
+# _HASHTAG_STOPWORDS and _clean_subject moved to backend/helpers.py
 
 
 def _canonical_hashtag_subjects(
@@ -4660,40 +4420,13 @@ async def root():
 # - Push notifications fire when recipient is not currently connected via WS.
 # =============================================================================
 
-MAX_MSG_TEXT = 2000
-MAX_MSG_IMAGE_BYTES = 3_000_000  # ~3MB base64 payload
+MAX_MSG_TEXT = _MODEL_MAX_MSG_TEXT
+MAX_MSG_IMAGE_BYTES = _MODEL_MAX_MSG_IMAGE_BYTES
 COMMON_REACTIONS = {'❤️', '😂', '😮', '😢', '😡', '👍', '👎', '🔥'}
 
 
-class SendMessageBody(BaseModel):
-    recipient_id: str = Field(min_length=1)
-    text: Optional[str] = Field(default=None, max_length=MAX_MSG_TEXT)
-    image_data: Optional[str] = Field(default=None, max_length=MAX_MSG_IMAGE_BYTES)
-    # Instagram-style "share a post to a friend" — attaches a snapshot of the
-    # feud so the recipient sees a preview inline in chat that they can tap
-    # to open. Only feud_id is trusted from the client; the snapshot fields
-    # are built server-side from the current feud document.
-    shared_feud_id: Optional[str] = Field(default=None, min_length=1, max_length=120)
-
-
-class ShareToUsersBody(BaseModel):
-    """Payload for /feuds/{id}/share — the fan-out share-sheet endpoint.
-
-    `recipient_ids` is the list of users the sender wants to share the feud
-    with in a single tap (Instagram-style multi-select). `text` is optional
-    and attached identically to every generated message.
-    """
-    recipient_ids: List[str] = Field(min_length=1, max_length=25)
-    text: Optional[str] = Field(default=None, max_length=MAX_MSG_TEXT)
-
-
-class ReactMessageBody(BaseModel):
-    emoji: str = Field(min_length=1, max_length=8)
-
-
-class ReportUserBody(BaseModel):
-    reason: str = Field(min_length=2, max_length=500)
-    message_id: Optional[str] = None
+# SendMessageBody / ShareToUsersBody / ReactMessageBody / ReportUserBody
+# moved to backend/models.py
 
 
 def _conv_key(a: str, b: str) -> str:
@@ -5820,16 +5553,10 @@ async def get_circle(owner_id: str, q: str = '', user: dict = Depends(get_curren
 
 STORY_TTL_HOURS = 24
 STORY_DAILY_QUOTA = 20
-STORY_COMMENT_MAX = 200
+STORY_COMMENT_MAX = _MODEL_STORY_COMMENT_MAX
 
 
-class StoryCreateBody(BaseModel):
-    feud_id: str
-    comment: Optional[str] = Field(default=None, max_length=STORY_COMMENT_MAX)
-
-
-class StoryReplyBody(BaseModel):
-    text: str = Field(min_length=1, max_length=1000)
+# StoryCreateBody / StoryReplyBody moved to backend/models.py
 
 
 async def _story_is_visible_to(story: dict, viewer_id: Optional[str]) -> bool:

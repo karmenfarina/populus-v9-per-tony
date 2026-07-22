@@ -1,0 +1,53 @@
+{
+  "summary": "Regression test of the defensive refactor (server.py -> models.py + moderation.py + helpers.py; profile.tsx -> EditProfileModal/PrefsModal/ProfessionModal + socials.ts + photoCache.ts). Backend: 14/14 pytest regression tests PASS (100%) — signup, login, anonymous, me, categories, professions, feuds list, hype feed, vote, comment (clean + blocked-word 'vaffanculo' returns 400), stories feed, story create, support submit. Moderation module still enforces BLOCKED_WORDS correctly. Frontend: found 1 REGRESSION (fixed) — profile.tsx imported only `validateNickname` from src/utils/nickname but the refactored `openProfileEdit` (line 308) and save handler (line 547) still call `sanitizeNicknameInput` which was NOT imported, producing a runtime red-screen 'sanitizeNicknameInput is not defined' the moment the user tapped MODIFICA PROFILO. Added `sanitizeNicknameInput` to the import list in /app/frontend/app/(tabs)/profile.tsx line 17. After the fix all three extracted modals open, render their extracted content (nickname/name/photos/bio/socials fields for Edit; 9 category chips for Prefs; 25 profession options for Profession) and close cleanly via their X buttons with no crashes. No other refactor breakage detected.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "app/(tabs)/profile.tsx",
+        "issue": "FIXED during test: `sanitizeNicknameInput` was used at lines 308 and 547 but not imported (only `validateNickname` was imported from @/src/utils/nickname). Tapping MODIFICA PROFILO threw a red-screen 'sanitizeNicknameInput is not defined' via openProfileEdit. Reference: /app/frontend/app/(tabs)/profile.tsx:17 (added sanitizeNicknameInput to the import).",
+        "testID": "profile-edit-button",
+        "priority": "HIGH"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {
+        "component": "stories/viewer/[userId].tsx (pre-existing, not caused by this refactor)",
+        "issue": "props.pointerEvents is deprecated — use style.pointerEvents. Warning still fires during navigation. Same issue reported in iteration_61. Not touched by the current refactor."
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_refactor_regression.py",
+    "/app/test_reports/pytest/refactor_regression.xml"
+  ],
+  "action_items": [
+    "No further action needed — the missing `sanitizeNicknameInput` import in profile.tsx line 17 has been added by the testing agent and profile edit flow is verified working end-to-end.",
+    "Double-check whether any OTHER symbol was dropped from imports during the profile refactor (a quick eslint no-undef sweep on profile.tsx would surface anything similar).",
+    "Consider carrying over the stale pointerEvents deprecation fix from iteration 61 backlog (not caused by this refactor)."
+  ],
+  "critical_code_review_comments": [
+    "server.py still opens with `from pydantic import BaseModel, Field, EmailStr` (line 20) even though every Pydantic body was moved to models.py — the direct pydantic import is only kept for one or two remaining inline schemas; if none remain the top-level import can be dropped.",
+    "helpers.py exports lowercase names (now_utc, iso_utc, new_id, hash_password, verify_password, strip_data_url, hashtag_norm, extract_subject_from_title, is_stance_party, clean_subject, HASHTAG_STOPWORDS) and server.py re-aliases most of them with underscore prefixes (`iso_utc as _iso_utc`). Consider standardising: either export underscore names from helpers.py directly or drop the aliases in server.py — the mixed convention is a source of future drift like the one we just hit in profile.tsx.",
+    "moderation.py imports `emergentintegrations.llm.chat` lazily inside the function — good — but the module-level `logger = logging.getLogger(__name__)` will log under 'moderation' whereas server.py logs under 'server'. Consider passing/using the same logger name so the JSON audit trail stays cohesive.",
+    "profile.tsx after refactor is still 1439 lines with plenty of state (photos, socials, prefs) that could be lifted into a `useProfileState` hook to bring the file below the 1000-line target the refactor implicitly aimed for."
+  ],
+  "updated_files": [
+    "/app/frontend/app/(tabs)/profile.tsx (line 17: added `sanitizeNicknameInput` to import from @/src/utils/nickname)",
+    "/app/backend/tests/test_refactor_regression.py (new regression suite)"
+  ],
+  "success_rate": {
+    "backend": "100% (14/14 endpoints)",
+    "frontend": "100% (all 3 extracted modals open + close correctly after the import fix)"
+  },
+  "seed_data_creation": "Used the pre-verified seed user chat_a@test.it (see /app/memory/test_credentials.md). Ephemeral signups (TEST_regress_<hex>@test.it) are created by the signup test but land in `requires_verification` state (no email delivery in this env) — DB rows exist but are harmless.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "The only refactor regression was the missing `sanitizeNicknameInput` import in profile.tsx (fixed). Backend regression suite `test_refactor_regression.py` covers signup/login/anonymous/me/categories/professions/feuds/hype/vote/comment (clean + blocked)/stories/support and can be reused as a smoke test for future backend refactors. Endpoints return `{key: [...]}` dicts for categories/professions/feuds/hype (not raw lists) — the suite uses a `_unwrap` helper to handle either shape. auth/login+signup returns `{token, user}` where `user.user_id` (NOT `user.id`) is the canonical id — /api/auth/me returns `{user: {...}}` with the same key. Fresh signups return `{requires_verification: true, email, message}` and no token, so tests must fall back to the seed user for authenticated calls.",
+  "rca_of_issue": "PRIMARY BUG (fixed): During the profile.tsx refactor the main agent moved photo/socials/bio/nickname UI into <EditProfileModal>, which correctly imports `sanitizeNicknameInput`. However, TWO call sites in the parent (`openProfileEdit` at line 308 and the save handler at line 547) still call the function directly, and the parent's import statement (line 17) was NOT updated to keep it. Result: as soon as the user taps the MODIFICA PROFILO button, JS throws `ReferenceError: sanitizeNicknameInput is not defined`, React Native shows the red screen and the modal never mounts. Mitigation applied: added `sanitizeNicknameInput` back to the import from `@/src/utils/nickname` — no logic change required. RE-TEST post-fix: all three modals open successfully (edit modal shows nickname/name/photos/bio/socials; prefs modal shows 9 category chips; profession modal shows 25 options) and close cleanly via their X buttons with zero console errors."
+}
