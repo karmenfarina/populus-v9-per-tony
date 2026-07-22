@@ -140,7 +140,13 @@ export default function AuthScreen() {
       }
       setError("Email di verifica inviata. Controlla la casella (e la cartella spam).");
     } catch (e: any) {
-      setError(e?.message || "Errore invio email.");
+      const fbCode = e?.code as string | undefined;
+      const fbMsg: Record<string, string> = {
+        'auth/too-many-requests': "Troppi tentativi. Aspetta qualche minuto e riprova.",
+        'auth/network-request-failed': "Nessuna connessione. Riprova.",
+        'auth/user-not-found': "Nessun account con questa email.",
+      };
+      setError((fbCode && fbMsg[fbCode]) || e?.message || "Errore invio email.");
     } finally { setResending(false); }
   };
 
@@ -165,19 +171,13 @@ export default function AuthScreen() {
                 key={m}
                 testID={`auth-tab-${m}`}
                 style={[styles.tab, mode === m && styles.tabActive]}
-                onPress={async () => {
+                onPress={() => {
                   setError(null);
                   setPendingVerify(null);
-                  // Google is a one-tap flow: fire the redirect immediately
-                  // instead of switching the form layout (avoids a UI flash
-                  // before the browser leaves the app).
-                  if (m === "google") {
-                    setLoading(true);
-                    try { await loginWithGoogle(); }
-                    catch (e: any) { setError(e?.message || "Errore"); }
-                    finally { setLoading(false); }
-                    return;
-                  }
+                  // All tabs (including Google) just switch mode. The
+                  // actual Google OAuth redirect is triggered by the red
+                  // CTA below ("CONTINUA CON GOOGLE") so the user has
+                  // a chance to confirm before leaving the app.
                   setMode(m);
                 }}
               >
