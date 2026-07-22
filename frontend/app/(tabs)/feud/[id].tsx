@@ -16,7 +16,6 @@ import FeudStatsModal from "@/src/components/FeudStatsModal";
 import AiFactionSummaryModal from "@/src/components/AiFactionSummaryModal";
 import ShareSheet from "@/src/components/ShareSheet";
 import InAppShareSheet from "@/src/components/InAppShareSheet";
-import AdBanner from "@/src/ads/AdBanner";
 import { useUIPrefs } from "@/src/ui/UIPrefs";
 import { useAuth } from "@/src/auth/AuthContext";
 
@@ -481,12 +480,9 @@ export default function FeudDetail() {
             </View>
           )}
 
-          {/* Real AdMob banner — replaces the previous mock sponsor
-              box. Renders test ads until we replace prod unit IDs in
-              `src/ads/config.ts` and rebuild via Emergent Publish.
-              Web: nothing. Expo Go: placeholder. Native: live banner. */}
-          <AdBanner placement="feud-detail" />
-
+          {/* Category-mapped sponsors moved back to the home feed
+              intercalation. On feud detail we keep a lean layout —
+              no full-width banner between the article and the poll. */}
           <View style={styles.pollWrap}>
             <Text style={styles.question}>{feud.question}</Text>
             <View style={styles.pollSplit}>
