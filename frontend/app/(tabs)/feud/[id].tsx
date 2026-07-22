@@ -481,17 +481,15 @@ export default function FeudDetail() {
             </View>
           )}
 
-          {/* In-feud ad slot — roughly mid-way through the article,
-              right before the poll. This is where the original mock
-              "sponsor" box sat in the previous design. Web: whole slot
-              is skipped (no banner would render underneath and the
-              disclosure label would sit alone as visual noise). */}
-          {Platform.OS !== "web" && (
-            <View style={styles.inFeudAdSlot} testID="ad-slot-feud-detail">
-              <Text style={styles.inFeudAdLabel}>PUBBLICITÀ</Text>
-              <AdBanner placement="feud-detail" />
-            </View>
-          )}
+          {/* In-feud ad slot — mid-way through the article, right
+              before the poll. Same slot the old mock "sponsor" box
+              occupied. On web the <AdBanner /> component renders a
+              visual placeholder (AdMob has no web SDK); on native
+              it renders the real banner (test or prod based on IDs). */}
+          <View style={styles.inFeudAdSlot} testID="ad-slot-feud-detail">
+            <Text style={styles.inFeudAdLabel}>PUBBLICITÀ</Text>
+            <AdBanner placement="feud-detail" />
+          </View>
 
           <View style={styles.pollWrap}>
             <Text style={styles.question}>{feud.question}</Text>

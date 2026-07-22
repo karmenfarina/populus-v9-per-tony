@@ -43,17 +43,20 @@ type Props = {
 };
 
 export default function AdBanner({ placement, style }: Props) {
-  // ── Web ─────────────────────────────────────────────
-  if (Platform.OS === "web") {
-    return null;
-  }
-
-  // ── Expo Go (JS-only, no native module) ────────────
-  if (isExpoGo) {
+  // ── Web (no AdMob SDK) OR Expo Go (native module not linked) ──
+  // Both render the same "SPAZIO PUBBLICITARIO" placeholder so the
+  // developer/user can visually verify where the banner will appear
+  // in the eventual production build. AdMob only renders real ads
+  // on a real native release build.
+  if (Platform.OS === "web" || isExpoGo) {
     return (
       <View style={[styles.placeholder, style]} testID={`ad-placeholder-${placement || "default"}`}>
         <Text style={styles.placeholderLabel}>SPAZIO PUBBLICITARIO</Text>
-        <Text style={styles.placeholderSub}>Attivo dopo il build nativo</Text>
+        <Text style={styles.placeholderSub}>
+          {Platform.OS === "web"
+            ? "Visibile solo nel build nativo di produzione"
+            : "Attivo dopo il build nativo"}
+        </Text>
       </View>
     );
   }
