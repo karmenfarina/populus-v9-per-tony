@@ -46,25 +46,6 @@ export default function MessagesListScreen() {
   const [confirmDelete, setConfirmDelete] = useState<Conversation | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  const deleteChat = useCallback(async () => {
-    if (!confirmDelete || deleting) return;
-    setDeleting(true);
-    const target = confirmDelete.other_user.user_id;
-    // Optimistic: remove the row immediately so the UI feels snappy.
-    // If the request fails we re-load to restore the true state.
-    setConvs((prev) => prev.filter((c) => c.other_user.user_id !== target));
-    try {
-      await api.clearConversation(target);
-      await refreshBadge();
-    } catch {
-      // Restore on failure.
-      await load();
-    } finally {
-      setDeleting(false);
-      setConfirmDelete(null);
-    }
-  }, [confirmDelete, deleting, refreshBadge, load]);
-
   const load = useCallback(async () => {
     try {
       const r = await api.conversations();
@@ -134,6 +115,25 @@ export default function MessagesListScreen() {
     await refreshBadge();
     setRefreshing(false);
   }, [load, refreshBadge]);
+
+  const deleteChat = useCallback(async () => {
+    if (!confirmDelete || deleting) return;
+    setDeleting(true);
+    const target = confirmDelete.other_user.user_id;
+    // Optimistic: remove the row immediately so the UI feels snappy.
+    // If the request fails we re-load to restore the true state.
+    setConvs((prev) => prev.filter((c) => c.other_user.user_id !== target));
+    try {
+      await api.clearConversation(target);
+      await refreshBadge();
+    } catch {
+      // Restore on failure.
+      await load();
+    } finally {
+      setDeleting(false);
+      setConfirmDelete(null);
+    }
+  }, [confirmDelete, deleting, refreshBadge, load]);
 
   if (!user || user.is_anonymous) {
     return (
