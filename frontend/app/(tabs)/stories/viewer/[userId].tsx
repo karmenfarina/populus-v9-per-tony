@@ -193,18 +193,65 @@ export default function StoriesViewer() {
         targetStories = (r?.stories || []) as Story[];
         cacheRef.current.set(nextUid, targetStories);
       } catch {
-        // Skip broken user entirely and recurse to the one after —
-        // avoids a dead-end where feed advertised a user but the
-        // stories endpoint failed.
-        setCurrentUserId(nextUid);
-        return;
+        // Skip broken/empty user and hop to the one AFTER without
+        // touching currentUserId (setState would trigger a full
+        // reload for that empty user). Just call jumpToUser again
+        // starting from the same index — we already advanced by
+        // targetIdx locally, so we need to pretend we're on
+        // `nextUid` for the recursion. Easiest way: skip inline.
+        targetStories = [];
       }
     }
     if (!targetStories || targetStories.length === 0) {
-      // Empty target — jump one more in the same direction.
-      setCurrentUserId(nextUid);
-      // Recurse using a microtask so the state settles first.
-      setTimeout(() => jumpToUser(direction), 0);
+      // Empty target — advance one more in the same direction by
+      // temporarily pretending we're at nextUid via the feed order.
+      // We DON'T setCurrentUserId here to avoid firing the load
+      // effect on a user with no stories. Instead we mutate the
+      // feed order lookup by re-invoking jumpToUser after telling
+      // it the "current" is nextUid via a ref-only override.
+      // Simpler: just look up the next user relative to nextUid
+      // and recurse inline.
+      const nowOrder = feedOrderRef.current;
+      const skipIdx = nowOrder.indexOf(nextUid);
+      const followingIdx = direction === "next" ? skipIdx + 1 : skipIdx - 1;
+      if (followingIdx < 0 || followingIdx >= nowOrder.length) {
+        closeViewer();
+        return;
+      }
+      // Temporarily pretend we're on nextUid so the next recursion
+      // starts from the right spot. Use ref only.
+      feedOrderRef.current = nowOrder;
+      // Direct recursion — this call will process `followingIdx`.
+      // We simulate by adjusting the perceived currentUserId via
+      // a local variable.
+      // Simplest reliable approach: manually replicate the target
+      // hop rather than recursing.
+      const followingUid = nowOrder[followingIdx];
+      let followingStories = cacheRef.current.get(followingUid) || null;
+      if (!followingStories) {
+        try {
+          const rr: any = await api.storiesByUser(followingUid);
+          followingStories = (rr?.stories || []) as Story[];
+          cacheRef.current.set(followingUid, followingStories);
+        } catch {
+          followingStories = [];
+        }
+      }
+      if (!followingStories || followingStories.length === 0) {
+        closeViewer();
+        return;
+      }
+      const fIdx = startFromLast
+        ? followingStories.length - 1
+        : Math.max(0, followingStories.findIndex((s) => !s.viewed) >= 0
+            ? followingStories.findIndex((s) => !s.viewed)
+            : 0);
+      internalNavRef.current = true;
+      setCurrentUserId(followingUid);
+      setStories(followingStories);
+      setIdx(fIdx);
+      setProgress(0);
+      autoCloseFiredRef.current = false;
       return;
     }
     const nextIdx = startFromLast
@@ -213,6 +260,7 @@ export default function StoriesViewer() {
           ? targetStories.findIndex((s) => !s.viewed)
           : 0);
     // Atomic swap.
+    internalNavRef.current = true;
     setCurrentUserId(nextUid);
     setStories(targetStories);
     setIdx(nextIdx);
@@ -258,12 +306,44 @@ export default function StoriesViewer() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [closeViewer]);
 
-  // Run the initial fetch exactly ONCE on mount — subsequent user
-  // switches are handled internally by jumpToUser (no remount).
+  // Ref used to distinguish an INTERNAL user swap (jumpToUser) from
+  // an EXTERNAL one (route param change / fresh mount). Internal
+  // swaps do their own atomic setStories/setIdx and must NOT trigger
+  // a full `load()` — that would cause the black flash we removed.
+  const internalNavRef = useRef(false);
+
+  // Keep currentUserId in sync with the route parameter. When the
+  // viewer route changes (e.g. user closes the viewer, then taps a
+  // DIFFERENT ring in the StoriesBar) Expo Router may re-use the
+  // mounted component and simply update the params — the state
+  // wouldn't refresh otherwise and the viewer would stay stuck on
+  // the previous user's stories. Same trick handles the case where
+  // `useLocalSearchParams` hydrates AFTER first render on native.
   useEffect(() => {
+    const nextId = String(initialUserId || "");
+    if (!nextId || nextId === currentUserId) return;
+    setCurrentUserId(nextId);
+    setInitialLoading(true);
+    setProgress(0);
+    autoCloseFiredRef.current = false;
+    // External navigation — allow the load effect below to run.
+    internalNavRef.current = false;
+  }, [initialUserId, currentUserId]);
+
+  // Load whenever currentUserId changes (fresh mount OR external
+  // route change). Internal jumps (jumpToUser) skip this via the
+  // internalNavRef guard because they already did an atomic swap
+  // using the prefetched cache — re-loading would blank the frame.
+  useEffect(() => {
+    if (!currentUserId) return;
+    if (internalNavRef.current) {
+      // Consume the flag — this cycle was set by jumpToUser.
+      internalNavRef.current = false;
+      return;
+    }
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [currentUserId]);
 
   // Prefetch the immediately-adjacent users' stories in the background
   // so jumpToUser can swap atomically with no flash. Runs whenever
