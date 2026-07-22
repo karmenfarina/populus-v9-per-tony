@@ -300,6 +300,10 @@ export default function StoriesViewer() {
         setIdx(firstUnseen >= 0 ? firstUnseen : 0);
       }
       setProgress(0);
+      // Unfreeze the auto-advance timer now that we've committed the
+      // right user's stories. The route-sync effect had frozen it
+      // via autoCloseFiredRef=true to prevent a stale-user tick.
+      autoCloseFiredRef.current = false;
     } catch (e: any) {
       Alert.alert("Errore", e?.message || "Impossibile caricare le storie");
       closeViewer();
@@ -333,9 +337,19 @@ export default function StoriesViewer() {
     if (!nextId) return;
     setCurrentUserId((prev) => {
       if (prev === nextId) return prev;
+      // CRITICAL: clear the previous user's stories BEFORE load()
+      // runs. If we didn't, the auto-advance timer could tick against
+      // the OLD user's story array — hitting the last story of the
+      // PREVIOUS ring and calling jumpToUser("next"), which would
+      // navigate to the profile right after (the exact bug the user
+      // reported: "tapping my ring sometimes opens the second
+      // profile"). Freezing the timer via autoCloseFiredRef=true is
+      // a belt-and-braces safeguard for the same race.
       setInitialLoading(true);
+      setStories([]);
+      setIdx(0);
       setProgress(0);
-      autoCloseFiredRef.current = false;
+      autoCloseFiredRef.current = true;
       // External navigation — force the next load effect to run.
       internalNavRef.current = false;
       return nextId;
