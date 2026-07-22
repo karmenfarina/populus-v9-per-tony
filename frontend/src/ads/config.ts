@@ -25,8 +25,8 @@ export const TEST_BANNER_UNIT_ID_IOS = "ca-app-pub-3940256099942544/2934735716";
 
 // ↓ REPLACE THESE WITH YOUR REAL AD UNIT IDS ONCE YOU HAVE AN ADMOB
 // ACCOUNT APPROVED. Keep the format ca-app-pub-XXXXXXXXX/XXXXXXXXX.
-export const PROD_BANNER_UNIT_ID_ANDROID = ""; // e.g. "ca-app-pub-XXXXXXXXXXXXXXXX/YYYYYYYYYY"
-export const PROD_BANNER_UNIT_ID_IOS = ""; // e.g. "ca-app-pub-XXXXXXXXXXXXXXXX/YYYYYYYYYY"
+export const PROD_BANNER_UNIT_ID_ANDROID = "ca-app-pub-5117475525408614/9356461869";
+export const PROD_BANNER_UNIT_ID_IOS = "ca-app-pub-5117475525408614/2938393171";
 
 /**
  * Resolves the correct banner unit ID for the current platform.
