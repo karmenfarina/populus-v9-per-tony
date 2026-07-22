@@ -329,6 +329,29 @@ export default function StoriesViewer() {
       setFeedOrder(order);
       cacheRef.current.set(uid, rows);
       if (!rows.length) {
+        // Defensive re-check: transient empty responses (e.g. the
+        // just-published story hasn't been indexed yet, or the feed
+        // races with a story expiry) shouldn't kick the user back to
+        // home. Wait a bit and retry ONCE before giving up — this
+        // eliminates the "tap friend's ring, get bounced back to
+        // home" symptom the user reported during upload windows.
+        try {
+          await new Promise((r) => setTimeout(r, 600));
+          if (myToken !== loadTokenRef.current) return;
+          const retry: any = await api.storiesByUser(uid);
+          const retryRows: Story[] = retry?.stories || [];
+          if (myToken !== loadTokenRef.current) return;
+          if (retryRows.length) {
+            cacheRef.current.set(uid, retryRows);
+            setStories(retryRows);
+            const firstUnseen = retryRows.findIndex((s) => !s.viewed);
+            setIdx(startFromLast ? retryRows.length - 1 : (firstUnseen >= 0 ? firstUnseen : 0));
+            setProgress(0);
+            autoCloseFiredRef.current = false;
+            return;
+          }
+        } catch { /* fall through to close */ }
+        if (myToken !== loadTokenRef.current) return;
         setTimeout(() => closeViewer(), 100);
         return;
       }
@@ -377,28 +400,33 @@ export default function StoriesViewer() {
   // that `initialUserId !== currentUserId`, and forcibly RESET
   // currentUserId back to the stale route param — causing a black
   // flash and an immediate "return to first user" bounce.
+  //
+  // Uses a ref-only comparison + a batch of setState calls so we can
+  // synchronously clear the previous user's stories BEFORE the load
+  // effect runs. Previously did setState-inside-setState-updater which
+  // was fragile under React 18's stricter batching semantics.
+  const currentUserIdRef = useRef<string>(currentUserId);
+  useEffect(() => { currentUserIdRef.current = currentUserId; }, [currentUserId]);
   useEffect(() => {
     const nextId = String(initialUserId || "");
     if (!nextId) return;
-    setCurrentUserId((prev) => {
-      if (prev === nextId) return prev;
-      // CRITICAL: clear the previous user's stories BEFORE load()
-      // runs. If we didn't, the auto-advance timer could tick against
-      // the OLD user's story array — hitting the last story of the
-      // PREVIOUS ring and calling jumpToUser("next"), which would
-      // navigate to the profile right after (the exact bug the user
-      // reported: "tapping my ring sometimes opens the second
-      // profile"). Freezing the timer via autoCloseFiredRef=true is
-      // a belt-and-braces safeguard for the same race.
-      setInitialLoading(true);
-      setStories([]);
-      setIdx(0);
-      setProgress(0);
-      autoCloseFiredRef.current = true;
-      // External navigation — force the next load effect to run.
-      internalNavRef.current = false;
-      return nextId;
-    });
+    if (currentUserIdRef.current === nextId) return;
+    // CRITICAL: clear the previous user's stories BEFORE load()
+    // runs. If we didn't, the auto-advance timer could tick against
+    // the OLD user's story array — hitting the last story of the
+    // PREVIOUS ring and calling jumpToUser("next"), which would
+    // navigate to the profile right after (the exact bug the user
+    // reported: "tapping my ring sometimes opens the second
+    // profile"). Freezing the timer via autoCloseFiredRef=true is
+    // a belt-and-braces safeguard for the same race.
+    setInitialLoading(true);
+    setStories([]);
+    setIdx(0);
+    setProgress(0);
+    autoCloseFiredRef.current = true;
+    // External navigation — force the next load effect to run.
+    internalNavRef.current = false;
+    setCurrentUserId(nextId);
   }, [initialUserId]);
 
   // Load whenever currentUserId changes (fresh mount OR external

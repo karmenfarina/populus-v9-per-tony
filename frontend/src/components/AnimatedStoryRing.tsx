@@ -83,6 +83,7 @@ export default function AnimatedStoryRing({
     return (
       <View style={[styles.wrap, { width: size, height: size, borderRadius: outerR }]}>
         <Animated.View
+          pointerEvents="none"
           style={[
             StyleSheet.absoluteFillObject,
             { borderRadius: outerR, transform: [{ rotate }] },
@@ -96,10 +97,12 @@ export default function AnimatedStoryRing({
               StyleSheet.absoluteFillObject,
               { borderRadius: outerR },
             ]}
+            pointerEvents="none"
           />
         </Animated.View>
         {/* Inner mask — reveals the avatar photo. */}
         <View
+          pointerEvents="none"
           style={{
             width: innerSize,
             height: innerSize,
@@ -131,6 +134,7 @@ export default function AnimatedStoryRing({
       ]}
     >
       <View
+        pointerEvents="none"
         style={{
           width: innerSize,
           height: innerSize,
