@@ -1,8 +1,8 @@
-import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import * as WebBrowser from 'expo-web-browser';
 import * as Linking from 'expo-linking';
 import { Platform } from 'react-native';
-import { api, getToken, setToken, User } from '../api';
+import { api, ApiError, getToken, setToken, User } from '../api';
 
 type AuthState = {
   user: User | null;
@@ -38,15 +38,59 @@ export function useAuth() {
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  // Guard against processing the SAME `session_id` twice. In dev, React
+  // StrictMode double-invokes useEffect. In prod, a fast remount (e.g.
+  // Fast Refresh, route change during mount) can also cause the hash
+  // parser to run twice before `history.replaceState` clears it. Both
+  // paths would call `/auth/google-session` twice → duplicate work on
+  // the backend, occasional consent-screen re-prompts on Emergent's
+  // side, and noisy logs. The ref survives re-renders.
+  const processedSessionIds = useRef<Set<string>>(new Set());
+  const processingLock = useRef<Promise<boolean> | null>(null);
 
   const refreshMe = useCallback(async () => {
-    try {
-      const t = await getToken();
-      if (!t) { setUser(null); return; }
-      const res = await api.me();
-      setUser(normalizeUser(res.user));
-    } catch {
+    // Read the persisted session token first.
+    const t = await getToken();
+    if (!t) { setUser(null); return; }
+    // Retry `/auth/me` up to 3 times with a short backoff. Post-fork or
+    // right after a deploy, the backend can respond with a 5xx/network
+    // hiccup on the first call — silently trying again avoids kicking a
+    // logged-in user back to the Google login flow (which is what forces
+    // them through the Emergent consent screen again).
+    const attempts = [0, 500, 1500];
+    let lastStatus = -1;
+    let lastErr: any = null;
+    for (let i = 0; i < attempts.length; i++) {
+      if (attempts[i] > 0) {
+        await new Promise((r) => setTimeout(r, attempts[i]));
+      }
+      try {
+        const res = await api.me();
+        setUser(normalizeUser(res.user));
+        return;
+      } catch (e: any) {
+        lastErr = e;
+        lastStatus = e instanceof ApiError ? e.status : -1;
+        // Terminal cases: don't retry.
+        // - 401 → session is truly dead, drop the token
+        // - 403 → app-level auth denial, treat as invalid too
+        // - 404 → shouldn't happen but stop the loop
+        if (lastStatus === 401 || lastStatus === 403 || lastStatus === 404) break;
+      }
+    }
+    // We exhausted retries. Only clear the stored token when the server
+    // explicitly told us the session is dead. On network/5xx/transient
+    // failures we KEEP the token so the next cold start can recover the
+    // session without forcing the user through Google + Emergent consent
+    // all over again.
+    if (lastStatus === 401 || lastStatus === 403) {
       await setToken(null);
+      setUser(null);
+    } else {
+      console.warn('[Auth] refreshMe transient failure, keeping token', {
+        status: lastStatus,
+        message: lastErr?.message,
+      });
       setUser(null);
     }
   }, []);
@@ -57,15 +101,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!url) return false;
     const m = url.match(/[#?&]session_id=([^&]+)/);
     if (!m || !m[1]) return false;
-    try {
-      const sid = decodeURIComponent(m[1]);
-      const res = await api.googleSession(sid);
-      await setToken(res.token);
-      setUser(normalizeUser(res.user));
-      return true;
-    } catch {
-      return false;
+    const sid = decodeURIComponent(m[1]);
+    // De-dupe: never process the same session_id twice, even across
+    // React StrictMode double-invocations or Fast Refresh remounts.
+    if (processedSessionIds.current.has(sid)) return true;
+    // Serialize concurrent callers so a race between (mount, hot deep-link
+    // listener, cold-start deep link) doesn't fire two backend requests.
+    if (processingLock.current) {
+      return processingLock.current;
     }
+    const task = (async () => {
+      try {
+        const res = await api.googleSession(sid);
+        processedSessionIds.current.add(sid);
+        await setToken(res.token);
+        setUser(normalizeUser(res.user));
+        return true;
+      } catch {
+        return false;
+      } finally {
+        processingLock.current = null;
+      }
+    })();
+    processingLock.current = task;
+    return task;
   }, []);
 
   useEffect(() => {
@@ -177,11 +236,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const url = (await Promise.race([browserPromise, linkPromise])) as string | null;
     handled = true;
     if (!url) throw new Error('Login Google annullato');
-    const hashMatch = url.match(/[#?&]session_id=([^&]+)/);
-    if (!hashMatch) throw new Error('Session ID mancante nella risposta di Google');
-    const session_id = decodeURIComponent(hashMatch[1]);
-    const res = await api.googleSession(session_id);
-    await applyAuthResult(res);
+    // Route through `processSessionUrl` so the shared dedupe lock catches
+    // the race between this call and the global deep-link listener (which
+    // also fires when Android delivers the callback URL to the running
+    // app). Without the lock we would call `/api/auth/google-session`
+    // twice for the same `session_id` — that in turn nudges Emergent
+    // into re-showing the consent screen on subsequent logins.
+    const ok = await processSessionUrl(url);
+    if (!ok) throw new Error('Session ID mancante nella risposta di Google');
   };
 
   const logout = async () => {
