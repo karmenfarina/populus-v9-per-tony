@@ -149,11 +149,11 @@ export default function StoriesBar() {
   };
 
   const myGroup = groups.find((g) => g.is_mine) || null;
-  // Only show friends whose stories I haven't seen yet — matches the
-  // user requirement: "quando è stata guardata deve sparire". Users
-  // whose stories are all viewed disappear from the strip until they
-  // post something new (which flips has_unseen back to true).
-  const otherGroups = groups.filter((g) => !g.is_mine && g.has_unseen);
+  // Show ALL friends who have stories in the last 24h — whether the
+  // user has viewed them or not. Viewed rings stay in the strip but
+  // switch to their `seen` (faded outline) variant. Filtering them
+  // out would drop chats-with-context the user still wants to see.
+  const otherGroups = groups.filter((g) => !g.is_mine);
 
   return (
     <View style={styles.container} testID="stories-bar">
