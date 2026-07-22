@@ -91,7 +91,7 @@ function timeAgo(iso: string): string {
 
 export default function StoriesViewer() {
   const router = useRouter();
-  const { userId } = useLocalSearchParams<{ userId: string }>();
+  const { userId, startAt } = useLocalSearchParams<{ userId: string; startAt?: string }>();
   const { user: me } = useAuth();
   const [stories, setStories] = useState<Story[]>([]);
   const [idx, setIdx] = useState(0);
@@ -99,6 +99,12 @@ export default function StoriesViewer() {
   const [replyText, setReplyText] = useState("");
   const [sending, setSending] = useState(false);
   const [paused, setPaused] = useState(false);
+  // Ordered list of ALL user_ids that currently have stories in my
+  // feed. Used to seamlessly jump between users' rings when the
+  // current user's stories end (or when tapping "prev" at idx 0).
+  // Same order as the horizontal StoriesBar on the home screen: my
+  // own group first (if any), then friends by has_unseen priority.
+  const [feedOrder, setFeedOrder] = useState<string[]>([]);
   // Progress is a plain number 0..1 driven by a setInterval so the
   // rendering stays deterministic across web + native (Animated.Value
   // with useNativeDriver:false was flaky on web at story transitions).
@@ -134,26 +140,69 @@ export default function StoriesViewer() {
   const storiesRef = useRef<Story[]>([]);
   const idxRef = useRef(0);
   const pausedRef = useRef(false);
+  const feedOrderRef = useRef<string[]>([]);
   useEffect(() => { storiesRef.current = stories; }, [stories]);
   useEffect(() => { idxRef.current = idx; }, [idx]);
   useEffect(() => { pausedRef.current = paused; }, [paused]);
+  useEffect(() => { feedOrderRef.current = feedOrder; }, [feedOrder]);
 
   const currentStory = stories[idx] || null;
   const isOwnStory = me?.user_id === currentStory?.user_id;
+
+  // Jumps to the next user with stories (relative to `userId`) in the
+  // feed order. If no next user exists, closes the viewer. Uses
+  // router.replace so the back stack stays clean (a single "viewer"
+  // entry, never a chain of them).
+  const jumpToUser = useCallback((direction: "next" | "prev") => {
+    const order = feedOrderRef.current;
+    if (!order.length) { closeViewer(); return; }
+    const currentIdx = order.indexOf(String(userId));
+    if (currentIdx < 0) { closeViewer(); return; }
+    const targetIdx = direction === "next" ? currentIdx + 1 : currentIdx - 1;
+    if (targetIdx < 0 || targetIdx >= order.length) {
+      closeViewer();
+      return;
+    }
+    const nextUid = order[targetIdx];
+    router.replace({
+      pathname: "/stories/viewer/[userId]",
+      params: {
+        userId: nextUid,
+        // When jumping BACKWARDS we open the previous user's LAST
+        // story (matches Instagram behaviour). Forward jumps default
+        // to the first unseen story (handled in load()).
+        ...(direction === "prev" ? { startAt: "last" } : {}),
+      },
+    } as any);
+  }, [userId, router, closeViewer]);
 
   const load = useCallback(async () => {
     if (!userId) return;
     setLoading(true);
     try {
-      const r: any = await api.storiesByUser(userId as string);
+      // Fetch this user's stories AND the full feed order in parallel.
+      // The feed lets us seamlessly transition to the next/previous
+      // user's ring when the current chain ends.
+      const [r, feed]: [any, any] = await Promise.all([
+        api.storiesByUser(userId as string),
+        api.storiesFeed().catch(() => ({ groups: [] })),
+      ]);
       const rows: Story[] = r?.stories || [];
+      const order = ((feed?.groups || []) as Array<{ user_id: string }>).map((g) => g.user_id);
+      setFeedOrder(order);
       if (!rows.length) {
         setTimeout(() => closeViewer(), 100);
         return;
       }
       setStories(rows);
-      const firstUnseen = rows.findIndex((s) => !s.viewed);
-      setIdx(firstUnseen >= 0 ? firstUnseen : 0);
+      if (startAt === "last") {
+        // Backwards navigation from the next user's ring — open on the
+        // last story so tapping "back" again continues the reverse walk.
+        setIdx(rows.length - 1);
+      } else {
+        const firstUnseen = rows.findIndex((s) => !s.viewed);
+        setIdx(firstUnseen >= 0 ? firstUnseen : 0);
+      }
       setProgress(0);
     } catch (e: any) {
       Alert.alert("Errore", e?.message || "Impossibile caricare le storie");
@@ -161,12 +210,12 @@ export default function StoriesViewer() {
     } finally {
       setLoading(false);
     }
-  }, [userId, closeViewer]);
+  }, [userId, startAt, closeViewer]);
 
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId]);
+  }, [userId, startAt]);
 
   // Single global interval that ticks 20 times a second, driving the
   // progress bar of the CURRENT story. Uses `useFocusEffect` (not
@@ -195,9 +244,12 @@ export default function StoriesViewer() {
           if (next >= 1) {
             const currentIdx = idxRef.current;
             if (currentIdx + 1 >= storiesRef.current.length) {
+              // End of THIS user's chain — try to hop to the next
+              // user's ring instead of closing. jumpToUser falls
+              // back to closeViewer() if there's no next user.
               autoCloseFiredRef.current = true;
               clearInterval(timer);
-              closeViewer();
+              jumpToUser("next");
               return 1;
             }
             setIdx(currentIdx + 1);
@@ -207,7 +259,7 @@ export default function StoriesViewer() {
         });
       }, TICK_MS);
       return () => clearInterval(timer);
-    }, [loading, stories.length, closeViewer]),
+    }, [loading, stories.length, closeViewer, jumpToUser]),
   );
 
   // Reset progress every time the user manually navigates to a new
@@ -225,7 +277,14 @@ export default function StoriesViewer() {
   }, [currentStory?.story_id]);
 
   const goPrev = () => {
-    if (idx === 0) { setProgress(0); return; }
+    if (idx === 0) {
+      // At the very first story of this user — walk backwards into
+      // the previous user's ring (Instagram-style). If there is no
+      // previous user, just reset the progress to 0 (matches the
+      // original behaviour of "stay on story 1").
+      jumpToUser("prev");
+      return;
+    }
     setIdx(idx - 1);
     setProgress(0);
   };
@@ -243,7 +302,10 @@ export default function StoriesViewer() {
 
   const goNext = () => {
     if (idx + 1 >= stories.length) {
-      closeViewer();
+      // End of this user's chain — hop to next user's ring instead
+      // of closing. jumpToUser falls back to closeViewer if there's
+      // no next user in the feed.
+      jumpToUser("next");
       return;
     }
     setIdx(idx + 1);
