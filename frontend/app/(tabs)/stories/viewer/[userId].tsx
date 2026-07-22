@@ -268,27 +268,30 @@ export default function StoriesViewer() {
     autoCloseFiredRef.current = false;
   }, [currentUserId, closeViewer]);
 
-  const load = useCallback(async () => {
-    if (!currentUserId) return;
+  // Load takes an explicit `uid` argument (rather than closing over
+  // `currentUserId`) so we never call it against a stale closure —
+  // the effect below can pass the newly-updated user id directly.
+  const load = useCallback(async (uid: string, startFromLast: boolean) => {
+    if (!uid) return;
     setInitialLoading(true);
     try {
       // Fetch this user's stories AND the full feed order in parallel.
       // The feed lets us seamlessly transition to the next/previous
       // user's ring when the current chain ends.
       const [r, feed]: [any, any] = await Promise.all([
-        api.storiesByUser(currentUserId),
+        api.storiesByUser(uid),
         api.storiesFeed().catch(() => ({ groups: [] })),
       ]);
       const rows: Story[] = r?.stories || [];
       const order = ((feed?.groups || []) as Array<{ user_id: string }>).map((g) => g.user_id);
       setFeedOrder(order);
-      cacheRef.current.set(currentUserId, rows);
+      cacheRef.current.set(uid, rows);
       if (!rows.length) {
         setTimeout(() => closeViewer(), 100);
         return;
       }
       setStories(rows);
-      if (initialStartAt === "last") {
+      if (startFromLast) {
         // Backwards navigation from the next user's ring — open on the
         // last story so tapping "back" again continues the reverse walk.
         setIdx(rows.length - 1);
@@ -303,7 +306,6 @@ export default function StoriesViewer() {
     } finally {
       setInitialLoading(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [closeViewer]);
 
   // Ref used to distinguish an INTERNAL user swap (jumpToUser) from
@@ -341,7 +343,7 @@ export default function StoriesViewer() {
       internalNavRef.current = false;
       return;
     }
-    load();
+    load(currentUserId, initialStartAt === "last");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUserId]);
 
