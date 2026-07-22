@@ -569,6 +569,32 @@ async def _evaluate_and_notify_badge_change(user_id: str) -> None:
         logger.warning(f"badge notification emit failed for {user_id}: {e}")
 
 
+async def _hydrate_primary_photo(payload: dict) -> dict:
+    """Attach the primary profile photo blob to a `_public_user` payload.
+    Kept as a small async helper so we can call it from ALL auth-adjacent
+    endpoints (login, signup, google-session, anonymous, update_profile,
+    /auth/me) without duplicating the DB read. Degrades silently on
+    failure — callers still get the base payload.
+    """
+    try:
+        pid = payload.get('primary_photo_id')
+        if not pid:
+            return payload
+        photo = await db.user_photos.find_one(
+            {'user_id': payload.get('user_id'), 'photo_id': pid},
+            {'_id': 0, 'data': 1, 'mime': 1},
+        )
+        if photo and photo.get('data'):
+            payload['primary_photo'] = {
+                'photo_id': pid,
+                'data': photo['data'],
+                'mime': photo.get('mime') or 'image/jpeg',
+            }
+    except Exception as e:
+        logger.warning(f"_hydrate_primary_photo failed: {e}")
+    return payload
+
+
 def _public_user(u: dict) -> dict:
     return {
         'user_id': u['user_id'],
@@ -713,7 +739,7 @@ async def verify_email(body: VerifyEmailBody):
         except Exception as e:
             logger.warning(f"deferred anon migration failed {pending_from}->{user_id}: {e}")
     fresh = await db.users.find_one({'user_id': user_id}, {'_id': 0})
-    return {'ok': True, 'token': make_jwt(user_id), 'user': _public_user(fresh)}
+    return {'ok': True, 'token': make_jwt(user_id), 'user': await _hydrate_primary_photo(_public_user(fresh))}
 
 
 @api_router.post('/auth/resend-verification')
@@ -850,7 +876,7 @@ async def login(body: LoginBody, authorization: Optional[str] = Header(None)):
             user = await db.users.find_one({'user_id': user['user_id']}, {'_id': 0})
     except Exception as e:
         logger.warning(f"login-time anon migration failed: {e}")
-    return {'token': make_jwt(user['user_id']), 'user': _public_user(user)}
+    return {'token': make_jwt(user['user_id']), 'user': await _hydrate_primary_photo(_public_user(user))}
 
 
 @api_router.post('/auth/anonymous')
@@ -866,7 +892,7 @@ async def anonymous(body: AnonymousBody):
         'favorite_categories': [],
     }
     await db.users.insert_one(user)
-    return {'token': make_jwt(user_id), 'user': _public_user(user)}
+    return {'token': make_jwt(user_id), 'user': await _hydrate_primary_photo(_public_user(user))}
 
 
 @api_router.post('/auth/google-session')
@@ -936,7 +962,7 @@ async def google_session(body: GoogleSessionBody, authorization: Optional[str] =
         },
         upsert=True,
     )
-    return {'token': session_token, 'user': _public_user(user)}
+    return {'token': session_token, 'user': await _hydrate_primary_photo(_public_user(user))}
 
 
 @api_router.get('/auth/me')
@@ -964,26 +990,10 @@ async def me(user: dict = Depends(get_current_user)):
     except Exception as e:
         logger.warning(f"me() alignment recompute failed: {e}")
     payload = _public_user(user)
-    # Hydrate the primary profile photo blob directly on the /auth/me
-    # response so the app has an avatar to show on the very first paint
-    # — no more "initials flash" while StoriesBar waits for /stories/feed.
-    # Kept out of `_public_user` (sync) because reading the photo blob
-    # is an async DB call. We degrade silently on failure.
-    try:
-        pid = payload.get('primary_photo_id')
-        if pid:
-            photo = await db.user_photos.find_one(
-                {'user_id': user['user_id'], 'photo_id': pid},
-                {'_id': 0, 'data': 1, 'mime': 1},
-            )
-            if photo and photo.get('data'):
-                payload['primary_photo'] = {
-                    'photo_id': pid,
-                    'data': photo['data'],
-                    'mime': photo.get('mime') or 'image/jpeg',
-                }
-    except Exception as e:
-        logger.warning(f"me() primary photo hydration failed: {e}")
+    # Delegate primary_photo hydration to the shared helper (also used
+    # by login/signup/google-session/anonymous), so all auth entry
+    # points return a consistent shape.
+    payload = await _hydrate_primary_photo(payload)
     return {'user': payload}
 
 
@@ -1082,7 +1092,7 @@ async def update_profile(body: ProfileBody, user: dict = Depends(get_current_use
         updates['display_name'] = dn or None
     await db.users.update_one({'user_id': user['user_id']}, {'$set': updates})
     updated = await db.users.find_one({'user_id': user['user_id']}, {'_id': 0})
-    return {'user': _public_user(updated)}
+    return {'user': await _hydrate_primary_photo(_public_user(updated))}
 
 
 ALLOWED_SOCIAL_KEYS = {'instagram', 'tiktok', 'twitter', 'youtube', 'website'}
@@ -1137,7 +1147,7 @@ async def update_details(body: DetailsBody, user: dict = Depends(get_current_use
     updates['details_updated_at'] = now_utc()
     await db.users.update_one({'user_id': user['user_id']}, {'$set': updates})
     updated = await db.users.find_one({'user_id': user['user_id']}, {'_id': 0})
-    return {'user': _public_user(updated)}
+    return {'user': await _hydrate_primary_photo(_public_user(updated))}
 
 
 # _strip_data_url moved to backend/helpers.py
@@ -5902,10 +5912,23 @@ async def create_story(body: StoryCreateBody, user: dict = Depends(get_current_u
         counts = await _compute_category_comment_counts(user['user_id'])
         earned = counts.get(cat_id, 0) >= threshold
         if not earned:
-            # Admin-granted override (see `_build_category_badge_payload`).
+            # Admin-granted override — historically the field was written
+            # in TWO different formats in the codebase:
+            #   1. list of dicts:   [{"category": "politica", "tier": 1}]
+            #      (this is what `_build_category_badge_payload` reads)
+            #   2. list of strings: ["politica:1"]
+            # Accept both so the "unlocked" state stays consistent between
+            # the modal (dict format) and the share flow (was string only).
             granted = user.get('granted_category_badges') or []
-            granted_key = f"{cat_id}:{tier}"
-            earned = granted_key in granted
+            for g in granted:
+                if isinstance(g, dict):
+                    if g.get('category') == cat_id and int(g.get('tier') or 0) == tier:
+                        earned = True
+                        break
+                elif isinstance(g, str):
+                    if g == f"{cat_id}:{tier}":
+                        earned = True
+                        break
         if not earned:
             raise HTTPException(status_code=403, detail="Devi prima sbloccare questa spilla.")
         badge_payload = {'badge_category': cat_id, 'badge_tier': tier}
