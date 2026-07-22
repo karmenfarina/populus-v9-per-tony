@@ -72,6 +72,14 @@ export default function AuthScreen() {
         await anonymous(nickname.trim());
       } else if (mode === "google") {
         await loginWithGoogle();
+        // On web, loginWithGoogle sets `window.location.href` and returns
+        // synchronously — the browser navigates away moments later. If we
+        // fall through to `router.replace("/")` in that tiny gap, Expo
+        // Router re-mounts `auth.tsx`, which resets `mode` to its default
+        // ("email") and flashes the wrong tab for one frame before the
+        // actual Google redirect happens. On native the WebBrowser flow
+        // is fully awaited so router.replace below is safe and needed.
+        if (Platform.OS === 'web') return;
       }
       // Route based on onboarding: index.tsx will handle deep redirect on next mount,
       // but here we push explicitly for immediacy.
