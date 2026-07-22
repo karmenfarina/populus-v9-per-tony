@@ -105,21 +105,22 @@ export default function StoriesViewer() {
   // multiple buttons does NOT render properly on React Native Web.
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
 
-  // Ref set the moment we start closing the viewer — every timer /
-  // interval callback checks this and short-circuits so we never
-  // schedule a second `router.back()` (which used to pile up dozens
-  // of GO_BACK calls when auto-advancing the last story).
-  const closedRef = useRef(false);
+  // Guard that flags "the interval has already scheduled a close" so
+  // we don't pile up router.back()/replace calls when the last story
+  // ends. It is NOT used by the X button, delete, or manual goNext —
+  // those must always work even after an auto-advance close attempt.
+  const autoCloseFiredRef = useRef(false);
 
   const closeViewer = useCallback(() => {
-    if (closedRef.current) return;
-    closedRef.current = true;
-    // Use router.replace on web where GO_BACK is broken for tab
-    // screens with href:null (RN Web logs "GO_BACK was not handled").
-    // On native `router.back()` is the right call.
+    // On web `router.back()` for tabs with `href:null` prints a
+    // GO_BACK-not-handled warning and does nothing, so we use replace.
+    // On native `router.back()` is preferred to keep the natural nav
+    // history. Falls back to replace when there's no history to pop.
     if (Platform.OS === "web") {
       router.replace("/" as any);
-    } else if ((router as any).canGoBack?.()) {
+      return;
+    }
+    if ((router as any).canGoBack?.()) {
       router.back();
     } else {
       router.replace("/" as any);
@@ -174,10 +175,10 @@ export default function StoriesViewer() {
     const TICK_MS = 50;
     const INCREMENT = TICK_MS / STORY_DURATION_MS;
     const timer = setInterval(() => {
-      // If the viewer is already being torn down, do NOT process any
-      // more ticks — otherwise setState + router calls pile up and
-      // corrupt the navigation history.
-      if (closedRef.current) {
+      // If the interval already scheduled an auto-close on the final
+      // story, freeze — otherwise every tick would schedule ANOTHER
+      // close and stack navigation would get flooded.
+      if (autoCloseFiredRef.current) {
         clearInterval(timer);
         return;
       }
@@ -188,8 +189,8 @@ export default function StoriesViewer() {
           // Time's up — auto-advance to the next story in the queue.
           const currentIdx = idxRef.current;
           if (currentIdx + 1 >= storiesRef.current.length) {
-            // End of queue → close viewer. Guard against multiple
-            // scheduled closes with `closedRef` inside `closeViewer`.
+            // End of queue → close viewer, but ONLY once.
+            autoCloseFiredRef.current = true;
             clearInterval(timer);
             closeViewer();
             return 1;
@@ -390,6 +391,11 @@ export default function StoriesViewer() {
               touches. This structure guarantees identical behaviour
               on both web and native, unlike box-none which has subtle
               cross-platform differences. */}
+          {/* Card + CTA wrapped in a container that has the horizontal
+              padding — the outer `body` deliberately has NO padding so
+              the tap zones underneath extend all the way to the screen
+              edges. */}
+          <View style={styles.cardWrap} pointerEvents="box-none">
           <View style={[styles.card, { pointerEvents: "none" as any }]}>
             {currentStory.feud ? (
               <>
@@ -445,6 +451,7 @@ export default function StoriesViewer() {
               <Ionicons name="chevron-forward" size={16} color={colors.brandPrimary} />
             </Pressable>
           ) : null}
+          </View>
         </View>
 
         {/* Reply row — hidden on my own stories */}
@@ -582,8 +589,15 @@ const styles = StyleSheet.create({
   },
   body: {
     flex: 1,
-    paddingHorizontal: spacing.md,
+    // NO horizontal padding here — the tap zones (position:absolute
+    // left:0 / right:0) must cover the ENTIRE screen width, edge to
+    // edge, so a user resting their thumb near the border still hits
+    // prev/next. Card padding is applied via `cardWrap` below.
     justifyContent: "center",
+  },
+  cardWrap: {
+    paddingHorizontal: spacing.md,
+    alignItems: "stretch",
   },
   tapZone: {
     position: "absolute",

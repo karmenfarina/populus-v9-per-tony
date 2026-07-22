@@ -35,6 +35,14 @@ export default function FeudDetail() {
   const goBack = () => {
     if (from === "top") { router.replace("/top"); return; }
     if (from === "notifications") { router.replace("/notifications"); return; }
+    // From a story viewer — return to the SAME author's viewer so
+    // the user resumes the queue where they left off. The `from`
+    // param is expected to be `/stories/viewer/{userId}` (the exact
+    // path the caller constructed).
+    if (typeof from === "string" && from.startsWith("/stories/viewer/")) {
+      router.replace(from as any);
+      return;
+    }
     // When opened from a chat message (shared_feud card), go back to that
     // exact conversation — not the tab root or the feed. If for some reason
     // we don't have the counterparty user_id, fall back to the messages
