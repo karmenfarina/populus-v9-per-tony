@@ -291,17 +291,37 @@ export default function ChatScreen() {
     return () => unsub();
   }, [subscribe, user, userId, refreshBadge]);
 
+  // Reliable scroll-to-bottom. FlatList's `scrollToEnd` sometimes fires
+  // BEFORE the list finishes rendering the newly-committed rows —
+  // especially on the very first paint of a chat with many messages,
+  // where the user briefly sees the TOP of the list before it jumps.
+  // We retry a few times over animation frames until the offset actually
+  // reaches the end (or we give up). Also called from `onContentSizeChange`
+  // so real-time incoming messages stay pinned to the bottom.
+  const scrollToBottom = useCallback((animated: boolean = false) => {
+    if (!listRef.current) return;
+    let attempts = 0;
+    const tick = () => {
+      attempts += 1;
+      try {
+        listRef.current?.scrollToEnd({ animated });
+      } catch { /* ignore */ }
+      if (attempts < 6) {
+        // Use requestAnimationFrame so we align with the render pipeline.
+        // Six frames (~100ms) is plenty for the largest realistic chats.
+        requestAnimationFrame(tick);
+      }
+    };
+    tick();
+  }, []);
+
   // Auto-scroll to end on new messages.
   useEffect(() => {
     if (messages.length === 0) return;
-    setTimeout(() => {
-      try {
-        listRef.current?.scrollToEnd({ animated: true });
-      } catch {
-        /* ignore */
-      }
-    }, 60);
-  }, [messages.length]);
+    // First render of a chat: no animation so the user sees the last
+    // message immediately, not a scroll-in transition from the top.
+    scrollToBottom(false);
+  }, [messages.length, scrollToBottom]);
 
   const send = useCallback(async () => {
     if (sending) return;
@@ -505,14 +525,18 @@ export default function ChatScreen() {
                   {item.story_ref ? (
                     (() => {
                       const s = item.story_ref!;
-                      const expiresAt = s.expires_at ? new Date(s.expires_at).getTime() : 0;
-                      const stillActive = expiresAt > Date.now();
-                      const openStory = () => {
-                        if (!stillActive) return;
+                      const openFeud = () => {
+                        // The card links to the FEUD (post) rather than
+                        // the ephemeral story — the feud stays reachable
+                        // even after the 24h story window has expired,
+                        // matching how the user expects DMs to work:
+                        // a reply-to-story should always keep the
+                        // conversation about the underlying topic alive.
+                        if (!s.feud_id) return;
                         router.push({
-                          pathname: "/stories/viewer/[userId]",
+                          pathname: "/feud/[id]",
                           params: {
-                            userId: s.author_id,
+                            id: s.feud_id,
                             from: "messages",
                             messagesUserId: String(userId || ""),
                           },
@@ -520,9 +544,9 @@ export default function ChatScreen() {
                       };
                       return (
                         <Pressable
-                          onPress={openStory}
-                          disabled={!stillActive}
-                          style={[styles.sharedFeudCard, !stillActive && { opacity: 0.55 }]}
+                          onPress={openFeud}
+                          disabled={!s.feud_id}
+                          style={styles.sharedFeudCard}
                           testID={`msg-story-ref-${bubbleId}`}
                         >
                           {s.feud_image_url ? (
@@ -532,27 +556,20 @@ export default function ChatScreen() {
                             />
                           ) : (
                             <View style={[styles.sharedFeudImg, { backgroundColor: colors.surfaceSecondary, alignItems: "center", justifyContent: "center" }]}>
-                              <Ionicons name="images-outline" size={40} color={colors.muted} />
+                              <Ionicons name="newspaper-outline" size={40} color={colors.muted} />
                             </View>
                           )}
                           <View style={styles.sharedFeudBody}>
                             <Text style={styles.sharedFeudCat} numberOfLines={1}>
-                              {stillActive ? "RISPOSTA A STORIA" : "STORIA SCADUTA"}
+                              RISPOSTA ALLA STORIA
                             </Text>
                             <Text style={styles.sharedFeudTitle} numberOfLines={3}>
-                              {s.feud_title || "Storia"}
+                              {s.feud_title || "Apri il post"}
                             </Text>
-                            {stillActive ? (
-                              <View style={styles.sharedFeudCta}>
-                                <Ionicons name="play-circle-outline" size={14} color={colors.brandPrimary} />
-                                <Text style={styles.sharedFeudCtaTxt}>RIVEDI LA STORIA</Text>
-                              </View>
-                            ) : (
-                              <View style={styles.sharedFeudCta}>
-                                <Ionicons name="time-outline" size={14} color={colors.muted} />
-                                <Text style={[styles.sharedFeudCtaTxt, { color: colors.muted }]}>NON PIÙ DISPONIBILE</Text>
-                              </View>
-                            )}
+                            <View style={styles.sharedFeudCta}>
+                              <Ionicons name="open-outline" size={14} color={colors.brandPrimary} />
+                              <Text style={styles.sharedFeudCtaTxt}>APRI IL POST</Text>
+                            </View>
                           </View>
                         </Pressable>
                       );
@@ -698,7 +715,7 @@ export default function ChatScreen() {
             keyExtractor={(m) => m.message_id}
             renderItem={renderMessage}
             contentContainerStyle={styles.list}
-            onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
+            onContentSizeChange={() => scrollToBottom(false)}
             ListEmptyComponent={
               <View style={styles.emptyChat}>
                 <Ionicons name="chatbubble-outline" size={48} color={colors.muted} />

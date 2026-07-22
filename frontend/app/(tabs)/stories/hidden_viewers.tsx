@@ -121,7 +121,15 @@ export default function StoriesHiddenViewers() {
     <SafeAreaView style={styles.safe} edges={["top", "bottom"]} testID="stories-hidden-viewers">
       <View style={styles.header}>
         <Pressable
-          onPress={() => router.back()}
+          onPress={() => {
+            // This screen is reachable ONLY from Profile → the back
+            // button must always land the user back on their profile,
+            // NOT on Home. `router.back()` used to fall through to the
+            // tab stack's root (Home) when the intermediate history
+            // had been cleaned up. `router.replace("/profile")` gives
+            // us deterministic behaviour on every platform.
+            router.replace("/profile" as any);
+          }}
           style={styles.backBtn}
           testID="hidden-viewers-back"
         >

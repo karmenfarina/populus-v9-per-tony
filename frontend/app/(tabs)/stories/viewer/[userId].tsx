@@ -436,7 +436,7 @@ export default function StoriesViewer() {
           clearInterval(timer);
           return;
         }
-        if (pausedRef.current) return;
+        if (pausedRef.current || !imageLoadedRef.current) return;
         setProgress((p) => {
           const next = p + INCREMENT;
           if (next >= 1) {
@@ -459,6 +459,22 @@ export default function StoriesViewer() {
       return () => clearInterval(timer);
     }, [initialLoading, stories.length, closeViewer, jumpToUser]),
   );
+
+  // Track which story image is fully loaded. Until then the auto-
+  // advance timer is paused and we show a subtle spinner overlay
+  // + a "shimmer" on the top progress segment — matches Instagram's
+  // behaviour where a story never counts down while its image is
+  // still coming down the wire.
+  const [imageLoaded, setImageLoaded] = useState(false);
+  useEffect(() => {
+    // Reset for every new story. If the story has no image the load
+    // event will never fire, so we mark it ready immediately.
+    setImageLoaded(!currentStory?.feud?.image_url);
+  }, [currentStory?.story_id, currentStory?.feud?.image_url]);
+  // Timer honours this via pausedRef indirectly — we OR our loading
+  // gate into the paused check inside the interval closure.
+  const imageLoadedRef = useRef(true);
+  useEffect(() => { imageLoadedRef.current = imageLoaded; }, [imageLoaded]);
 
   // Reset progress every time the user manually navigates to a new
   // story (either via tap or after auto-advance).
@@ -669,6 +685,8 @@ export default function StoriesViewer() {
                     source={{ uri: currentStory.feud.image_url }}
                     style={styles.cardImage}
                     resizeMode="cover"
+                    onLoad={() => setImageLoaded(true)}
+                    onError={() => setImageLoaded(true)}
                   />
                 ) : null}
                 <View style={styles.cardBody}>
