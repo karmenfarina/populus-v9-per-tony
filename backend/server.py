@@ -963,7 +963,28 @@ async def me(user: dict = Depends(get_current_user)):
                     user = fresh
     except Exception as e:
         logger.warning(f"me() alignment recompute failed: {e}")
-    return {'user': _public_user(user)}
+    payload = _public_user(user)
+    # Hydrate the primary profile photo blob directly on the /auth/me
+    # response so the app has an avatar to show on the very first paint
+    # — no more "initials flash" while StoriesBar waits for /stories/feed.
+    # Kept out of `_public_user` (sync) because reading the photo blob
+    # is an async DB call. We degrade silently on failure.
+    try:
+        pid = payload.get('primary_photo_id')
+        if pid:
+            photo = await db.user_photos.find_one(
+                {'user_id': user['user_id'], 'photo_id': pid},
+                {'_id': 0, 'data': 1, 'mime': 1},
+            )
+            if photo and photo.get('data'):
+                payload['primary_photo'] = {
+                    'photo_id': pid,
+                    'data': photo['data'],
+                    'mime': photo.get('mime') or 'image/jpeg',
+                }
+    except Exception as e:
+        logger.warning(f"me() primary photo hydration failed: {e}")
+    return {'user': payload}
 
 
 VALID_CATEGORY_IDS = {'politica', 'tv', 'musica', 'sport', 'cinema', 'social', 'gossip', 'tech', 'cronaca'}

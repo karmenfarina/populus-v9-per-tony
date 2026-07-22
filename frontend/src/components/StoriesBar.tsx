@@ -340,14 +340,17 @@ export default function StoriesBar() {
             <View style={styles.avatarWrap}>
               {(() => {
                 // Prefer the group's `author.avatar` from /stories/feed
-                // (already normalised to a full data URL on the server)
-                // so my own ring uses the SAME photo the other users
-                // see — the "primary" one, not just position 0. Fall
-                // back to `user.photos[0]?.data` when the feed hasn't
-                // arrived yet, prefixing the raw base64 with the data
-                // URL scheme so <Image source> can actually render it.
-                const raw = myGroup?.author?.avatar
-                  ?? (user?.photos && user.photos[0]?.data ? user.photos[0].data : null);
+                // once available. On cold start `myGroup` is null until
+                // the feed lands — use `user.primary_photo` (hydrated
+                // by /auth/me) as the immediate fallback so we don't
+                // flash the initials placeholder before the real photo
+                // paints. `user.photos[0]?.data` remains a legacy
+                // safety net if `primary_photo` isn't populated.
+                const primary = user?.primary_photo?.data || null;
+                const legacy = (user as any)?.photos && (user as any).photos[0]?.data
+                  ? (user as any).photos[0].data
+                  : null;
+                const raw = myGroup?.author?.avatar ?? primary ?? legacy;
                 if (!raw) {
                   // No profile picture and no active story avatar.
                   // A plain empty gray circle read as a "broken image

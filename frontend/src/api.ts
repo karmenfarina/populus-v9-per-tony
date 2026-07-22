@@ -184,6 +184,19 @@ export const api = {
   storiesByUser: (userId: string) => request(`/stories/user/${userId}`),
   createStory: (feud_id: string, comment?: string) =>
     request('/stories', { method: 'POST', body: JSON.stringify({ feud_id, comment: comment || null }) }),
+  // Publish a "badge showcase" story — no feud reference, just the
+  // unlocked category badge the user wants to flex. The backend
+  // rejects tiers the user hasn't earned yet.
+  createBadgeStory: (badge_category: string, badge_tier: number, comment?: string) =>
+    request('/stories', {
+      method: 'POST',
+      body: JSON.stringify({
+        kind: 'badge',
+        badge_category,
+        badge_tier,
+        comment: comment || null,
+      }),
+    }),
   markStoryViewed: (story_id: string) =>
     request(`/stories/${story_id}/view`, { method: 'POST' }),
   deleteStory: (story_id: string) =>
@@ -296,6 +309,14 @@ export type User = {
   bio?: string | null;
   social_links?: { instagram?: string; tiktok?: string; twitter?: string; youtube?: string; website?: string };
   primary_photo_id?: string | null;
+  // Hydrated by `/auth/me` so the app can render the avatar before
+  // `/stories/feed` finishes — eliminates the initials-then-photo
+  // flash on cold start. Present only when the user has an avatar.
+  primary_photo?: {
+    photo_id: string;
+    data: string;
+    mime?: string;
+  } | null;
   photos_count?: number;
   badge: {
     unlocked: boolean;

@@ -7,9 +7,11 @@ import {
   ActivityIndicator,
   ScrollView,
   StyleSheet,
+  Alert,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { api } from "@/src/api";
+import { api, ApiError } from "@/src/api";
+import { useAuth } from "@/src/auth/AuthContext";
 import { colors, font, spacing } from "@/src/theme";
 
 /**
@@ -65,9 +67,62 @@ const CATEGORY_LABEL: Record<string, string> = {
 };
 
 export default function CategoryBadgesModal({ visible, userId, displayName, onClose }: Props) {
+  const { user } = useAuth();
+  const isOwnShelf = !!user && user.user_id === userId;
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [badges, setBadges] = useState<CategoryBadge[]>([]);
+  // Which tier the user is currently sharing — used to disable the
+  // tap and show an inline spinner without blocking the whole modal.
+  const [sharingKey, setSharingKey] = useState<string | null>(null);
+
+  const shareBadge = useCallback(
+    async (categoryId: string, tier: 1 | 2 | 3, tierName: string) => {
+      // Only owner can share their own badges — enforced on backend
+      // as well, but we don't even show the prompt on other profiles.
+      if (!isOwnShelf) return;
+      const key = `${categoryId}:${tier}`;
+      // Confirm dialog. Uses Alert.alert because this modal isn't
+      // itself nested inside another Modal — safe on iOS/Android/Web.
+      Alert.alert(
+        "Condividere questa spilla?",
+        `Pubblicheremo una storia di 24h che mostra "${tierName}" alla tua Cerchia.`,
+        [
+          { text: "Annulla", style: "cancel" },
+          {
+            text: "Condividi",
+            style: "default",
+            onPress: async () => {
+              setSharingKey(key);
+              try {
+                await api.createBadgeStory(categoryId, tier);
+                setSharingKey(null);
+                Alert.alert(
+                  "Storia pubblicata",
+                  "La tua spilla è ora visibile alla Cerchia per 24 ore.",
+                );
+              } catch (e: any) {
+                setSharingKey(null);
+                const status = e instanceof ApiError ? e.status : 0;
+                const detail = (e?.message || "").trim();
+                let title = "Impossibile pubblicare";
+                let message = detail || "Errore sconosciuto";
+                if (status === 429) {
+                  title = "Limite giornaliero raggiunto";
+                  message = detail || "Hai raggiunto il limite di storie di oggi. Riprova domani.";
+                } else if (status === 403) {
+                  title = "Non autorizzato";
+                  message = detail || "Non puoi condividere questa spilla.";
+                }
+                Alert.alert(title, message);
+              }
+            },
+          },
+        ],
+      );
+    },
+    [isOwnShelf],
+  );
 
   const load = useCallback(async () => {
     if (!userId) return;
@@ -119,6 +174,14 @@ export default function CategoryBadgesModal({ visible, userId, displayName, onCl
                   ? "Commenta le faide per iniziare la collezione"
                   : "Continua a commentare per sbloccarne di nuove"}
               </Text>
+              {isOwnShelf && unlockedCount > 0 && (
+                <View style={styles.shareHintRow}>
+                  <Ionicons name="arrow-redo" size={12} color={colors.brandPrimary} />
+                  <Text style={styles.shareHintTxt}>
+                    Tocca una spilla sbloccata per condividerla nelle storie
+                  </Text>
+                </View>
+              )}
             </View>
           ) : null}
 
@@ -151,15 +214,46 @@ export default function CategoryBadgesModal({ visible, userId, displayName, onCl
                   <View style={styles.tierRow}>
                     {cat.tiers.map((t) => {
                       const bgColor = t.unlocked ? cat.color : "#3A3A3A";
+                      const key = `${cat.category_id}:${t.tier}`;
+                      const isSharing = sharingKey === key;
+                      // Tap-to-share is only available on the owner's
+                      // own shelf AND only for UNLOCKED tiers. Locked
+                      // tiers stay non-interactive (nothing to share yet).
+                      const canShare = isOwnShelf && t.unlocked;
                       return (
-                        <View
+                        <Pressable
                           key={t.tier}
-                          style={[
+                          onPress={canShare ? () => shareBadge(cat.category_id, t.tier, t.name) : undefined}
+                          disabled={!canShare || isSharing}
+                          android_ripple={canShare ? { color: "rgba(255,255,255,0.25)", borderless: false } : undefined}
+                          style={({ pressed }) => [
                             styles.tierCard,
-                            { backgroundColor: bgColor, opacity: t.unlocked ? 1 : 0.55 },
+                            {
+                              backgroundColor: bgColor,
+                              opacity: t.unlocked ? (pressed && canShare ? 0.85 : 1) : 0.55,
+                              transform: pressed && canShare ? [{ scale: 0.97 }] : undefined,
+                            },
                           ]}
                           testID={`badge-${cat.category_id}-tier${t.tier}`}
+                          accessibilityRole={canShare ? "button" : "text"}
+                          accessibilityLabel={
+                            canShare
+                              ? `${t.name}, tocca per condividere nelle storie`
+                              : `${t.name}, ${t.unlocked ? "sbloccata" : "non ancora sbloccata"}`
+                          }
                         >
+                          {/* Small share affordance in the corner of
+                              every unlocked tier owned by the current
+                              user — signals the tap is available. */}
+                          {canShare && (
+                            <View style={styles.shareChip}>
+                              {isSharing ? (
+                                <ActivityIndicator size={10} color="#fff" />
+                              ) : (
+                                <Ionicons name="arrow-redo" size={11} color="#fff" />
+                              )}
+                            </View>
+                          )}
                           <Text style={styles.tierEmoji} numberOfLines={1}>{t.emoji}</Text>
                           <Text style={styles.tierName} numberOfLines={2}>{t.name}</Text>
                           <View style={styles.tierBadge}>
@@ -170,7 +264,7 @@ export default function CategoryBadgesModal({ visible, userId, displayName, onCl
                               ? `SBLOCCATA`
                               : `${Math.min(cat.count, t.threshold)}/${t.threshold}`}
                           </Text>
-                        </View>
+                        </Pressable>
                       );
                     })}
                   </View>
@@ -348,5 +442,30 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: "700",
     letterSpacing: 0.5,
+  },
+  // Small share affordance overlaid on the top-right of every
+  // unlocked tier card owned by the current user. Absolute positioning
+  // keeps the existing card layout intact.
+  shareChip: {
+    position: "absolute",
+    top: 6,
+    right: 6,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  shareHintRow: {
+    marginTop: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  shareHintTxt: {
+    color: colors.brandPrimary,
+    fontSize: font.sizes.xs,
+    fontWeight: "600",
   },
 });

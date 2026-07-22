@@ -1,0 +1,48 @@
+{
+  "summary": "Iter_68 verification: (1) /api/auth/me primary_photo hydration fix (flash del cerchio vuoto) and (2) badge story publishing + viewer rendering. BACKEND: 31/32 pytest pass, 1 skipped (badge happy-path needs admin grant endpoint not exposed). /auth/me returns {photo_id, data, mime} when primary exists (verified chat_a: primary_photo.data length=1456, mime='image/jpeg'), null/absent when no photo (verified fresh anonymous). Graceful degrade after delete works (200, primary_photo null). No regression on existing fields (user_id, nickname, primary_photo_id, auth_provider all present). Badge story kind validation: 200 backward-compat (feud_id only), 400 (bad kind/bad category/bad tier/missing category), 403 with exact Italian message 'Devi prima sbloccare questa spilla.', 404 (bogus feud_id). Feed hydration exposes kind + badge object with all required keys (category_id, category_label, color, icon, tier, name, emoji, threshold) for badge stories, and feud object for feud stories. Auth session regression suite 15/15 pass (signup verification flow, anon token, session upsert idempotency, logout). FRONTEND: mobile viewport 390x844, chat_a authenticated via same-origin fetch + localStorage.faide_token. api.ts confirmed exports api.createBadgeStory and User type has primary_photo. CategoryBadgesModal on OWN profile (chat_a) — modal opens via profile-badge testID, unlockedCount=0 so share hint correctly hidden; all 27 tier cards have aria-label 'non ancora sbloccata' and no 'tocca per condividere' variant (canShare gate works). On OTHER profile (chatUserB via public-badges-view-all) — modal opens, hint hidden, 0 cards with 'tocca per condividere' aria-label (isOwnShelf=false gate works). Viewer/[userId].tsx code inspection confirms badge card renders coloured background + category label + emoji + tier name + LIV.X threshold chip + 'SPILLA SBLOCCATA' text via testID='story-badge-card' AND the 'APRI LA FAIDA' CTA is gated by `currentStory.kind !== 'badge'` so it does NOT appear on badge stories. Live API 403 replay from browser confirms error path: {status:403, body:'{\"detail\":\"Devi prima sbloccare questa spilla.\"}'}. NOTE: happy-path UI (unlocked tier tap → Alert → success Alert) could not be executed live because neither seeded test user (chat_a, chat_b) has any unlocked category badge (0/27 both), and the backend admin endpoint to grant a badge is not exposed at the tested paths.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_auth_me_primary_photo.py",
+    "/app/backend/tests/test_stories_kind_badge.py",
+    "/app/backend/tests/test_stories_badge_feed_iter68.py",
+    "/app/test_reports/pytest/iter68_results.xml"
+  ],
+  "measurements": {
+    "auth_me_primary_photo_shape_chat_a": {"keys":["photo_id","data","mime"], "data_length": 1456, "mime": "image/jpeg", "photo_id": "ph_8f5825600849"},
+    "auth_me_primary_photo_anon": null,
+    "badge_403_body": "{\"detail\":\"Devi prima sbloccare questa spilla.\"}",
+    "own_shelf_tier_cards_count": 27,
+    "own_shelf_unlocked_count": 0,
+    "own_shelf_share_hint_visible": false,
+    "other_shelf_share_hint_visible": false,
+    "other_shelf_cards_with_share_aria": 0
+  },
+  "action_items": [
+    "OPTIONAL: expose a documented admin endpoint (e.g. POST /api/admin/users/{id}/grant_badge) so the badge-share happy-path can be verified end-to-end in CI. The 403 path is already covered; without a grant endpoint the 200 UI flow (unlocked tap → Alert → POST → success Alert) can only be verified by seeding data manually."
+  ],
+  "critical_code_review_comments": [
+    "server.py `_hydrate_story_row` (line 5769): correct — returns kind, feud=None for badge and badge=None-branch for feud (implicit). Consider making it explicit by always emitting `badge: null` for feud stories so frontend doesn't need optional chaining.",
+    "server.py `me()` primary_photo hydration (lines 967-986): well-guarded try/except with graceful degrade — good. Photo blob is inlined on every /auth/me call which may be heavy if the avatar is large (chat_a's is 1456 chars = tiny, but real users may hit 100-500KB). Consider capping data size or serving via a short-lived signed URL if payload becomes a bottleneck.",
+    "CategoryBadgesModal.tsx (line 224): Pressable receives onPress conditionally, but `disabled` covers both !canShare and isSharing — good UX (locked or busy = no-op).",
+    "viewer/[userId].tsx line 917 guard `currentStory.kind !== 'badge' && currentStory.feud`: correct — badge stories skip the CTA."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_auth_me_primary_photo.py (new)",
+    "/app/backend/tests/test_stories_badge_feed_iter68.py (new)"
+  ],
+  "success_rate": {
+    "backend": "100% (31/31 executed; 1 conditional-skip for admin-grant path)",
+    "frontend": "100% for verifiable scenarios (own-shelf modal, other-shelf modal, /auth/me hydration, badge 403 error path). Happy-path UI unverified — no user has an unlocked badge."
+  },
+  "seed_data_creation": "None persistent. Tests upload a 1x1 PNG to chat_a and immediately delete it, restoring the original primary_photo_id. Anonymous accounts created (ephemeral, no cleanup needed).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "chat_a and chat_b both have 0/27 unlocked category badges — the badge tap-to-share happy path can't be verified via UI without either (a) an admin endpoint to grant a badge or (b) seeding a user with >=100 comments in a category. Backend 403 path is fully covered. To auth in browser tests: POST /api/auth/login via page.evaluate (same-origin cookies), localStorage.setItem('faide_token', JSON.stringify(token)), then page.goto('/'). Wait ~5s for AuthContext hydration. CategoryBadgesModal opens via profile-badge (own) or public-badges-view-all (other user). testIDs on modal: category-badges-modal, category-badges-close, badge-{cat}-tier{1|2|3}. Aria-label for canShare tier = '${name}, tocca per condividere nelle storie'.",
+  "rca_of_issue": "N/A — no bugs found. Both fixes verified structurally + behaviourally."
+}

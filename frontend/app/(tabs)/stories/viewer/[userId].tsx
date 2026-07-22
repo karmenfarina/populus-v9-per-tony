@@ -63,13 +63,29 @@ type StoryFeud = {
   summary?: string;
 } | null;
 
+// Category-badge showcase payload — populated by the backend when a
+// story has `kind === 'badge'`. Rendered as a full-bleed coloured card
+// instead of the usual feud snapshot.
+type StoryBadge = {
+  category_id: string;
+  category_label: string;
+  color: string;
+  icon: string;
+  tier: 1 | 2 | 3;
+  name: string;
+  emoji: string;
+  threshold: number;
+} | null;
+
 type Story = {
   story_id: string;
   user_id: string;
+  kind?: 'feud' | 'badge';
   comment: string;
   created_at: string;
   expires_at: string;
   feud: StoryFeud;
+  badge?: StoryBadge;
   author: {
     user_id: string;
     nickname?: string | null;
@@ -821,7 +837,34 @@ export default function StoriesViewer() {
               taps at the very edges of the screen still register. */}
           <View style={styles.cardWrap}>
           <View style={[styles.card, { pointerEvents: "none" as any }]}>
-            {currentStory.feud ? (
+            {currentStory.kind === 'badge' && currentStory.badge ? (
+              // ─── Badge showcase card ────────────────────────────
+              // Full-bleed coloured background matching the category
+              // colour, big emoji, tier name and category label. The
+              // user shared this specifically to flex the achievement,
+              // so we lean into the visual.
+              <View
+                style={[
+                  styles.badgeCard,
+                  { backgroundColor: currentStory.badge.color },
+                ]}
+                testID="story-badge-card"
+              >
+                <Text style={styles.badgeCat} numberOfLines={1}>
+                  {(currentStory.badge.category_label || currentStory.badge.category_id).toUpperCase()}
+                </Text>
+                <Text style={styles.badgeEmoji}>{currentStory.badge.emoji}</Text>
+                <Text style={styles.badgeName} numberOfLines={2}>
+                  {currentStory.badge.name}
+                </Text>
+                <View style={styles.badgeTierChip}>
+                  <Text style={styles.badgeTierTxt}>
+                    LIV. {currentStory.badge.tier} · {currentStory.badge.threshold} COMMENTI
+                  </Text>
+                </View>
+                <Text style={styles.badgeUnlockedTxt}>SPILLA SBLOCCATA</Text>
+              </View>
+            ) : currentStory.feud ? (
               <>
                 {currentStory.feud.image_url ? (
                   <Image
@@ -868,10 +911,10 @@ export default function StoriesViewer() {
             ) : null}
           </View>
 
-          {/* Explicit "open feud" CTA — sibling of the card so it can
-              still receive taps despite the card being pointer-events:
-              none. Positioned right below the card in the layout flow. */}
-          {currentStory.feud ? (
+          {/* Explicit "open feud" CTA — only for feud stories. Badge
+              stories intentionally have no CTA: they're a static
+              showcase. */}
+          {currentStory.kind !== 'badge' && currentStory.feud ? (
             <Pressable onPress={openFeud} style={styles.openFeudBtn} testID="story-open-feud">
               <Text style={styles.openFeudTxt}>APRI LA FAIDA</Text>
               <Ionicons name="chevron-forward" size={16} color={colors.brandPrimary} />
@@ -1138,6 +1181,52 @@ const styles = StyleSheet.create({
   cardMissingTxt: {
     color: colors.muted,
     fontSize: font.sizes.sm,
+  },
+  // ─── Badge showcase card ─────────────────────────────────────
+  badgeCard: {
+    minHeight: 320,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.xl,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.md,
+  },
+  badgeCat: {
+    color: "rgba(255,255,255,0.85)",
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 2,
+  },
+  badgeEmoji: {
+    fontSize: 96,
+    lineHeight: 108,
+    textAlign: "center",
+  },
+  badgeName: {
+    color: "#fff",
+    fontSize: 22,
+    fontWeight: "800",
+    textAlign: "center",
+    letterSpacing: 0.5,
+  },
+  badgeTierChip: {
+    backgroundColor: "rgba(0,0,0,0.35)",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+  },
+  badgeTierTxt: {
+    color: "#fff",
+    fontSize: 10,
+    fontWeight: "700",
+    letterSpacing: 1.2,
+  },
+  badgeUnlockedTxt: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "700",
+    letterSpacing: 3,
+    marginTop: spacing.xs,
   },
   commentBox: {
     paddingHorizontal: spacing.md,
