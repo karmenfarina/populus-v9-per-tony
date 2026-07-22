@@ -13,6 +13,7 @@ import { UIPrefsProvider } from "@/src/ui/UIPrefs";
 import { NotificationsProvider } from "@/src/notifications/NotificationsContext";
 import { MessagingProvider } from "@/src/messaging/MessagingContext";
 import { StoryUploadProvider } from "@/src/stories/StoryUploadContext";
+import Constants from "expo-constants";
 
 LogBox.ignoreAllLogs(true);
 SplashScreen.preventAutoHideAsync();
@@ -49,6 +50,29 @@ export default function RootLayout() {
       SplashScreen.hideAsync();
     }
   }, [loaded, error]);
+
+  // ── Google Mobile Ads (AdMob) SDK initialisation ──
+  // Fires once at app cold start. Skipped on web (no SDK there) and
+  // in Expo Go (native module not linked → would throw). Wrapped in
+  // a try/catch so a bad AdMob config never crashes the entire app.
+  useEffect(() => {
+    if (Platform.OS === "web") return;
+    if (Constants.appOwnership === "expo") return; // Expo Go — skip
+    (async () => {
+      try {
+        // Uses the platform-aware wrapper — the web build gets a no-op
+        // stub, so this whole init sequence collapses to a Promise
+        // that resolves immediately on web (and is short-circuited
+        // above anyway by the Platform.OS check).
+        const { mobileAds } = await import("@/src/ads/mobileAds");
+        await mobileAds().initialize();
+      } catch (e) {
+        // AdMob init failure is non-fatal — the app should keep
+        // running, just without ads.
+        console.warn("[AdMob] initialize failed", e);
+      }
+    })();
+  }, []);
 
   // Deep-link routing when the user taps a push notification.
   useEffect(() => {

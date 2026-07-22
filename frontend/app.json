@@ -14,6 +14,7 @@
       "infoPlist": {
         "NSCameraUsageDescription": "Scatta foto per il tuo profilo",
         "NSPhotoLibraryUsageDescription": "Carica foto per il tuo profilo",
+        "NSUserTrackingUsageDescription": "Ti mostriamo pubblicità più pertinenti ai tuoi interessi.",
         "LSApplicationQueriesSchemes": [
           "instagram",
           "instagram-stories",
@@ -35,7 +36,8 @@
       "googleServicesFile": "./google-services.json",
       "permissions": [
         "CAMERA",
-        "READ_EXTERNAL_STORAGE"
+        "READ_EXTERNAL_STORAGE",
+        "com.google.android.gms.permission.AD_ID"
       ]
     },
     "web": {
@@ -55,7 +57,27 @@
         }
       ],
       "expo-video",
-      "expo-notifications"
+      "expo-notifications",
+      [
+        "react-native-google-mobile-ads",
+        {
+          "androidAppId": "ca-app-pub-3940256099942544~3347511713",
+          "iosAppId": "ca-app-pub-3940256099942544~1458002511",
+          "delayAppMeasurementInit": true
+        }
+      ],
+      [
+        "expo-tracking-transparency",
+        {
+          "userTrackingPermission": "Ti mostriamo pubblicità più pertinenti ai tuoi interessi."
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "ios": { "useFrameworks": "static" }
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

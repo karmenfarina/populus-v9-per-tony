@@ -1,0 +1,47 @@
+{
+  "summary": "Iter_71 frontend-only verification of the AdMob (react-native-google-mobile-ads 16.4.0) integration + platform-extension fix (mobileAds.native.ts / mobileAds.web.ts). Executed a Playwright smoke test at 375x667: (1) POST /api/auth/login for chat_a@test.it -> 200 + token; (2) home page GET / -> loads, title='Populus', renders login/onboarding screen, ZERO ad-* DOM nodes, ZERO 'codegenNativeComponent' console errors, ZERO 'google-mobile-ads' errors, ZERO pageerror events; (3) direct nav /feud/feud_38fc2c55b3fa -> renders successfully (testID=feud-detail-screen present, real feud article 'Meta lancia Content Seal' displayed), ZERO ad-* DOM nodes, NO 'SPAZIO PUBBLICITARIO' text (confirms AdBanner returns null on Platform.OS==='web' as intended), no red screen, no runtime exceptions. Backend regression smoke: /api/auth/me=200, /api/feuds=200 (169 feuds). Code review of /app/frontend/src/ads/* and app.json confirms: mobileAds.web.ts stub (BannerAd = () => null), config.ts.resolveBannerUnitId returns null on 'web' and Google TEST unit IDs when prod IDs empty, app.json plugin block has androidAppId/iosAppId test IDs, NSUserTrackingUsageDescription and com.google.android.gms.permission.AD_ID present. All acceptance criteria met.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "playwright-inline (see iter_71 log): /root/.emergent/automation_output/20260722_170229/console_20260722_170229.log"
+  ],
+  "measurements": {
+    "home_load_http": 200,
+    "home_title": "Populus",
+    "home_ad_elements_count": 0,
+    "home_codegennativecomponent_error": false,
+    "home_google_mobile_ads_error": false,
+    "feud_detail_screen_present": true,
+    "feud_detail_ad_elements_count": 0,
+    "feud_detail_placeholder_text_on_web": false,
+    "feud_detail_red_screen": false,
+    "auth_me_status": 200,
+    "feuds_list_status": 200,
+    "feuds_list_count": 169,
+    "page_errors_captured": 0
+  },
+  "action_items": [
+    "NON-BLOCKING: expo-notifications warns 'Listening to push token changes is not yet fully supported on web' — pre-existing, unrelated to AdMob; no action needed unless you want to gate the listener with Platform.OS !== 'web' (already done for other push code).",
+    "NON-BLOCKING: RN-Web deprecation warnings for 'shadow*' style props and 'props.pointerEvents' — pre-existing across the codebase, not introduced by iter_71. Consider a codebase-wide sweep in a future refactor."
+  ],
+  "critical_code_review_comments": [
+    "AdBanner.tsx: platform gating order (web -> Expo Go -> native) is correct. The unconditional top-level `import { BannerAd, BannerAdSize } from '@/src/ads/mobileAds'` is now safe because Metro picks the .web.ts stub on web, avoiding the codegenNativeComponent bundling issue that broke previous iterations.",
+    "mobileAds.web.ts: BannerAd = () => null and BannerAdSize as plain object literals — well-typed to match the native surface without pulling in react-native-google-mobile-ads at all. Note: `TestIds = { BANNER: '' }` is present but currently only BANNER is exposed; if future code references INTERSTITIAL / REWARDED it will silently be undefined. Suggest expanding to a full mirror of the native TestIds shape if new formats are added.",
+    "config.ts.resolveBannerUnitId: correctly returns null on 'web', TEST id in dev or when prod id is empty, prod id in release when non-empty. Logic reads cleanly. The two test IDs (Android 6300978111 / iOS 2934735716) match Google's published sample unit IDs.",
+    "_layout.tsx: mobileAds init is dynamic-imported and wrapped in try/catch; both the Platform.OS==='web' AND Constants.appOwnership==='expo' short-circuits fire before the import, so the .web.ts stub is never invoked at runtime on web (though it would degrade gracefully if it were). Good defense-in-depth.",
+    "app.json: react-native-google-mobile-ads plugin block correctly uses Google's official TEST App IDs (~3347511713 for Android, ~1458002511 for iOS). NSUserTrackingUsageDescription and com.google.android.gms.permission.AD_ID both present. delayAppMeasurementInit=true is the recommended default for GDPR consent flows — matches AdBanner's requestNonPersonalizedAdsOnly=true default. Ready for a native build.",
+    "feud/[id].tsx line 488: <AdBanner placement='feud-detail' /> is placed AFTER the sources box and BEFORE the poll — a good above-the-fold-ish position without being intrusive. The old mock sponsor UI is fully removed from this render path (sponsorBox/sponsorLabel/sponsorHeadline styles remain in the StyleSheet but are now dead code — minor cleanup opportunity)."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% smoke (2/2 endpoints)", "frontend": "100% (all AdMob acceptance criteria verified on web preview)"},
+  "seed_data_creation": "None (used existing chat_a@test.it / test123 fixture user + pre-existing feud_38fc2c55b3fa).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "The AdMob integration passes on web with zero DOM artifacts (as designed). To validate the Expo-Go placeholder path OR the real native BannerAd, a native/EAS build is required — cannot be tested in the web preview. If prod Ad Unit IDs are later populated in /app/frontend/src/ads/config.ts (PROD_BANNER_UNIT_ID_ANDROID / PROD_BANNER_UNIT_ID_IOS), a rebuild + on-device manual test is needed; the resolveBannerUnitId branch that uses them only fires when __DEV__ is false, so ensure the release build is used. The dead-code sponsor* styles in feud/[id].tsx StyleSheet can be trimmed in a future cleanup pass.",
+  "rca_of_issue": "N/A — no defects observed. The platform-extension fix (mobileAds.web.ts stub + mobileAds.native.ts real) successfully prevents Metro's web bundler from ever seeing the native-only react-native-google-mobile-ads imports, resolving the previous 'codegenNativeComponent' bundling failure. Runtime path on web: AdBanner renders, Platform.OS==='web' branch returns null immediately — no side effects, no DOM, no console noise."
+}
