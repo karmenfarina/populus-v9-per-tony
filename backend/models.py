@@ -159,7 +159,18 @@ class ReportUserBody(BaseModel):
 # Stories
 # --------------------------------------------------------------------
 class StoryCreateBody(BaseModel):
-    feud_id: str
+    # Two flavours of stories share the same endpoint:
+    #   - kind="feud"  (default, back-compat): must include `feud_id`.
+    #   - kind="badge": show off an unlocked CATEGORY badge — must
+    #                   include `badge_category` (registry key) and
+    #                   `badge_tier` (1..3). The `feud_id` field is
+    #                   ignored for this kind.
+    # The old contract (just `feud_id` in the body) keeps working
+    # because kind defaults to "feud".
+    kind: Optional[str] = Field(default="feud")
+    feud_id: Optional[str] = None
+    badge_category: Optional[str] = None
+    badge_tier: Optional[int] = None
     comment: Optional[str] = Field(default=None, max_length=STORY_COMMENT_MAX)
 
 

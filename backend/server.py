@@ -324,6 +324,21 @@ BADGE_META: dict = {
 # ────────────────────────────────────────────────────────────────
 CATEGORY_BADGE_THRESHOLDS = [100, 250, 500]
 
+# Human-readable Italian labels for each badge category. Mirrored on the
+# frontend `CATEGORY_LABEL` map — keep the two in sync when adding new
+# categories.
+_CATEGORY_LABELS_IT: dict = {
+    'politica': 'Politica',
+    'tv': 'Programmi TV',
+    'musica': 'Musica',
+    'sport': 'Sport',
+    'cinema': 'Cinema',
+    'social': 'Social',
+    'gossip': 'Gossip',
+    'cronaca': 'Cronaca',
+    'tech': 'Tech',
+}
+
 CATEGORY_BADGES: dict = {
     'politica': {
         'color': '#B03A2E',
@@ -5735,33 +5750,62 @@ async def _hydrate_story_row(story: dict, viewer_id: Optional[str]) -> dict:
     story doc so the frontend has everything it needs to render the
     fullscreen viewer without follow-up requests.
     """
+    kind = story.get('kind') or 'feud'
     out = {
         'story_id': story['story_id'],
         'user_id': story['user_id'],
+        'kind': kind,
         'feud_id': story.get('feud_id'),
         'comment': story.get('comment') or '',
         'created_at': _iso_utc(story['created_at']) if isinstance(story.get('created_at'), datetime) else story.get('created_at'),
         'expires_at': _iso_utc(story['expires_at']) if isinstance(story.get('expires_at'), datetime) else story.get('expires_at'),
     }
-    # Compact feud payload — just what the story card needs. Full detail
-    # is fetched only when the user actually taps through to /feud/[id].
-    feud = await db.feuds.find_one({'feud_id': out['feud_id']}, {'_id': 0})
-    if feud:
-        _attach_percentages(feud, revealed=False)
-        out['feud'] = {
-            'feud_id': feud['feud_id'],
-            'title': feud.get('title'),
-            'category': feud.get('category'),
-            'category_label': feud.get('category_label'),
-            'party_a': feud.get('party_a'),
-            'party_b': feud.get('party_b'),
-            'image_url': feud.get('image_url'),
-            'summary': feud.get('summary'),
-        }
-    else:
-        # Feud was deleted after the story was posted — surface a placeholder
-        # so the viewer can still show the author's comment without crashing.
+    if kind == 'badge':
+        # Badge showcase story — no feud reference, but we hydrate the
+        # badge metadata from the registry so the viewer can render a
+        # category-coloured card without extra round-trips.
+        cat_id = story.get('badge_category')
+        tier = int(story.get('badge_tier') or 0)
+        cat_meta = CATEGORY_BADGES.get(cat_id) if cat_id else None
+        tier_meta = None
+        if cat_meta and 1 <= tier <= 3:
+            tier_meta = cat_meta['tiers'][tier - 1]
+        if cat_meta and tier_meta:
+            out['badge'] = {
+                'category_id': cat_id,
+                'category_label': _CATEGORY_LABELS_IT.get(cat_id, cat_id),
+                'color': cat_meta['color'],
+                'icon': cat_meta['icon'],
+                'tier': tier,
+                'name': tier_meta['name'],
+                'emoji': tier_meta['emoji'],
+                'threshold': CATEGORY_BADGE_THRESHOLDS[tier - 1],
+            }
+        else:
+            # Registry drifted — degrade gracefully with a placeholder
+            # so the viewer can still render the author + comment.
+            out['badge'] = None
         out['feud'] = None
+    else:
+        # Compact feud payload — just what the story card needs. Full detail
+        # is fetched only when the user actually taps through to /feud/[id].
+        feud = await db.feuds.find_one({'feud_id': out['feud_id']}, {'_id': 0})
+        if feud:
+            _attach_percentages(feud, revealed=False)
+            out['feud'] = {
+                'feud_id': feud['feud_id'],
+                'title': feud.get('title'),
+                'category': feud.get('category'),
+                'category_label': feud.get('category_label'),
+                'party_a': feud.get('party_a'),
+                'party_b': feud.get('party_b'),
+                'image_url': feud.get('image_url'),
+                'summary': feud.get('summary'),
+            }
+        else:
+            # Feud was deleted after the story was posted — surface a placeholder
+            # so the viewer can still show the author's comment without crashing.
+            out['feud'] = None
     # Author profile — minimal projection to keep the payload light.
     author = await db.users.find_one(
         {'user_id': story['user_id']},
@@ -5807,24 +5851,57 @@ async def _hydrate_story_row(story: dict, viewer_id: Optional[str]) -> dict:
 async def create_story(body: StoryCreateBody, user: dict = Depends(get_current_user)):
     if user.get('auth_provider') == 'anonymous' or user.get('is_anonymous'):
         raise HTTPException(status_code=403, detail="Gli account anonimi non possono pubblicare storie")
-    # Referenced feud must exist — otherwise the story would be a broken card.
-    feud = await db.feuds.find_one({'feud_id': body.feud_id}, {'_id': 0, 'feud_id': 1})
-    if not feud:
-        raise HTTPException(status_code=404, detail='Faida non trovata')
+
+    kind = (body.kind or 'feud').lower()
+    if kind not in ('feud', 'badge'):
+        raise HTTPException(status_code=400, detail="Tipo storia non valido.")
+
+    feud_id: Optional[str] = None
+    badge_payload: Optional[dict] = None
+
+    if kind == 'feud':
+        if not body.feud_id:
+            raise HTTPException(status_code=400, detail="feud_id obbligatorio per le storie di tipo faida.")
+        # Referenced feud must exist — otherwise the story would be a broken card.
+        feud = await db.feuds.find_one({'feud_id': body.feud_id}, {'_id': 0, 'feud_id': 1})
+        if not feud:
+            raise HTTPException(status_code=404, detail='Faida non trovata')
+        feud_id = body.feud_id
+    else:
+        # Badge story — validate the user actually owns the badge tier
+        # they're trying to show off. The registered "alignment" badges
+        # (buon_senso / bastian_contrario) are NOT shareable via this
+        # flow by product decision — only the category badges.
+        cat_id = (body.badge_category or '').strip()
+        tier = int(body.badge_tier or 0)
+        if cat_id not in CATEGORY_BADGES or not (1 <= tier <= 3):
+            raise HTTPException(status_code=400, detail="Spilla non valida.")
+        threshold = CATEGORY_BADGE_THRESHOLDS[tier - 1]
+        # Count = category comment aggregate (matches the badge-unlock rule).
+        counts = await _compute_category_comment_counts(user['user_id'])
+        earned = counts.get(cat_id, 0) >= threshold
+        if not earned:
+            # Admin-granted override (see `_build_category_badge_payload`).
+            granted = user.get('granted_category_badges') or []
+            granted_key = f"{cat_id}:{tier}"
+            earned = granted_key in granted
+        if not earned:
+            raise HTTPException(status_code=403, detail="Devi prima sbloccare questa spilla.")
+        badge_payload = {'badge_category': cat_id, 'badge_tier': tier}
 
     # Comment moderation — same two-stage pipeline used by feud comments.
     clean_comment = ''
     if body.comment and body.comment.strip():
         clean_comment, flagged = _moderate_text(body.comment)
         if flagged:
-            await _log_flagged(user['user_id'], body.feud_id, body.comment, flagged)
+            await _log_flagged(user['user_id'], feud_id or f"badge:{badge_payload}", body.comment, flagged)
             raise HTTPException(
                 status_code=400,
                 detail=f"Commento bloccato: contiene termini non consentiti ({', '.join(flagged)})",
             )
         ai_safe, ai_reason = await _ai_moderate_comment(clean_comment)
         if not ai_safe:
-            await _log_flagged(user['user_id'], body.feud_id, clean_comment, [f'ai:{ai_reason or "unsafe"}'])
+            await _log_flagged(user['user_id'], feud_id or f"badge:{badge_payload}", clean_comment, [f'ai:{ai_reason or "unsafe"}'])
             raise HTTPException(
                 status_code=400,
                 detail='Commento bloccato: contenuto non consentito (hate speech, minacce o incitamento alla violenza).',
@@ -5846,12 +5923,15 @@ async def create_story(body: StoryCreateBody, user: dict = Depends(get_current_u
     doc = {
         'story_id': new_id('story'),
         'user_id': user['user_id'],
-        'feud_id': body.feud_id,
+        'kind': kind,
+        'feud_id': feud_id,
         'comment': clean_comment,
         'created_at': created,
         'expires_at': created + timedelta(hours=STORY_TTL_HOURS),
         'viewers': [],
     }
+    if badge_payload:
+        doc.update(badge_payload)
     await db.stories.insert_one(doc)
     return {'story': await _hydrate_story_row(doc, user['user_id'])}
 

@@ -11,7 +11,6 @@ import {
 } from "react-native";
 import { useRouter, useFocusEffect } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "@/src/api";
 import { useAuth } from "@/src/auth/AuthContext";
@@ -64,13 +63,15 @@ type LocalStoryGroup = {
 // Bar dims kept in constants so the parent screen can compute paddings
 // without duplicating magic numbers.
 export const STORIES_BAR_HEIGHT = 108;
-const CIRCLE_SIZE = 66;
-const RING_WIDTH = 3;
+const CIRCLE_SIZE = 56;
+const RING_WIDTH = 2.5;
 
-// Persistence key for the "did the user collapse the strip?" preference.
-// Kept per-device (AsyncStorage) so the choice survives cold starts but
-// doesn't leak between accounts you might sign in with on the same box.
-const COLLAPSED_STORAGE_KEY = "faide_stories_bar_collapsed";
+// NOTE: we intentionally do NOT persist the collapsed/expanded choice
+// across app launches. Product decision: every fresh app session
+// starts with the strip OPEN so returning users see who published
+// stories at a glance. Within the session the user can collapse it —
+// that state lives only in component memory and resets on the next
+// cold start.
 
 export default function StoriesBar() {
   const router = useRouter();
@@ -105,46 +106,17 @@ export default function StoriesBar() {
 
   // Collapsed / expanded state for the whole stories strip.
   //   collapsed = only the thin pill "Nuove storie" / "Storie" is shown
-  //   expanded  = the full horizontal ring strip (previous default)
+  //   expanded  = the full horizontal ring strip (default)
   //
-  // Default = collapsed (the point of this UI: keep the home feed
-  // uncluttered until the user WANTS to peek). We hydrate the choice
-  // from AsyncStorage once, on mount, so it persists across app cold
-  // starts. `hydratedCollapsed` gates the very first render so we
-  // don't briefly flash the expanded state before we know what the
-  // user preferred.
-  const [collapsed, setCollapsed] = useState<boolean>(true);
-  const [hydratedCollapsed, setHydratedCollapsed] = useState<boolean>(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const v = await AsyncStorage.getItem(COLLAPSED_STORAGE_KEY);
-        if (cancelled) return;
-        // Anything explicitly "0" (user tapped to expand) wins. Any
-        // other value (null, "1", legacy) → keep the default collapsed
-        // state. This makes "collapsed" the sticky default while still
-        // remembering an explicit expand.
-        if (v === "0") setCollapsed(false);
-      } catch {
-        /* ignore — storage failures fall back to collapsed default */
-      } finally {
-        if (!cancelled) setHydratedCollapsed(true);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  // Product decision: every fresh app session starts EXPANDED so
+  // returning users immediately see who has fresh stories. The user
+  // can collapse the strip in-session, but the choice does NOT
+  // persist across cold starts — we want the strip to reintroduce
+  // itself every time the app opens.
+  const [collapsed, setCollapsed] = useState<boolean>(false);
 
   const toggleCollapsed = useCallback(() => {
-    setCollapsed((prev) => {
-      const next = !prev;
-      // Best-effort persist; ignore write errors.
-      AsyncStorage.setItem(COLLAPSED_STORAGE_KEY, next ? "1" : "0").catch(() => {});
-      return next;
-    });
+    setCollapsed((prev) => !prev);
   }, []);
 
   const load = useCallback(async (opts?: { silent?: boolean }) => {
@@ -248,13 +220,10 @@ export default function StoriesBar() {
 
   // ------------------------------------------------------------------
   // COLLAPSED VIEW — thin pill, tap to expand.
-  // Rendered when:
-  //   * hydration of the persisted preference is done, AND
-  //   * user chose to keep the strip collapsed (default).
-  // The very first render (before hydration finishes) always shows
-  // the pill too, so we never briefly flash the tall expanded strip.
+  // Only rendered when the user explicitly collapsed the strip in
+  // this session (default is expanded).
   // ------------------------------------------------------------------
-  if (collapsed || !hydratedCollapsed) {
+  if (collapsed) {
     return (
       <View style={styles.collapsedContainer} testID="stories-bar-collapsed">
         <Pressable
@@ -497,24 +466,24 @@ export default function StoriesBar() {
 
 const styles = StyleSheet.create({
   container: {
-    // Expanded strip. Height = header (~28) + original strip (108).
-    // We stop hard-coding a single fixed height here so the header
-    // can breathe without cropping the circles below.
+    // Expanded strip. Slimmer than the original: circle 56 px + tight
+    // padding. The header still sits on top so the user can spot the
+    // "Nuove storie" cue and toggle the collapse.
     backgroundColor: colors.surface,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
-    paddingTop: 4,
+    paddingTop: 2,
   },
   expandedHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: spacing.md,
-    paddingBottom: 4,
+    paddingBottom: 2,
   },
   expandedHeaderLabel: {
     color: colors.muted,
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: "600",
     letterSpacing: 0.4,
     textTransform: "uppercase",
@@ -595,8 +564,8 @@ const styles = StyleSheet.create({
   scrollBody: {
     paddingHorizontal: spacing.md,
     alignItems: "center",
-    gap: spacing.md,
-    paddingBottom: 8,
+    gap: spacing.sm + 2,
+    paddingBottom: 6,
   },
   item: {
     width: CIRCLE_SIZE + 12,
@@ -650,19 +619,18 @@ const styles = StyleSheet.create({
   },
   avatarInitials: {
     color: colors.onSurface,
-    fontSize: 22,
+    // Scales with the smaller CIRCLE_SIZE (was 22 for 66 px). Keep
+    // the same ratio so the letters still visually center.
+    fontSize: 18,
     fontWeight: "700",
     letterSpacing: 0.5,
-    // Keep the letters visually centered even when the descender is
-    // taller than the ascender (works around the RN-Web baseline
-    // being higher than native).
-    lineHeight: 24,
+    lineHeight: 20,
     textAlign: "center",
     includeFontPadding: false,
   },
   label: {
-    marginTop: 4,
-    fontSize: 11,
+    marginTop: 3,
+    fontSize: 10,
     color: colors.onSurface,
     maxWidth: CIRCLE_SIZE + 12,
     textAlign: "center",
