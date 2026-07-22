@@ -100,7 +100,7 @@ function timeAgo(iso: string): string {
 
 export default function StoriesViewer() {
   const router = useRouter();
-  const { userId: initialUserId, startAt: initialStartAt } = useLocalSearchParams<{ userId: string; startAt?: string }>();
+  const { userId: initialUserId, startAt: initialStartAt, nav: navToken } = useLocalSearchParams<{ userId: string; startAt?: string; nav?: string }>();
   const { user: me } = useAuth();
   const { notifyStoryViewed } = useStoryUpload();
   // Current user whose stories are being played. Initialised from the
@@ -407,10 +407,24 @@ export default function StoriesViewer() {
   // was fragile under React 18's stricter batching semantics.
   const currentUserIdRef = useRef<string>(currentUserId);
   useEffect(() => { currentUserIdRef.current = currentUserId; }, [currentUserId]);
+  // Track the last nav token we've reacted to. Together with the
+  // `initialUserId` comparison this guarantees that EVERY external
+  // openViewer() call resyncs the viewer, even when the user taps
+  // the SAME ring twice (or a ring the internal jumpToUser had
+  // already drifted the state away from). Without this, Expo Router
+  // reuses the mounted instance, `initialUserId` doesn't change, the
+  // effect returns early, and the viewer keeps showing whichever
+  // user `currentUserId` was last set to internally — the reported
+  // "tapping any circle opens another user's stories" bug.
+  const lastNavTokenRef = useRef<string | null>(null);
   useEffect(() => {
     const nextId = String(initialUserId || "");
     if (!nextId) return;
-    if (currentUserIdRef.current === nextId) return;
+    const token = navToken ? String(navToken) : null;
+    const idChanged = currentUserIdRef.current !== nextId;
+    const tokenChanged = token !== null && token !== lastNavTokenRef.current;
+    if (!idChanged && !tokenChanged) return;
+    lastNavTokenRef.current = token;
     // CRITICAL: clear the previous user's stories BEFORE load()
     // runs. If we didn't, the auto-advance timer could tick against
     // the OLD user's story array — hitting the last story of the
@@ -426,8 +440,15 @@ export default function StoriesViewer() {
     autoCloseFiredRef.current = true;
     // External navigation — force the next load effect to run.
     internalNavRef.current = false;
-    setCurrentUserId(nextId);
-  }, [initialUserId]);
+    if (idChanged) setCurrentUserId(nextId);
+    else {
+      // Same target user but a fresh tap — the [currentUserId] load
+      // effect won't fire (state didn't change). Kick off the load
+      // manually so the (potentially drifted) internal state is
+      // repaired.
+      load(nextId, false);
+    }
+  }, [initialUserId, navToken, load]);
 
   // Load whenever currentUserId changes (fresh mount OR external
   // route change). Internal jumps (jumpToUser) skip this via the

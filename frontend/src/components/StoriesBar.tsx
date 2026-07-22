@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   View,
   Text,
@@ -148,7 +148,18 @@ export default function StoriesBar() {
     // observed to occasionally resolve to a STALE viewer instance
     // (opening the wrong user's stories) when the previous viewer
     // was still mid-unmount, right after a story upload flow.
-    router.push(`/stories/viewer/${encodeURIComponent(authorId)}` as any);
+    //
+    // ALSO: pass a `nav` token (unique per tap). The viewer's route
+    // sync effect keys off it, so even if Expo Router REUSES the same
+    // mounted viewer instance (e.g. the last time it was open it
+    // auto-advanced internally to a different user via jumpToUser
+    // and the URL param never changed), the fresh token forces a
+    // full resync back to the user the strip actually tapped. This
+    // was the root cause of "tapping any circle after publishing a
+    // story opens the wrong user's stories".
+    router.push(
+      `/stories/viewer/${encodeURIComponent(authorId)}?nav=${Date.now()}` as any,
+    );
   };
 
   const openComposerOrMine = () => {
