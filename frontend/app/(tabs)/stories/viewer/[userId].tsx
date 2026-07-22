@@ -457,7 +457,7 @@ export default function StoriesViewer() {
             </Pressable>
           ) : null}
           </View>
-        </View>
+        </Pressable>
 
         {/* Reply row — hidden on my own stories */}
         {!isOwnStory ? (
