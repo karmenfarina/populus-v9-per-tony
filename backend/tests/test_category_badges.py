@@ -20,9 +20,9 @@ EXPECTED_THRESHOLDS = [100, 250, 500]
 
 # Product-spec tier names for a few key categories.
 SPEC_NAMES = {
-    'politica': ['Trombato di Provincia', 'Giampiero Mughini', 'Silvio Berlusconi'],
+    'politica': ['Peone di Corridoio', 'Opinionista da Talk Show', 'Silvio Berlusconi'],
     'gossip': ['Vrenzola Napoletana', 'Alfonso Signorini', 'Fabrizio Corona'],
-    'tech': ['Smanettone', 'Tecnocrate', 'Elon Musk'],
+    'tech': ['Smanettone', 'Startupparo', 'Elon Musk'],
 }
 
 

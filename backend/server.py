@@ -345,7 +345,7 @@ CATEGORY_BADGES: dict = {
         'icon': 'megaphone',
         'tiers': [
             {'name': 'Peone di Corridoio', 'emoji': '🎗️'},
-            {'name': 'Giampiero Mughini',  'emoji': '🎙️'},
+            {'name': 'Opinionista da Talk Show', 'emoji': '🗣️'},
             {'name': 'Silvio Berlusconi',  'emoji': '🇮🇹'},
         ],
     },
@@ -417,7 +417,7 @@ CATEGORY_BADGES: dict = {
         'icon': 'hardware-chip',
         'tiers': [
             {'name': 'Smanettone',   'emoji': '💻'},
-            {'name': 'Tecnocrate',   'emoji': '🤖'},
+            {'name': 'Startupparo',  'emoji': '💡'},
             {'name': 'Elon Musk',    'emoji': '🚀'},
         ],
     },
