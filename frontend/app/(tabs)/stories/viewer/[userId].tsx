@@ -91,11 +91,22 @@ function timeAgo(iso: string): string {
 
 export default function StoriesViewer() {
   const router = useRouter();
-  const { userId, startAt } = useLocalSearchParams<{ userId: string; startAt?: string }>();
+  const { userId: initialUserId, startAt: initialStartAt } = useLocalSearchParams<{ userId: string; startAt?: string }>();
   const { user: me } = useAuth();
+  // Current user whose stories are being played. Initialised from the
+  // route param but then swapped INTERNALLY when the user reaches the
+  // end of a chain (goes to next user) or taps back from story 0
+  // (goes to previous user). Not backed by router.replace anymore so
+  // the component never unmounts between users — that was causing a
+  // visible black flash on the screen at every transition.
+  const [currentUserId, setCurrentUserId] = useState<string>(String(initialUserId || ""));
   const [stories, setStories] = useState<Story[]>([]);
   const [idx, setIdx] = useState(0);
-  const [loading, setLoading] = useState(true);
+  // Only true on very FIRST mount. Once the first user's data has
+  // arrived we never show the full-screen loading spinner again —
+  // subsequent user switches keep the previous frame visible until
+  // the new data is ready (matches Instagram's smooth transitions).
+  const [initialLoading, setInitialLoading] = useState(true);
   const [replyText, setReplyText] = useState("");
   const [sending, setSending] = useState(false);
   const [paused, setPaused] = useState(false);
@@ -105,6 +116,10 @@ export default function StoriesViewer() {
   // Same order as the horizontal StoriesBar on the home screen: my
   // own group first (if any), then friends by has_unseen priority.
   const [feedOrder, setFeedOrder] = useState<string[]>([]);
+  // In-memory cache of user_id -> stories[] populated by the initial
+  // load and prefetch calls. Lets us swap users instantly with no
+  // black flash when the next user's data was already prefetched.
+  const cacheRef = useRef<Map<string, Story[]>>(new Map());
   // Progress is a plain number 0..1 driven by a setInterval so the
   // rendering stays deterministic across web + native (Animated.Value
   // with useNativeDriver:false was flaky on web at story transitions).
@@ -149,14 +164,16 @@ export default function StoriesViewer() {
   const currentStory = stories[idx] || null;
   const isOwnStory = me?.user_id === currentStory?.user_id;
 
-  // Jumps to the next user with stories (relative to `userId`) in the
-  // feed order. If no next user exists, closes the viewer. Uses
-  // router.replace so the back stack stays clean (a single "viewer"
-  // entry, never a chain of them).
-  const jumpToUser = useCallback((direction: "next" | "prev") => {
+  // Jumps to the next/prev user with stories (relative to the
+  // CURRENT user) in the feed order. Runs entirely in-memory using
+  // the cacheRef map when possible so there's no black flash. Falls
+  // back to a background fetch if the target user's stories were
+  // not prefetched — the previous user's frame stays visible in the
+  // meantime, so the perceived transition is smooth.
+  const jumpToUser = useCallback(async (direction: "next" | "prev") => {
     const order = feedOrderRef.current;
     if (!order.length) { closeViewer(); return; }
-    const currentIdx = order.indexOf(String(userId));
+    const currentIdx = order.indexOf(currentUserId);
     if (currentIdx < 0) { closeViewer(); return; }
     const targetIdx = direction === "next" ? currentIdx + 1 : currentIdx - 1;
     if (targetIdx < 0 || targetIdx >= order.length) {
@@ -164,38 +181,66 @@ export default function StoriesViewer() {
       return;
     }
     const nextUid = order[targetIdx];
-    router.replace({
-      pathname: "/stories/viewer/[userId]",
-      params: {
-        userId: nextUid,
-        // When jumping BACKWARDS we open the previous user's LAST
-        // story (matches Instagram behaviour). Forward jumps default
-        // to the first unseen story (handled in load()).
-        ...(direction === "prev" ? { startAt: "last" } : {}),
-      },
-    } as any);
-  }, [userId, router, closeViewer]);
+    const startFromLast = direction === "prev";
+
+    // Load target user's stories (from cache if available) BEFORE
+    // swapping the state — this way we swap current user + stories
+    // atomically and the render never shows an empty/loading frame.
+    let targetStories = cacheRef.current.get(nextUid) || null;
+    if (!targetStories) {
+      try {
+        const r: any = await api.storiesByUser(nextUid);
+        targetStories = (r?.stories || []) as Story[];
+        cacheRef.current.set(nextUid, targetStories);
+      } catch {
+        // Skip broken user entirely and recurse to the one after —
+        // avoids a dead-end where feed advertised a user but the
+        // stories endpoint failed.
+        setCurrentUserId(nextUid);
+        return;
+      }
+    }
+    if (!targetStories || targetStories.length === 0) {
+      // Empty target — jump one more in the same direction.
+      setCurrentUserId(nextUid);
+      // Recurse using a microtask so the state settles first.
+      setTimeout(() => jumpToUser(direction), 0);
+      return;
+    }
+    const nextIdx = startFromLast
+      ? targetStories.length - 1
+      : Math.max(0, targetStories.findIndex((s) => !s.viewed) >= 0
+          ? targetStories.findIndex((s) => !s.viewed)
+          : 0);
+    // Atomic swap.
+    setCurrentUserId(nextUid);
+    setStories(targetStories);
+    setIdx(nextIdx);
+    setProgress(0);
+    autoCloseFiredRef.current = false;
+  }, [currentUserId, closeViewer]);
 
   const load = useCallback(async () => {
-    if (!userId) return;
-    setLoading(true);
+    if (!currentUserId) return;
+    setInitialLoading(true);
     try {
       // Fetch this user's stories AND the full feed order in parallel.
       // The feed lets us seamlessly transition to the next/previous
       // user's ring when the current chain ends.
       const [r, feed]: [any, any] = await Promise.all([
-        api.storiesByUser(userId as string),
+        api.storiesByUser(currentUserId),
         api.storiesFeed().catch(() => ({ groups: [] })),
       ]);
       const rows: Story[] = r?.stories || [];
       const order = ((feed?.groups || []) as Array<{ user_id: string }>).map((g) => g.user_id);
       setFeedOrder(order);
+      cacheRef.current.set(currentUserId, rows);
       if (!rows.length) {
         setTimeout(() => closeViewer(), 100);
         return;
       }
       setStories(rows);
-      if (startAt === "last") {
+      if (initialStartAt === "last") {
         // Backwards navigation from the next user's ring — open on the
         // last story so tapping "back" again continues the reverse walk.
         setIdx(rows.length - 1);
@@ -208,14 +253,35 @@ export default function StoriesViewer() {
       Alert.alert("Errore", e?.message || "Impossibile caricare le storie");
       closeViewer();
     } finally {
-      setLoading(false);
+      setInitialLoading(false);
     }
-  }, [userId, startAt, closeViewer]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [closeViewer]);
 
+  // Run the initial fetch exactly ONCE on mount — subsequent user
+  // switches are handled internally by jumpToUser (no remount).
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId, startAt]);
+  }, []);
+
+  // Prefetch the immediately-adjacent users' stories in the background
+  // so jumpToUser can swap atomically with no flash. Runs whenever
+  // the current user OR the feed order changes.
+  useEffect(() => {
+    if (!feedOrder.length || !currentUserId) return;
+    const cIdx = feedOrder.indexOf(currentUserId);
+    if (cIdx < 0) return;
+    const neighbours = [feedOrder[cIdx - 1], feedOrder[cIdx + 1]].filter(Boolean) as string[];
+    neighbours.forEach((uid) => {
+      if (cacheRef.current.has(uid)) return;
+      api.storiesByUser(uid)
+        .then((res: any) => {
+          cacheRef.current.set(uid, (res?.stories || []) as Story[]);
+        })
+        .catch(() => { /* silent — prefetch is best-effort */ });
+    });
+  }, [currentUserId, feedOrder]);
 
   // Single global interval that ticks 20 times a second, driving the
   // progress bar of the CURRENT story. Uses `useFocusEffect` (not
@@ -227,7 +293,7 @@ export default function StoriesViewer() {
   // the viewer was off-screen and closed the viewer prematurely.
   useFocusEffect(
     useCallback(() => {
-      if (loading || stories.length === 0) return;
+      if (initialLoading || stories.length === 0) return;
       // Reset the auto-close guard whenever the screen regains focus
       // so a viewer we came back to can still complete + close.
       autoCloseFiredRef.current = false;
@@ -259,7 +325,7 @@ export default function StoriesViewer() {
         });
       }, TICK_MS);
       return () => clearInterval(timer);
-    }, [loading, stories.length, closeViewer, jumpToUser]),
+    }, [initialLoading, stories.length, closeViewer, jumpToUser]),
   );
 
   // Reset progress every time the user manually navigates to a new
@@ -321,7 +387,7 @@ export default function StoriesViewer() {
       pathname: "/feud/[id]",
       params: {
         id: currentStory.feud.feud_id,
-        from: `/stories/viewer/${userId}`,
+        from: `/stories/viewer/${currentUserId}`,
       },
     } as any);
   };
@@ -375,7 +441,7 @@ export default function StoriesViewer() {
     }
   };
 
-  if (loading) {
+  if (initialLoading) {
     return (
       <SafeAreaView style={styles.safe} edges={["top", "bottom"]}>
         <View style={styles.center}>
