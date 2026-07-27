@@ -1,0 +1,34 @@
+{
+  "summary": "Backend-only regression test for iter76 fix: 'La sintesi del pensiero' (POST /api/feuds/{feud_id}/ai-summary) no longer crashes with 'TypeError: Depends object is not subscriptable'. The one-line fix at server.py:2901 (positional -> keyword arg `user=user` in the internal call to get_comments) works as intended. Created /app/backend/tests/test_iter76_ai_summary_fix.py with 7 tests covering: (1) ai-summary returns 200 not 500, (2) response shape with side_a/side_b/common/generated_at keys, (3) requires auth (401), (4) 404 for unknown feud, (5) GET /comments regression (with & without owner_user_id, and anonymous). All 7 tests PASS. Additionally verified end-to-end with substantive Italian comments: AI returns real synthesis (empty:false, 2 bullets/side, generated_at ISO timestamp).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter76_ai_summary_fix.py",
+    "/app/test_reports/pytest/iter76_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is ~6637 lines — should be split into modular routers (feuds, comments, auth, ai, admin) per the >700-line rule.",
+    "get_comments() is imported/called BOTH as a FastAPI endpoint and as an internal helper from get_ai_summary. Calling FastAPI endpoints as plain functions is fragile (as this very bug demonstrated). Recommend extracting the shared logic into a private `_load_visible_comments(feud_id, viewer_user, owner_user_id)` helper and having both the endpoint and get_ai_summary call THAT, so future parameter additions on the endpoint can't silently corrupt internal callers."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter76_ai_summary_fix.py (new)"
+  ],
+  "success_rate": {
+    "backend": "100% (7/7)",
+    "frontend": "N/A (not requested)"
+  },
+  "seed_data_creation": "Test fixture posts 2 comments (one from user_6e65e19525d5 / side A, one from user_16f709708760 / side B) on the first feud where both users can vote+comment. Comments are prefixed with 'Test ... iter76'. No cleanup performed (comments are harmless and useful for future retests).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "The iter76 fix is verified working. Test suite at /app/backend/tests/test_iter76_ai_summary_fix.py covers ai-summary + get_comments regression. Uses pre-verified users chat_a@test.it / chat_b@test.it (test123). Vote side param is UPPERCASE 'A'/'B' (Pydantic Literal). GET /api/feuds returns {feuds: [...], personalized: bool}, not a bare list. AI faction summary LLM may legitimately return empty:true when comments are trivial/test-like — that path is NOT a bug; the test allows it.",
+  "rca_of_issue": "RCA (already correctly identified & fixed by main agent): In iter75 a new query param `owner_user_id: Optional[str] = None` was inserted at position 2 in get_comments(), pushing the `user` DI param to position 3. The internal caller in get_ai_summary was `get_comments(feud_id, user)` — positional. Python bound `user` to `owner_user_id`, and `user` fell back to its default `Depends(get_current_user_optional)` sentinel. Later code inside get_comments then did `user['user_id']` on the Depends object → TypeError: 'Depends' object is not subscriptable. Reproduction: prior to fix, any authenticated POST to /api/feuds/{id}/ai-summary would 500. Mitigation applied at server.py:2901 → `get_comments(feud_id, user=user)` (keyword). Verified: 7/7 tests pass + end-to-end LLM synthesis returns 200 with populated side_a/side_b bullets."
+}

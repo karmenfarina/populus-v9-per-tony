@@ -2898,7 +2898,7 @@ async def get_ai_summary(feud_id: str, user: dict = Depends(get_current_user)):
     # Reuse the get_comments logic to obtain visible comments only. This
     # respects the "author must still be on the same side" filter so we
     # never analyse ghost opinions.
-    data = await get_comments(feud_id, user)  # type: ignore
+    data = await get_comments(feud_id, user=user)  # type: ignore
     side_a = data.get('side_a') or []
     side_b = data.get('side_b') or []
     if not side_a and not side_b:
