@@ -3695,11 +3695,24 @@ async def admin_cleanup(_: bool = Depends(require_admin)):
 
 @api_router.get('/admin/stats')
 async def admin_stats(_: bool = Depends(require_admin)):
-    total_users = await db.users.count_documents({})
-    onboarded_users = await db.users.count_documents({'onboarding_completed': True})
+    # Respect the analytics reset baseline: everything created before
+    # the last reset is invisible so the DEMOGRAFIA tab starts from zero
+    # after the developer taps "Azzera".
+    baseline = await _analytics._get_baseline(db)
+    user_match: dict = {}
+    vote_match: dict = {}
+    if baseline is not None:
+        user_match["created_at"] = {"$gte": baseline}
+        vote_match["created_at"] = {"$gte": baseline}
+
+    total_users = await db.users.count_documents(user_match)
+    onboarded_users = await db.users.count_documents({**user_match, 'onboarding_completed': True})
 
     # Join votes with users
-    pipeline = [
+    pipeline: list = []
+    if vote_match:
+        pipeline.append({'$match': vote_match})
+    pipeline.extend([
         {'$lookup': {'from': 'users', 'localField': 'user_id', 'foreignField': 'user_id', 'as': 'u'}},
         {'$unwind': {'path': '$u', 'preserveNullAndEmptyArrays': True}},
         {'$project': {
@@ -3709,7 +3722,7 @@ async def admin_stats(_: bool = Depends(require_admin)):
             'sex': '$u.sex',
             'age': '$u.age',
         }},
-    ]
+    ])
     joined = await db.votes.aggregate(pipeline).to_list(100000)
     total_votes = len(joined)
 
@@ -3745,7 +3758,10 @@ async def admin_stats(_: bool = Depends(require_admin)):
     )
 
     # Top feuds by total votes
-    top_pipe = [
+    top_pipe: list = []
+    if vote_match:
+        top_pipe.append({'$match': vote_match})
+    top_pipe.extend([
         {'$group': {
             '_id': '$feud_id',
             'total': {'$sum': 1},
@@ -3765,7 +3781,7 @@ async def admin_stats(_: bool = Depends(require_admin)):
             'party_a': '$f.party_a',
             'party_b': '$f.party_b',
         }},
-    ]
+    ])
     top_feuds_raw = await db.votes.aggregate(top_pipe).to_list(5)
     top_feuds = []
     for tf in top_feuds_raw:
