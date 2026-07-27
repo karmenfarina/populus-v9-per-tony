@@ -171,6 +171,9 @@ export const api = {
     request(`/feuds/${id}/vote`, { method: 'POST', body: JSON.stringify({ side }) }),
   comments: (id: string, ownerUserId?: string) =>
     request(`/feuds/${id}/comments${ownerUserId ? `?owner_user_id=${encodeURIComponent(ownerUserId)}` : ''}`),
+  // Analytics — record an app-open event (fired once per session on
+  // launch). Fire-and-forget from the caller's perspective.
+  analyticsAppOpen: () => request('/analytics/app-open', { method: 'POST' }).catch(() => null),
   addComment: (id: string, text: string) =>
     request(`/feuds/${id}/comments`, { method: 'POST', body: JSON.stringify({ text }) }),
   replies: (commentId: string) => request(`/comments/${commentId}/replies`),

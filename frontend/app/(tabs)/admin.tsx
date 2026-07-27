@@ -8,6 +8,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { storage } from "@/src/utils/storage";
 import { colors, spacing, font } from "@/src/theme";
+import AnalyticsPanel from "@/src/components/AnalyticsPanel";
 
 const KEY_STORAGE = "populus_admin_key";
 const BASE = process.env.EXPO_PUBLIC_BACKEND_URL || "";
@@ -44,6 +45,10 @@ export default function AdminScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(false);
+  // Two-tab switch — Analytics (KPI + retention + categorie + profili) is
+  // the growth-plan dashboard; Demografia is the legacy one (utile per
+  // controllare voti per regione/sesso/età al volo).
+  const [tab, setTab] = useState<"analytics" | "demographics">("analytics");
 
   useEffect(() => {
     (async () => {
@@ -65,8 +70,8 @@ export default function AdminScreen() {
   }, []);
 
   useEffect(() => {
-    if (hydrated && key) load(key);
-  }, [hydrated, key, load]);
+    if (hydrated && key && tab === "demographics") load(key);
+  }, [hydrated, key, load, tab]);
 
   const submitKey = async () => {
     if (!keyInput.trim()) return;
@@ -130,17 +135,41 @@ export default function AdminScreen() {
       <View style={styles.header}>
         <View style={{ flex: 1 }}>
           <Text style={styles.brand}>ADMIN</Text>
-          <Text style={styles.subtitle}>Statistiche demografiche</Text>
+          <Text style={styles.subtitle}>
+            {tab === "analytics" ? "Analytics · KPI di crescita" : "Statistiche demografiche"}
+          </Text>
         </View>
-        <Pressable onPress={() => load(key)} style={styles.iconBtn} testID="admin-refresh">
-          <Ionicons name="refresh" size={20} color={colors.brandSecondary} />
-        </Pressable>
+        {tab === "demographics" ? (
+          <Pressable onPress={() => load(key)} style={styles.iconBtn} testID="admin-refresh">
+            <Ionicons name="refresh" size={20} color={colors.brandSecondary} />
+          </Pressable>
+        ) : null}
         <Pressable onPress={clearKey} style={styles.iconBtn} testID="admin-logout">
           <Ionicons name="log-out-outline" size={20} color={colors.brandSecondary} />
         </Pressable>
       </View>
 
-      {loading ? (
+      {/* Tab switcher */}
+      <View style={styles.tabsRow}>
+        <Pressable
+          style={[styles.tabBtn, tab === "analytics" && styles.tabBtnActive]}
+          onPress={() => setTab("analytics")}
+          testID="admin-tab-analytics"
+        >
+          <Text style={[styles.tabTxt, tab === "analytics" && styles.tabTxtActive]}>ANALYTICS</Text>
+        </Pressable>
+        <Pressable
+          style={[styles.tabBtn, tab === "demographics" && styles.tabBtnActive]}
+          onPress={() => setTab("demographics")}
+          testID="admin-tab-demographics"
+        >
+          <Text style={[styles.tabTxt, tab === "demographics" && styles.tabTxtActive]}>DEMOGRAFIA</Text>
+        </Pressable>
+      </View>
+
+      {tab === "analytics" ? (
+        <AnalyticsPanel adminKey={key} />
+      ) : loading ? (
         <View style={styles.centerFill}><ActivityIndicator size="large" color={colors.brandPrimary} /></View>
       ) : error ? (
         <View style={styles.centerFill}>
@@ -292,4 +321,29 @@ const styles = StyleSheet.create({
   gateInput: { borderWidth: 2, borderColor: colors.border, padding: spacing.md, fontSize: font.sizes.lg, color: colors.onSurface, backgroundColor: colors.surfaceSecondary },
   gateCta: { backgroundColor: colors.brandPrimary, borderWidth: 2, borderColor: colors.border, paddingVertical: spacing.md, alignItems: "center" },
   gateCtaTxt: { color: colors.onBrandPrimary, fontSize: font.sizes.xl, letterSpacing: 2, fontWeight: "500" },
+  tabsRow: {
+    flexDirection: "row",
+    borderBottomWidth: 2,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceSecondary,
+  },
+  tabBtn: {
+    flex: 1,
+    paddingVertical: spacing.sm,
+    alignItems: "center",
+    borderRightWidth: 2,
+    borderColor: colors.border,
+  },
+  tabBtnActive: {
+    backgroundColor: colors.brandPrimary,
+  },
+  tabTxt: {
+    fontSize: font.sizes.sm,
+    letterSpacing: 2,
+    color: colors.muted,
+    fontWeight: "500",
+  },
+  tabTxtActive: {
+    color: colors.onBrandPrimary,
+  },
 });

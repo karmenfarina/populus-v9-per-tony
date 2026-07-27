@@ -1,0 +1,48 @@
+{
+  "summary": "Iteration 78 backend review — Populus analytics dashboard. Built 20-test pytest suite covering all 10 admin analytics endpoints, dev-account exclusion, instrumentation, and regression on core endpoints. Found and fixed 2 backend bugs (timezone naive/aware datetime subtraction in /retention and /top-feuds-24h). After the fix, 20/20 tests pass. Instrumentation is confirmed working: vote_cast, comment_created, and feud_view events land in activity_events; last_active_at is updated; deep-action-rate reflects new activity within 2s. Startup hook correctly flags all 5 developer emails as is_dev_account:true. Public /analytics/app-open works for both authenticated (records event) and unauthenticated (no-op, returns ok:true) callers. Toggle endpoint honours 400/404 error semantics.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "GET /api/admin/analytics/retention",
+        "issue": "FIXED — 500 on cohort_age_days calculation. `c[\"earliest\"]` returned by MongoDB aggregation is timezone-naive but `now` was UTC-aware, causing `TypeError: can't subtract offset-naive and offset-aware datetimes`. Also same issue for `ev[\"ts\"] - signup` in the retention day-bucket loop. Fixed by introducing `_aware()` helper and wrapping both operands. (analytics.py L393, L381, L397)"
+      },
+      {
+        "endpoint": "GET /api/admin/analytics/top-feuds-24h",
+        "issue": "FIXED — same tz-naive/aware bug: `f[\"created_at\"] + timedelta(hours=24)` was fine, but the eligibility list-comp reparsed the ISO string of a naive dt and subtracted from tz-aware `now`. Rewrote to compute `_age_seconds` up-front from `_aware(created)` and use that in the median filter. (analytics.py L463-L488)"
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter78_analytics.py",
+    "/app/test_reports/pytest/iter78_analytics.xml"
+  ],
+  "action_items": [
+    "None from testing agent — the two timezone bugs were fixed. Main agent should self-verify the AnalyticsPanel.tsx frontend correctly renders the retention cohorts (some rows come back with null d1_pct/d7_pct/d30_pct — chart code must handle nulls).",
+    "Optional: consider adding a small in-flight de-dupe for EVT_APP_OPEN so a burst of app-open POSTs from one client doesn't inflate activity_events."
+  ],
+  "critical_code_review_comments": [
+    "analytics.py mixes tz-naive dates from Mongo with tz-aware `now`. The `_aware()` helper is now used in the two hot paths, but every other place that reads a datetime from Mongo (e.g. `signup` in retention was one of them) should follow the same pattern to avoid future 500s.",
+    "log_event fires `db.users.update_one({user_id:...}, {$set:{last_active_at:now}})` on every event — for high-volume events this is a hot write. Consider throttling (e.g. only update if `last_active_at` older than 1 min) to reduce DB churn.",
+    "activity_events grows unbounded — add a TTL index or periodic pruning policy (e.g. keep last 180d) once traffic is real. Growth-plan KPIs only look back 90d.",
+    "In profiles(), the `circle_pipe` loads every user + their friendships into memory via async for; for a large user base this is O(N). Consider computing circle_size with a $count within the pipeline instead of returning arrays.",
+    "top-feuds-24h issues one aggregate per feud in a Python for-loop (N+1 pattern). For 500 feuds that's 500 round-trips. A single aggregate with `$facet` or `$group` on votes joined to feuds would be faster.",
+    "Frontend (not tested but reviewed): AnalyticsPanel.tsx should be code-split or lazy-loaded — the analytics screen is admin-only, no reason to ship its bundle to normal users."
+  ],
+  "updated_files": [
+    "/app/backend/analytics.py — added _aware() helper; fixed retention and top-feuds-24h timezone bugs; stripped internal _age_seconds key from response",
+    "/app/backend/tests/test_iter78_analytics.py — new file, 20 tests"
+  ],
+  "success_rate": {"backend": "100% (20/20)", "frontend": "not tested (backend-only request)"},
+  "seed_data_creation": "None. All tests use existing chat_a@test.it / chat_b@test.it users and existing feuds.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Regression suite lives at /app/backend/tests/test_iter78_analytics.py — 20 tests, ~10s. Requires chat_a@test.it and chat_b@test.it to exist. Any future changes to analytics.py should keep the `_aware()` normalization for every datetime read from Mongo. If retention cohorts stay empty/null in test env it's expected — cohort_age_days must be ≥2 for d1_pct to be non-null.",
+  "rca_of_issue": "Root cause of both 500 errors: Motor/PyMongo returns naive datetimes for BSON dates (no tzinfo attached), but analytics.py uses `datetime.now(timezone.utc)` for `now`. Subtracting a naive from an aware datetime raises TypeError. Fix: normalize every datetime read from Mongo with `_aware(dt)` before arithmetic. Reproduction: `curl -H 'X-Admin-Key: populus-admin-42b8f3' /api/admin/analytics/retention` returned 500. Mitigation applied and verified with the pytest suite (both endpoints now 200 with valid structured payloads)."
+}

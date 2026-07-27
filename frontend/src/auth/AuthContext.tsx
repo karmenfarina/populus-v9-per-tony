@@ -75,6 +75,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         const res = await api.me();
         setUser(normalizeUser(res.user));
+        // Analytics — hydrated session counts as an app-open event.
+        api.analyticsAppOpen();
         return;
       } catch (e: any) {
         lastErr = e;
@@ -186,6 +188,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await setToken(res.token);
     markLoggedIn();
     setUser(normalizeUser(res.user));
+    // Analytics — signal the session start once auth is applied. Fire-and-
+    // forget: never blocks the caller and swallows its own errors.
+    api.analyticsAppOpen();
   };
 
   const signup = async (email: string, password: string, nickname: string) => {

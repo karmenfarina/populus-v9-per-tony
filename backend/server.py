@@ -49,6 +49,16 @@ from models import (
     MAX_MSG_IMAGE_BYTES as _MODEL_MAX_MSG_IMAGE_BYTES,
     STORY_COMMENT_MAX as _MODEL_STORY_COMMENT_MAX,
 )
+# Analytics module — event logging + admin dashboard endpoints.
+# See /app/backend/analytics.py for the design notes.
+import analytics as _analytics
+from analytics import (
+    log_event as _log_event,
+    EVT_APP_OPEN, EVT_SIGNUP, EVT_LOGIN, EVT_FEUD_VIEW,
+    EVT_VOTE_CAST, EVT_VOTE_CHANGE, EVT_COMMENT_CREATED, EVT_REPLY_CREATED,
+    EVT_FAVORITE_ADDED, EVT_STORY_CREATED, EVT_STORY_VIEW, EVT_SHARE_ACTION,
+    EVT_NOTIFICATION_OPEN,
+)
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -739,6 +749,8 @@ async def verify_email(body: VerifyEmailBody):
         except Exception as e:
             logger.warning(f"deferred anon migration failed {pending_from}->{user_id}: {e}")
     fresh = await db.users.find_one({'user_id': user_id}, {'_id': 0})
+    await _analytics.maybe_flag_new_user_as_dev(db, fresh)
+    asyncio.create_task(_log_event(db, user_id, EVT_SIGNUP, provider='email'))
     return {'ok': True, 'token': make_jwt(user_id), 'user': await _hydrate_primary_photo(_public_user(fresh))}
 
 
@@ -876,6 +888,7 @@ async def login(body: LoginBody, authorization: Optional[str] = Header(None)):
             user = await db.users.find_one({'user_id': user['user_id']}, {'_id': 0})
     except Exception as e:
         logger.warning(f"login-time anon migration failed: {e}")
+    asyncio.create_task(_log_event(db, user['user_id'], EVT_LOGIN, provider='email'))
     return {'token': make_jwt(user['user_id']), 'user': await _hydrate_primary_photo(_public_user(user))}
 
 
@@ -922,6 +935,7 @@ async def anonymous(body: AnonymousBody):
     if device_id:
         user['device_id'] = device_id
     await db.users.insert_one(user)
+    asyncio.create_task(_log_event(db, user_id, EVT_SIGNUP, provider='anonymous'))
     return {'token': make_jwt(user_id), 'user': await _hydrate_primary_photo(_public_user(user))}
 
 
@@ -976,6 +990,8 @@ async def google_session(body: GoogleSessionBody, authorization: Optional[str] =
             'majority_votes': 0, 'minority_votes': 0, 'total_votes': 0,
         }
         await db.users.insert_one(user)
+        await _analytics.maybe_flag_new_user_as_dev(db, user)
+        asyncio.create_task(_log_event(db, user_id, EVT_SIGNUP, provider='google'))
 
     # Upsert instead of insert to gracefully handle the same session_token being
     # returned twice by Emergent OAuth (which triggers a DuplicateKeyError and
@@ -992,6 +1008,7 @@ async def google_session(body: GoogleSessionBody, authorization: Optional[str] =
         },
         upsert=True,
     )
+    asyncio.create_task(_log_event(db, user_id, EVT_LOGIN, provider='google'))
     return {'token': session_token, 'user': await _hydrate_primary_photo(_public_user(user))}
 
 
@@ -1091,6 +1108,8 @@ async def firebase_session(body: FirebaseSessionBody):
             'granted_category_badges': [],
         }
         await db.users.insert_one(user)
+        await _analytics.maybe_flag_new_user_as_dev(db, user)
+        asyncio.create_task(_log_event(db, user['user_id'], EVT_SIGNUP, provider='firebase'))
     else:
         # Attach firebase_uid to legacy accounts on first Firebase login.
         await db.users.update_one(
@@ -1099,6 +1118,7 @@ async def firebase_session(body: FirebaseSessionBody):
         )
         user['firebase_uid'] = firebase_uid
         user['email_verified'] = True
+        asyncio.create_task(_log_event(db, user['user_id'], EVT_LOGIN, provider='firebase'))
 
     # Reuse the same JWT contract as `/auth/login` so `get_current_user`
     # picks it up transparently.
@@ -1759,6 +1779,11 @@ async def record_view(feud_id: str, user: dict = Depends(get_current_user)):
         },
         upsert=True,
     )
+    # Analytics — timeline record for retention/DAU aggregations
+    asyncio.create_task(_log_event(
+        db, user['user_id'], EVT_FEUD_VIEW,
+        feud_id=feud_id, category=f.get('category'),
+    ))
     return {'ok': True}
 
 
@@ -1801,6 +1826,9 @@ async def add_favorite(feud_id: str, user: dict = Depends(get_current_user)):
         },
         upsert=True,
     )
+    asyncio.create_task(_log_event(
+        db, user['user_id'], EVT_FAVORITE_ADDED, feud_id=feud_id,
+    ))
     return {'ok': True, 'is_favorite': True}
 
 
@@ -2243,6 +2271,11 @@ async def vote_feud(feud_id: str, body: VoteBody, user: dict = Depends(get_curre
         # Fire-and-forget alignment fanout: recomputes majority/minority (and
         # badges) for every other voter of this feud whenever the leader flips.
         asyncio.create_task(_fanout_alignment_recompute(feud_id, pre_leader, user['user_id']))
+        # Analytics — vote change (side switch)
+        asyncio.create_task(_log_event(
+            db, user['user_id'], EVT_VOTE_CHANGE,
+            feud_id=feud_id, category=feud.get('category'), side=body.side,
+        ))
         return {'feud': updated, 'changed': True}
     await db.votes.insert_one({
         'vote_id': new_id('vote'), 'feud_id': feud_id, 'user_id': user['user_id'],
@@ -2273,6 +2306,11 @@ async def vote_feud(feud_id: str, body: VoteBody, user: dict = Depends(get_curre
     await _notify_vote_flip(updated, pre_leader, user['user_id'])
     # Fire-and-forget alignment fanout for other voters (badges + counters).
     asyncio.create_task(_fanout_alignment_recompute(feud_id, pre_leader, user['user_id']))
+    # Analytics — first-time vote on this feud
+    asyncio.create_task(_log_event(
+        db, user['user_id'], EVT_VOTE_CAST,
+        feud_id=feud_id, category=feud.get('category'), side=body.side,
+    ))
     return {'feud': updated, 'changed': False}
 
 
@@ -2942,6 +2980,11 @@ async def add_comment(feud_id: str, body: CommentBody, user: dict = Depends(get_
     doc['reply_count'] = 0
     # normalize datetime
     doc['created_at'] = _iso_utc(doc['created_at'])
+    # Analytics — comment created
+    asyncio.create_task(_log_event(
+        db, user['user_id'], EVT_COMMENT_CREATED,
+        feud_id=feud_id, side=vote['side'],
+    ))
     return {'comment': doc}
 
 
@@ -3044,6 +3087,11 @@ async def add_reply(comment_id: str, body: ReplyBody, user: dict = Depends(get_c
             )
     except Exception as e:
         logger.warning(f"notification emit (reply) failed: {e}")
+    # Analytics — reply created
+    asyncio.create_task(_log_event(
+        db, user['user_id'], EVT_REPLY_CREATED,
+        feud_id=parent['feud_id'], side=side,
+    ))
     return {'reply': doc}
 
 
@@ -4645,6 +4693,16 @@ async def on_startup():
         )
     except Exception as e:
         logger.warning(f"grandfather email_verified migration failed: {e}")
+
+    # Analytics module bootstrap — creates indexes on activity_events +
+    # flags the developer's own accounts (DEV_ACCOUNT_EMAILS env var) as
+    # `is_dev_account: true` so they're excluded from every KPI.
+    try:
+        await _analytics._ensure_indexes(db)
+        n = await _analytics.mark_dev_accounts_from_env(db)
+        logger.info(f"analytics ready: {n} dev-account(s) tagged this boot")
+    except Exception as e:
+        logger.warning(f"analytics bootstrap warning: {e}")
     # One-shot backfill: users who onboarded BEFORE `cronaca` was introduced
     # can't possibly have it in their favorites (it didn't exist), so the
     # "favorites-only" home filter effectively hides it from them until they
@@ -6641,6 +6699,13 @@ async def _send_dm_internal(sender_id: str, recipient_id: str, text: str,
 
 
 app.include_router(api_router)
+
+# Analytics — mounted on the same /api prefix, gated by X-Admin-Key
+# (analytics dashboard) and by optional user auth (public app-open).
+_analytics_admin = _analytics.build_analytics_router(db, require_admin)
+_analytics_public = _analytics.build_public_analytics_router(db, get_current_user_optional)
+app.include_router(_analytics_admin, prefix="/api")
+app.include_router(_analytics_public, prefix="/api")
 
 app.add_middleware(
     CORSMiddleware, allow_credentials=True, allow_origins=['*'],
