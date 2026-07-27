@@ -445,20 +445,17 @@ export default function FeudDetail() {
               {feud.context_text ? (
                 <Pressable
                   onPress={() => setShowContext((v) => !v)}
-                  hitSlop={10}
+                  hitSlop={12}
                   testID="feud-context-toggle"
                   accessibilityLabel={
                     showContext ? "Torna al testo della faida" : "Mostra il contesto della notizia"
                   }
-                  style={[
-                    styles.contextInfoBtn,
-                    showContext && styles.contextInfoBtnActive,
-                  ]}
+                  style={styles.contextInfoBtn}
                 >
                   <Ionicons
-                    name="information-circle"
-                    size={22}
-                    color={showContext ? colors.onBrandPrimary : colors.brandPrimary}
+                    name={showContext ? "information-circle" : "information-circle-outline"}
+                    size={18}
+                    color={showContext ? colors.brandPrimary : colors.muted}
                   />
                 </Pressable>
               ) : null}
@@ -961,19 +958,11 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xs,
   },
   contextInfoBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    borderWidth: 2,
-    borderColor: colors.brandPrimary,
+    padding: 4,
+    marginLeft: spacing.xs,
+    marginBottom: spacing.xs,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "transparent",
-    marginLeft: spacing.sm,
-    marginBottom: spacing.xs,
-  },
-  contextInfoBtnActive: {
-    backgroundColor: colors.brandPrimary,
   },
   mediaSection: { paddingHorizontal: spacing.lg, marginBottom: spacing.md },
   summary: { fontSize: font.sizes.lg, lineHeight: 24, color: colors.onSurface, marginBottom: spacing.sm },
