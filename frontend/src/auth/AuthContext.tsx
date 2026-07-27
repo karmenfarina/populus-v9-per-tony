@@ -2,7 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useRef, useSt
 import * as WebBrowser from 'expo-web-browser';
 import * as Linking from 'expo-linking';
 import { Platform } from 'react-native';
-import { api, ApiError, getToken, setToken, User } from '../api';
+import { api, ApiError, getToken, setToken, User, markLoggedOut, markLoggedIn } from '../api';
 import { getDeviceId } from '../utils/deviceId';
 
 type AuthState = {
@@ -123,6 +123,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const res = await api.googleSession(sid);
         processedSessionIds.current.add(sid);
         await setToken(res.token);
+        markLoggedIn();
         setUser(normalizeUser(res.user));
         return true;
       } catch {
@@ -183,6 +184,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const applyAuthResult = async (res: { token: string; user: User }) => {
     await setToken(res.token);
+    markLoggedIn();
     setUser(normalizeUser(res.user));
   };
 
@@ -260,6 +262,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const logout = async () => {
+    // Set the guard BEFORE anything else — the background pollers
+    // (notifications/messaging, both on 30s intervals) will now silently
+    // no-op instead of hitting the backend with a bare header.
+    markLoggedOut();
     try { await api.logout(); } catch {}
     try {
       // Fire-and-forget Firebase sign-out so a stale Firebase session

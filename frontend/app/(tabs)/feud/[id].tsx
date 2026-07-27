@@ -112,6 +112,10 @@ export default function FeudDetail() {
   const [activeSide, setActiveSide] = useState<"A" | "B" | null>(null);
   const [statsOpen, setStatsOpen] = useState(false);
   const [aiSummaryOpen, setAiSummaryOpen] = useState(false);
+  // Toggle between "LA FAIDA" (summary) and "CONTESTO" (context_text).
+  // Reset back to `false` every time the feud id changes so opening a new
+  // post never inherits the previous one's toggled state.
+  const [showContext, setShowContext] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [inAppShareOpen, setInAppShareOpen] = useState(false);
   const { sourcesExpanded, setSourcesExpanded } = useUIPrefs();
@@ -132,6 +136,7 @@ export default function FeudDetail() {
     setLoading(true);
     setError(null);
     setGone(false);
+    setShowContext(false);
     scrollRef.current?.scrollTo({ y: 0, animated: false });
   }, [id]);
 
@@ -433,11 +438,38 @@ export default function FeudDetail() {
           </ImageBackground>
 
           <View style={styles.article}>
-            <Text style={styles.sectionKicker}>LA FAIDA</Text>
-            {(feud.summary || "").split(/\n{2,}/).filter(p => p.trim()).map((para, idx) => (
-              <Text key={idx} style={styles.summary}>{para.trim()}</Text>
-            ))}
-            {feud.hashtag && (
+            <View style={styles.articleHeader}>
+              <Text style={styles.sectionKicker}>
+                {showContext && feud.context_text ? "CONTESTO" : "LA FAIDA"}
+              </Text>
+              {feud.context_text ? (
+                <Pressable
+                  onPress={() => setShowContext((v) => !v)}
+                  hitSlop={10}
+                  testID="feud-context-toggle"
+                  accessibilityLabel={
+                    showContext ? "Torna al testo della faida" : "Mostra il contesto della notizia"
+                  }
+                  style={[
+                    styles.contextInfoBtn,
+                    showContext && styles.contextInfoBtnActive,
+                  ]}
+                >
+                  <Ionicons
+                    name="information-circle"
+                    size={22}
+                    color={showContext ? colors.onBrandPrimary : colors.brandPrimary}
+                  />
+                </Pressable>
+              ) : null}
+            </View>
+            {((showContext && feud.context_text) ? feud.context_text : (feud.summary || ""))
+              .split(/\n{2,}/)
+              .filter((p) => p.trim())
+              .map((para, idx) => (
+                <Text key={idx} style={styles.summary}>{para.trim()}</Text>
+              ))}
+            {!showContext && feud.hashtag && (
               <Pressable
                 onPress={() => router.push(`/hashtag/${feud.hashtag}`)}
                 testID="feud-hashtag"
@@ -922,6 +954,27 @@ const styles = StyleSheet.create({
   hashtagPill: { alignSelf: "flex-start", marginTop: spacing.sm, borderWidth: 1, borderColor: colors.brandPrimary, paddingHorizontal: spacing.sm, paddingVertical: 3, backgroundColor: colors.brandPrimary },
   hashtagText: { fontSize: font.sizes.xs, color: colors.onBrandPrimary, letterSpacing: 0.5, fontWeight: "500" },
   sectionKicker: { fontSize: font.sizes.sm, letterSpacing: 2, color: colors.brandPrimary, marginBottom: spacing.xs },
+  articleHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: spacing.xs,
+  },
+  contextInfoBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: 2,
+    borderColor: colors.brandPrimary,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "transparent",
+    marginLeft: spacing.sm,
+    marginBottom: spacing.xs,
+  },
+  contextInfoBtnActive: {
+    backgroundColor: colors.brandPrimary,
+  },
   mediaSection: { paddingHorizontal: spacing.lg, marginBottom: spacing.md },
   summary: { fontSize: font.sizes.lg, lineHeight: 24, color: colors.onSurface, marginBottom: spacing.sm },
   sourcesBox: { padding: spacing.lg, borderBottomWidth: 2, borderColor: colors.border, backgroundColor: colors.surface, gap: spacing.sm },

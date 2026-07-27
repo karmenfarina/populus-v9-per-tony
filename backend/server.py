@@ -3960,6 +3960,22 @@ async def _generate_feud_for_category(cat: dict, LlmChat, UserMessage) -> Option
             "`party_b` risponde Y). Zero neutralità, ma nessuna delle due parti va delegittimata.\n"
             "In totale il summary deve essere 90-150 parole. Vietato aprire con 'polemica', 'scoppia "
             "il caso', 'si litiga': entra subito nel merito dei fatti.\n\n"
+            "REGOLA PER `context` (obbligatoria, separata dal summary): il context è un "
+            "TESTO DI CONTESTUALIZZAZIONE dedicato a chi NON conosce la vicenda o si è "
+            "perso i precedenti. Deve essere 80-150 parole, in italiano, e spiegare:\n"
+            "  • CHI sono i protagonisti (professione, contesto, perché sono rilevanti) "
+            "se non sono figure di dominio pubblico universale;\n"
+            "  • QUALI FATTI PREGRESSI hanno portato a questa notizia (rivalità storiche, "
+            "vicende recenti, dichiarazioni precedenti, procedimenti in corso, tensioni "
+            "note); un breve recap di ciò che i lettori informati già sanno.\n"
+            "Il context NON deve ripetere il summary — non racconta cosa è successo OGGI, "
+            "racconta il ‘backstage informativo’ che aiuta a inquadrare l'oggi. Deve essere "
+            "usabile come 'onboarding' per chi apre la faida senza sapere di cosa si parla. "
+            "Basato su conoscenze pubbliche del contesto italiano (attualità, TV, sport, "
+            "politica, gossip) — puoi menzionare eventi noti anche se non nell'estratto. "
+            "Se davvero non esiste alcun background rilevante (vicenda totalmente isolata "
+            "e autoconclusiva), restituisci comunque un context che spieghi chi sono i "
+            "protagonisti e perché la loro voce conta in questo ambito.\n\n"
             "Rispondi SOLO con questo JSON:\n"
             '{"title": "titolo tabloid max 90 caratteri", '
             '"subject": "SOLO in modalità B (singolo soggetto con posizioni opposte): il NOME del soggetto della faida — persona, gruppo, cosa (es. \"Fabrizio Corona\", \"Samsung\", \"il nuovo film Marvel\"). In modalità A (due contendenti) lascia stringa vuota.", '
@@ -3967,6 +3983,7 @@ async def _generate_feud_for_category(cat: dict, LlmChat, UserMessage) -> Option
             '"party_b": "seconda parte antitetica alla prima", '
             '"hashtag_subjects": "Array di 1 o 2 NOMI PROPRI PULITI per l\'hashtag di raggruppamento. In modalità A metti [\\"NomeA\\", \\"NomeB\\"] (es. [\\"Milan\\", \\"Inter\\"] oppure [\\"Fabrizio Corona\\", \\"Selvaggia Lucarelli\\"]). In modalità B metti UN SOLO nome [\\"NomeSoggetto\\"] (es. [\\"Fabrizio Corona\\"], [\\"Sanremo 2026\\"], [\\"Temptation Island\\"]). REGOLE FERREE: SOLO nomi propri di persona/brand/prodotto/evento; MAI articoli/preposizioni (\\"il\\", \\"la\\", \\"di\\", \\"del\\"); MAI descrizioni tra parentesi; MAI frasi retoriche (\\"Chi difende…\\", \\"contrari\\"); MAI emoji; MAI titoli lunghi (\\"Il resort di Bill Gates in Puglia\\" → [\\"Bill Gates\\"] o [\\"Bill Gates\\", \\"Puglia\\"]); max 3 parole per nome; cognome incluso quando esiste (\\"Fabrizio Corona\\" non solo \\"Corona\\"). Questo hashtag deve permettere di raggruppare tutte le faide future sugli stessi protagonisti.", '
             '"summary": "mini-articolo di 90-150 parole strutturato nei 3 blocchi (COSA È SUCCESSO / IL DETTAGLIO CHIAVE / PERCHÉ LA GENTE SI DIVIDE) separati da \\n\\n. Basato ESCLUSIVAMENTE su titolo + estratto della notizia scelta.", '
+            '"context": "testo di contestualizzazione di 80-150 parole (chi sono i protagonisti, quali antefatti/precedenti aiutano a capire la notizia di oggi). NON ripete il summary. Deve aiutare chi non ha seguito la vicenda a inquadrarla.", '
             '"question": "domanda schierante e provocatoria, non neutra", '
             '"source_index": indice (0-based) della notizia scelta nel pool (obbligatorio), '
             '"engagement_score": numero da 1 a 10 che stimi per la faida che hai creato, '
@@ -4119,6 +4136,10 @@ async def _generate_feud_for_category(cat: dict, LlmChat, UserMessage) -> Option
         'party_a': (data.get('party_a') or 'Team A')[:60],
         'party_b': (data.get('party_b') or 'Team B')[:60],
         'summary': data.get('summary') or '',
+        # Contextualisation text. Explains background/prior information so
+        # readers who missed the antefacts can understand the story. Shown
+        # via a toggle ("i" button) on the feud detail screen.
+        'context_text': (data.get('context') or '').strip() or None,
         'question': data.get('question') or 'Con chi ti schieri?',
         'image_url': image_url,
         'media': media_obj,
