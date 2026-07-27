@@ -62,12 +62,24 @@ export default function AiFactionSummaryModal({
     }
   }, [feudId]);
 
-  // Auto-run on first open. Subsequent opens keep the last result so the
-  // user can compare before manually refreshing with the top-right icon.
+  // Auto-run every time the modal opens. Comments arrive continuously
+  // and the user's expectation is a fresh read every time they tap the
+  // "Sintesi del pensiero" button — not the stale result from the last
+  // open. On close we wipe the cached data so the next open shows the
+  // loading state (not the previous run flashing briefly).
   useEffect(() => {
-    if (!visible) return;
-    if (!data && !loading) load();
-  }, [visible, data, loading, load]);
+    if (!visible) {
+      setData(null);
+      setError(null);
+      return;
+    }
+    // Fire regardless of any cached data — the whole point is freshness.
+    load();
+    // We intentionally omit `load` and `data` from deps: `load` is stable
+    // via useCallback([feudId]) and re-adding it here would double-fire
+    // if the parent recreates the callback for any reason.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, feudId]);
 
   const showEmpty = !loading && !error && data?.empty;
   const showResult = !loading && !error && data && !data.empty;

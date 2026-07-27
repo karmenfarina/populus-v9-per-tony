@@ -2637,6 +2637,16 @@ async def _ai_faction_summary(feud: dict, comments_a: list[dict], comments_b: li
     Returns a dict `{side_a: [str], side_b: [str], common: [str],
     generated_at: iso}` or None on any provider error. Bullets are short
     (≤ 22 words) and in Italian.
+
+    Enrichments vs the previous version:
+    - Includes REPLIES as sub-context for each top-level comment so the
+      LLM can see how the debate actually unfolds.
+    - Filters out low-signal comments (empty, <5 chars, pure emoji).
+    - Ranks comments by informativeness (length + reply_count) so the
+      most substantive opinions land in the prompt window first.
+    - Passes vote counts so the model knows the relative faction size.
+    - Sharper Italian prompt with explicit reasoning steps and negative
+      examples.
     """
     if not EMERGENT_LLM_KEY:
         return None
@@ -2646,44 +2656,126 @@ async def _ai_faction_summary(feud: dict, comments_a: list[dict], comments_b: li
         logger.warning(f"ai-summary: emergentintegrations import failed: {e}")
         return None
 
-    def _prep(rows: list[dict], side_label: str) -> str:
-        # Compose "Reply → Comment" blocks. Cap payload so a very noisy feud
-        # doesn't blow the token budget: keep the 25 most-recent comments,
-        # each truncated to ~250 chars. Same limit per side.
-        rows = rows[:25]
-        blocks: list[str] = []
-        for c in rows:
-            txt = (c.get('text') or '').strip().replace('\n', ' ')[:250]
-            if not txt:
-                continue
-            blocks.append(f"- {txt}")
-        return f"### {side_label}\n" + ("\n".join(blocks) if blocks else "(nessun commento)")
+    # ── 1. Load replies for the visible comments so the prompt sees the
+    #    real conversation, not just the top-level opinions. Cap at 6
+    #    replies per comment to keep the token budget in check.
+    all_comment_ids = [c.get('comment_id') for c in (comments_a + comments_b) if c.get('comment_id')]
+    replies_by_cmt: dict[str, list[dict]] = {}
+    if all_comment_ids:
+        try:
+            reply_docs = await db.replies.find(
+                {'comment_id': {'$in': all_comment_ids}},
+                {'_id': 0, 'comment_id': 1, 'text': 1, 'created_at': 1},
+            ).sort('created_at', 1).to_list(3000)
+            for r in reply_docs:
+                cid = r.get('comment_id')
+                if not cid:
+                    continue
+                replies_by_cmt.setdefault(cid, []).append(r)
+        except Exception as e:
+            logger.warning(f"ai-summary: reply fetch failed: {e}")
 
-    a_block = _prep(comments_a, f"TEAM A — {feud.get('party_a') or 'Team A'}")
-    b_block = _prep(comments_b, f"TEAM B — {feud.get('party_b') or 'Team B'}")
+    _emoji_only_re = re.compile(
+        r'^[\s\W\d\U0001F300-\U0001FAFF\u2600-\u27BF\U0001F600-\U0001F64F]+$'
+    )
+
+    def _informative(txt: str) -> bool:
+        """Reject empty, ultra-short and pure-emoji strings."""
+        t = (txt or '').strip()
+        if len(t) < 5:
+            return False
+        # Filter out pure emoji / punctuation chatter like "😂😂😂" or "!!!"
+        if _emoji_only_re.match(t):
+            return False
+        return True
+
+    def _prep(rows: list[dict], side_label: str, party_name: str) -> str:
+        # Filter noise, then rank by informativeness (length + reply_count).
+        # Cap payload at 30 comments per side and 250 chars per comment,
+        # plus up to 6 replies per comment truncated to 180 chars each.
+        cleaned = [c for c in rows if _informative(c.get('text'))]
+        cleaned.sort(
+            key=lambda c: (
+                int(c.get('reply_count') or 0) * 40 + len((c.get('text') or '').strip()),
+            ),
+            reverse=True,
+        )
+        cleaned = cleaned[:30]
+
+        blocks: list[str] = []
+        for c in cleaned:
+            txt = (c.get('text') or '').strip().replace('\n', ' ')[:250]
+            rep_count = int(c.get('reply_count') or 0)
+            tag = f" (👥{rep_count})" if rep_count > 0 else ""
+            block = f"- {txt}{tag}"
+            # Attach up to 6 replies as sub-bullets — the LLM should
+            # weight the OP more than replies but still see the pushback.
+            reps = replies_by_cmt.get(c.get('comment_id') or '', [])
+            for r in reps[:6]:
+                rt = (r.get('text') or '').strip().replace('\n', ' ')[:180]
+                if _informative(rt):
+                    block += f"\n   ↳ {rt}"
+            blocks.append(block)
+
+        header = f"### {side_label} ({party_name}) — {len(rows)} commenti totali"
+        body = "\n".join(blocks) if blocks else "(nessun commento sostanziale)"
+        return f"{header}\n{body}"
+
+    party_a = feud.get('party_a') or 'Team A'
+    party_b = feud.get('party_b') or 'Team B'
+    a_block = _prep(comments_a, "TEAM A", party_a)
+    b_block = _prep(comments_b, "TEAM B", party_b)
+
+    votes_a = int(feud.get('votes_a') or 0)
+    votes_b = int(feud.get('votes_b') or 0)
+    total_votes = votes_a + votes_b
+    ratio_hint = ""
+    if total_votes > 0:
+        pct_a = round(100 * votes_a / total_votes)
+        pct_b = 100 - pct_a
+        ratio_hint = f"Voti attuali: Team A {votes_a} ({pct_a}%) vs Team B {votes_b} ({pct_b}%).\n"
 
     prompt = (
         f"FAIDA: {feud.get('title') or ''}\n"
-        f"DOMANDA: {feud.get('question') or ''}\n\n"
-        f"COMMENTI DELLE DUE FAZIONI (in italiano):\n\n"
+        f"DOMANDA: {feud.get('question') or ''}\n"
+        f"TEAM A = {party_a}\n"
+        f"TEAM B = {party_b}\n"
+        f"{ratio_hint}\n"
+        f"COMMENTI E REPLICHE DELLE DUE FAZIONI (in italiano):\n\n"
         f"{a_block}\n\n{b_block}\n\n"
-        "Il tuo compito è produrre una sintesi FEDELE e non tendenziosa dei "
-        "PRINCIPALI argomenti che ciascuna fazione sta portando A SOSTEGNO "
-        "del proprio voto. Evita generici, entra sempre nel merito.\n\n"
-        "REGOLE:\n"
-        "1. 2–4 bullet per fazione (max 22 parole ciascuno).\n"
-        "2. Ogni bullet deve essere una TESI CONCRETA, non un'etichetta.\n"
-        "3. NON inserire ideologie mai citate nei commenti.\n"
-        "4. Cerca SOVRAPPOSIZIONI: se entrambe le fazioni concordano su un "
-        "punto (es. 'la situazione è vergognosa', 'servono regole più chiare'), "
-        "mettilo in `common` (0–3 bullet). Se non c'è nulla di veramente comune, "
-        "lascia l'array VUOTO.\n"
-        "5. Se la sezione commenti è DAVVERO vuota (nessuna opinione "
-        "leggibile per una fazione, o meno di 2 commenti reali complessivi), "
-        'rispondi {"empty": true}. Altrimenti sforzati sempre di produrre '
-        "almeno 1 bullet per fazione, anche solo distillando l'unica tesi "
-        "principale rilevabile.\n\n"
-        "Rispondi SOLO con questo JSON, in italiano, senza commenti né testo extra:\n"
+        "═══════════════════════════════════════════════════\n"
+        "COMPITO:\n"
+        "Produci una sintesi FEDELE, SPECIFICA e non tendenziosa degli "
+        "argomenti che ciascuna fazione porta a sostegno del proprio voto. "
+        "Usa lo stile giornalistico italiano: chiaro, asciutto, senza retorica.\n\n"
+        "PROCESSO (ragiona internamente prima di rispondere):\n"
+        "  1. Leggi TUTTI i commenti e le repliche di entrambi i team.\n"
+        "  2. Per ogni team, identifica le 2-4 tesi più ricorrenti e "
+        "sostantive (non i luoghi comuni). Guarda al MERITO, non al tono.\n"
+        "  3. Cerca punti di CONVERGENZA reali: preoccupazioni condivise, "
+        "critiche trasversali, valori comuni citati da entrambi. "
+        "Se davvero non ci sono, lascia l'array vuoto — NON inventare.\n"
+        "  4. Riformula ogni tesi in un bullet chiaro e concreto.\n\n"
+        "REGOLE DI OUTPUT:\n"
+        "• 2–4 bullet per fazione, massimo 22 parole ciascuno.\n"
+        "• Ogni bullet è una TESI CONCRETA che si può contestare, "
+        "non un'etichetta (\"pro-A\", \"contrari\") né un giudizio "
+        "morale (\"hanno ragione\").\n"
+        "• Cita fatti/esempi dai commenti dove utile, senza virgolettati.\n"
+        "• NON aggiungere ideologie o riferimenti storici non presenti "
+        "nei commenti.\n"
+        "• Comuni: 0–4 bullet. Metti QUI solo tesi condivise davvero da "
+        "entrambe le fazioni (es. \"tutti chiedono più trasparenza\").\n"
+        "• Se una fazione ha <2 commenti informativi, produci comunque 1 "
+        "bullet distillato dall'unica opinione rilevabile.\n"
+        "• Se ENTRAMBE le fazioni hanno <2 commenti informativi totali, "
+        'rispondi {"empty": true}.\n\n'
+        "ESEMPI:\n"
+        "  BUONO: \"Sostengono che la riforma penalizza le piccole imprese "
+        "e vada rinviata di un anno.\"\n"
+        "  CATTIVO: \"Sono contrari alla riforma.\" (troppo generico)\n"
+        "  CATTIVO: \"Hanno ragione ad opporsi.\" (non è una tesi, è un giudizio)\n\n"
+        "RISPOSTA — SOLO questo JSON, in italiano, niente altro:\n"
         '{"side_a": ["bullet 1", "bullet 2", "..."], '
         '"side_b": ["bullet 1", "bullet 2", "..."], '
         '"common": ["punto in comune 1", "..."]}'
@@ -2691,11 +2783,19 @@ async def _ai_faction_summary(feud: dict, comments_a: list[dict], comments_b: li
     try:
         chat = LlmChat(
             api_key=EMERGENT_LLM_KEY,
-            session_id=f"sum-{feud.get('feud_id') or new_id('sum')}",
+            # Unique session per call = fresh context every time. The
+            # frontend now regenerates on every modal open, so any stale
+            # LLM state would just add latency.
+            session_id=f"sum-{feud.get('feud_id') or ''}-{int(now_utc().timestamp())}",
             system_message=(
-                "Sei un analista politico italiano imparziale. Distilli il "
-                "pensiero della gente nei commenti in bullet nitidi, senza "
-                "prendere posizione."
+                "Sei un analista italiano imparziale, esperto di dibattito "
+                "pubblico e sociologia del consenso. Il tuo compito è "
+                "distillare le opinioni della gente in bullet nitidi, "
+                "SPECIFICI e concreti. Non prendi mai posizione, non "
+                "moralizzi, non inserisci contenuti non presenti nei "
+                "commenti. Quando trovi convergenze reali tra le fazioni, "
+                "le evidenzi con precisione — quando non ci sono, lo dici "
+                "restituendo un array vuoto invece di forzare la sintesi."
             ),
         ).with_model('anthropic', 'claude-sonnet-4-6')
         reply = await chat.send_message(UserMessage(text=prompt))
