@@ -954,12 +954,12 @@ const styles = StyleSheet.create({
   articleHeader: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
+    justifyContent: "flex-start",
     marginBottom: spacing.xs,
   },
   contextInfoBtn: {
     padding: 4,
-    marginLeft: spacing.xs,
+    marginLeft: 2,
     marginBottom: spacing.xs,
     alignItems: "center",
     justifyContent: "center",
