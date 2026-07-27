@@ -135,16 +135,28 @@ export default function FeudDetail() {
     scrollRef.current?.scrollTo({ y: 0, animated: false });
   }, [id]);
 
+  // Precompute the profile-owner uid derived from `from=/user/<uid>` so
+  // every reload of comments floats their bubbles to the top consistently.
+  const ownerUid: string | undefined = (() => {
+    if (typeof from !== "string") return undefined;
+    const m = from.match(/^\/user\/([^\/?#]+)/);
+    return m ? m[1] : undefined;
+  })();
+
   const loadAll = useCallback(async () => {
     const f = await api.feud(id!);
     setFeud(f.feud);
+    // When the user opened this feud from another user's public vote history
+    // (`from=/user/<uid>`), lift that owner's comments to the very top so the
+    // viewer immediately sees what the profile they were browsing had to say
+    // about this story.
     const [c, s] = await Promise.all([
-      api.comments(id!),
+      api.comments(id!, ownerUid),
       api.sponsors(f.feud.category).catch(() => ({ sponsors: [] })),
     ]);
     setSideA(c.side_a); setSideB(c.side_b);
     if (s.sponsors && s.sponsors.length > 0) setSponsor(s.sponsors[0]);
-  }, [id]);
+  }, [id, ownerUid]);
 
   useEffect(() => {
     (async () => {
@@ -200,7 +212,7 @@ export default function FeudDetail() {
       setFeud(res.feud);
       // Reload comments so nickname_side reflects the new faction everywhere.
       try {
-        const c = await api.comments(feud.feud_id);
+        const c = await api.comments(feud.feud_id, ownerUid);
         setSideA(c.side_a); setSideB(c.side_b);
       } catch {}
     } catch (e: any) { setError(e?.message || "Errore"); }
@@ -213,7 +225,7 @@ export default function FeudDetail() {
     try {
       await api.addComment(feud.feud_id, commentText.trim());
       setCommentText("");
-      const c = await api.comments(feud.feud_id);
+      const c = await api.comments(feud.feud_id, ownerUid);
       setSideA(c.side_a); setSideB(c.side_b);
     } catch (e: any) { setError(e?.message || "Errore"); }
     finally { setPosting(false); }

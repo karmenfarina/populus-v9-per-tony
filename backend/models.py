@@ -42,6 +42,7 @@ class LoginBody(BaseModel):
 
 class AnonymousBody(BaseModel):
     nickname: str
+    device_id: Optional[str] = None
 
 
 class GoogleSessionBody(BaseModel):

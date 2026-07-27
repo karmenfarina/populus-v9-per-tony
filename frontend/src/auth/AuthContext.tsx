@@ -3,6 +3,7 @@ import * as WebBrowser from 'expo-web-browser';
 import * as Linking from 'expo-linking';
 import { Platform } from 'react-native';
 import { api, ApiError, getToken, setToken, User } from '../api';
+import { getDeviceId } from '../utils/deviceId';
 
 type AuthState = {
   user: User | null;
@@ -203,7 +204,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await applyAuthResult(res);
   };
   const anonymous = async (nickname: string) => {
-    const res = await api.anonymous(nickname);
+    // Attach a stable device_id so the backend can resurrect the same
+    // anonymous user instead of minting a new user_id on every tap.
+    // This is what prevents a single device from vote-stuffing a feud.
+    let deviceId: string | undefined;
+    try { deviceId = await getDeviceId(); } catch { deviceId = undefined; }
+    const res = await api.anonymous(nickname, deviceId);
     await applyAuthResult(res);
   };
 

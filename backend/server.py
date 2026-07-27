@@ -882,6 +882,34 @@ async def login(body: LoginBody, authorization: Optional[str] = Header(None)):
 @api_router.post('/auth/anonymous')
 async def anonymous(body: AnonymousBody):
     normalized_nick = _normalize_and_validate_nickname(body.nickname)
+    # Device-scoped anon identity — if a stable device_id was provided AND
+    # we already have an anonymous account linked to that device, resurrect
+    # that same user (with a fresh JWT) instead of minting a new user_id.
+    # This prevents a single device from creating N different anon
+    # identities (and therefore casting N votes on the same feud).
+    device_id = (body.device_id or '').strip()[:120] or None
+    if device_id:
+        existing = await db.users.find_one(
+            {'device_id': device_id, 'auth_provider': 'anonymous'},
+            {'_id': 0},
+        )
+        if existing:
+            # Update the nickname if the caller sends a different one — keeps
+            # the display in sync with what the user just typed on the auth
+            # screen. All other fields (user_id, engagement, votes) preserved.
+            if existing.get('nickname') != normalized_nick:
+                try:
+                    await db.users.update_one(
+                        {'user_id': existing['user_id']},
+                        {'$set': {'nickname': normalized_nick}},
+                    )
+                    existing['nickname'] = normalized_nick
+                except Exception as e:
+                    logger.warning(f"anon-resume nickname update failed: {e}")
+            return {
+                'token': make_jwt(existing['user_id']),
+                'user': await _hydrate_primary_photo(_public_user(existing)),
+            }
     user_id = new_id('anon')
     user = {
         'user_id': user_id, 'email': None, 'nickname': normalized_nick,
@@ -891,6 +919,8 @@ async def anonymous(body: AnonymousBody):
         'onboarding_completed': True,
         'favorite_categories': [],
     }
+    if device_id:
+        user['device_id'] = device_id
     await db.users.insert_one(user)
     return {'token': make_jwt(user_id), 'user': await _hydrate_primary_photo(_public_user(user))}
 
@@ -2513,7 +2543,11 @@ async def update_history_privacy(body: dict, user: dict = Depends(get_current_us
 
 
 @api_router.get('/feuds/{feud_id}/comments')
-async def get_comments(feud_id: str, user: Optional[dict] = Depends(get_current_user_optional)):
+async def get_comments(
+    feud_id: str,
+    owner_user_id: Optional[str] = None,
+    user: Optional[dict] = Depends(get_current_user_optional),
+):
     docs = await db.comments.find({'feud_id': feud_id}, {'_id': 0}).sort('created_at', -1).to_list(500)
     # Visibility rule: a comment is shown only if its author is CURRENTLY voting
     # for the same side the comment was posted on. Comments where the author has
@@ -2593,6 +2627,12 @@ async def get_comments(feud_id: str, user: Optional[dict] = Depends(get_current_
 
         def _bucket(c: dict) -> int:
             uid = c['user_id']
+            # Highest priority: the profile owner the viewer is currently visiting.
+            # When the user landed on this feud from another user's vote history,
+            # their comments float to the very top so the viewer immediately sees
+            # what that specific profile had to say about this story.
+            if owner_user_id and uid == owner_user_id and uid != viewer_id:
+                return -1
             if uid == viewer_id:
                 return 0  # viewer's own comments alongside their circle
             if uid in my_circle_ids:
@@ -2614,13 +2654,28 @@ async def get_comments(feud_id: str, user: Optional[dict] = Depends(get_current_
 
         def _sort_key(c: dict):
             b = _bucket(c)
-            # Bucket 0/1 → recency wins.
+            # Bucket -1 (profile owner) and 0/1 → recency wins.
             # Bucket 2 → popularity (reply_count) first, then recency.
-            if b in (0, 1):
+            if b in (-1, 0, 1):
                 return (b, -_ts(c))
             return (b, -int(c.get('reply_count') or 0), -_ts(c))
 
         docs.sort(key=_sort_key)
+    elif docs and owner_user_id:
+        # Anonymous viewer with an explicit profile-owner context: still float
+        # the owner's comments to the top so the "I came from that user's
+        # history" UX works even when the viewer isn't logged in.
+        def _ts_a(c: dict) -> float:
+            v = c.get('created_at')
+            if isinstance(v, str):
+                try:
+                    return datetime.fromisoformat(v.replace('Z', '+00:00')).timestamp()
+                except Exception:
+                    return 0.0
+            if isinstance(v, datetime):
+                return v.timestamp()
+            return 0.0
+        docs.sort(key=lambda c: (0 if c.get('user_id') == owner_user_id else 1, -_ts_a(c)))
     a = [c for c in docs if c['side'] == 'A']
     b = [c for c in docs if c['side'] == 'B']
     return {'side_a': a, 'side_b': b}
@@ -3714,6 +3769,27 @@ async def _generate_feud_for_category(cat: dict, LlmChat, UserMessage) -> Option
                 used_links.add(d['source_url'])
         headlines = [h for h in headlines if h.get('link') not in used_links]
 
+    # --- STEP 1b: gather recent feuds context (last 3 days) — passed to the AI
+    # so it can spot semantic duplicates on its own. The AI is instructed to
+    # SKIP a headline that essentially re-tells the same story a recent feud
+    # already covered, UNLESS the new headline adds a substantially new piece
+    # of information (new development, twist, quote, official statement).
+    # This is a judgement call left to the AI: legitimate follow-ups on the
+    # same subjects are OK, empty rehash isn't.
+    recent_feuds_ctx: list[dict] = []
+    try:
+        three_days_ago_ctx = now_utc() - timedelta(days=3)
+        rf_cursor = db.feuds.find(
+            {'created_at': {'$gte': three_days_ago_ctx}},
+            {'_id': 0, 'title': 1, 'summary': 1, 'hashtag_subjects': 1,
+             'subject': 1, 'party_a': 1, 'party_b': 1, 'category': 1, 'created_at': 1},
+        ).sort('created_at', -1).limit(60)
+        async for rf in rf_cursor:
+            recent_feuds_ctx.append(rf)
+    except Exception as e:
+        logger.warning(f"recent-feuds context load failed for {cat['id']}: {e}")
+        recent_feuds_ctx = []
+
     # --- STEP 2: hot-topic boost — reorder the pool so headlines mentioning a
     # trending topic from hot_topics.md appear FIRST. The LLM tends to weigh
     # earlier items more heavily, so this dramatically improves the chance
@@ -3809,10 +3885,43 @@ async def _generate_feud_for_category(cat: dict, LlmChat, UserMessage) -> Option
                 "Le notizie del pool che toccano questi argomenti sono marcate con [HOT]."
                 f"{hot_rule}"
             )
+
+        # Recent-feuds anti-repetition block. Give the AI the list of stories
+        # already published in the last 3 days so it can skip a headline that
+        # essentially rehashes what's already on the feed. This is a semantic
+        # dedup — different from the exact-link filter above. The AI is
+        # explicitly told: same subject is fine ONLY if the news adds a
+        # substantially new fact/development.
+        recent_feuds_block = ""
+        if recent_feuds_ctx:
+            def _rf_line(rf: dict) -> str:
+                subs = rf.get('hashtag_subjects') or []
+                if isinstance(subs, list):
+                    subs_txt = ", ".join([str(s) for s in subs if s])
+                else:
+                    subs_txt = ""
+                cat_lbl = rf.get('category') or ''
+                parts = f"{rf.get('party_a','')} vs {rf.get('party_b','')}".strip(' vs')
+                extra = f" [protagonisti: {subs_txt}]" if subs_txt else (f" [{parts}]" if parts else "")
+                return f"  • [{cat_lbl}] {rf.get('title','')}{extra}"
+            rf_bullets = "\n".join([_rf_line(rf) for rf in recent_feuds_ctx[:40]])
+            recent_feuds_block = (
+                "\n\n### FAIDE GIÀ PUBBLICATE (ULTIMI 3 GIORNI) ###\n"
+                f"{rf_bullets}\n"
+                "REGOLA ANTI-RIPETIZIONE: NON creare una faida che sia sostanzialmente lo "
+                "stesso argomento di una già presente nell'elenco qui sopra. Stessi "
+                "protagonisti sono ACCETTABILI solo se la nuova notizia aggiunge un FATTO "
+                "GENUINAMENTE NUOVO E RILEVANTE (colpo di scena, nuova dichiarazione shock, "
+                "sentenza, sviluppo che sposta la storia). Se la nuova notizia è solo un "
+                "commento, una replica ovvia o un riassunto di quello già coperto, restituisci "
+                'esattamente {"skip": true, "reason": "argomento già coperto"} — meglio saltare '
+                "un ciclo che pubblicare contenuto ridondante."
+            )
         prompt = (
             f"Categoria: {cat['label']}.\n\n"
             f"POOL DI NOTIZIE REALI DI OGGI:\n{sources_block}\n"
-            f"{hot_topics_block}\n"
+            f"{hot_topics_block}"
+            f"{recent_feuds_block}\n"
             "COMPITO: scegli LA notizia con il coefficiente di engagement più alto. "
             "Criteri, in ordine di importanza:\n"
             "1. Deve avere DUE parti chiaramente contrapposte OPPURE due posizioni opposte "

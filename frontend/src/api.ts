@@ -115,8 +115,11 @@ export const api = {
     request('/auth/signup', { method: 'POST', body: JSON.stringify({ email, password, nickname }) }),
   login: (email: string, password: string) =>
     request('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
-  anonymous: (nickname: string) =>
-    request('/auth/anonymous', { method: 'POST', body: JSON.stringify({ nickname }) }),
+  anonymous: (nickname: string, device_id?: string) =>
+    request('/auth/anonymous', {
+      method: 'POST',
+      body: JSON.stringify(device_id ? { nickname, device_id } : { nickname }),
+    }),
   googleSession: (session_id: string) =>
     request('/auth/google-session', { method: 'POST', body: JSON.stringify({ session_id }) }),
   firebaseSession: (id_token: string) =>
@@ -146,7 +149,8 @@ export const api = {
   }) => request('/support/submit', { method: 'POST', body: JSON.stringify(data) }),
   vote: (id: string, side: 'A' | 'B') =>
     request(`/feuds/${id}/vote`, { method: 'POST', body: JSON.stringify({ side }) }),
-  comments: (id: string) => request(`/feuds/${id}/comments`),
+  comments: (id: string, ownerUserId?: string) =>
+    request(`/feuds/${id}/comments${ownerUserId ? `?owner_user_id=${encodeURIComponent(ownerUserId)}` : ''}`),
   addComment: (id: string, text: string) =>
     request(`/feuds/${id}/comments`, { method: 'POST', body: JSON.stringify({ text }) }),
   replies: (commentId: string) => request(`/comments/${commentId}/replies`),
