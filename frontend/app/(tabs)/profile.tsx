@@ -49,6 +49,12 @@ export default function Profile() {
   // via `useFocusEffect` after Layout is done.
   const scrollRef = useRef<ScrollView>(null);
   const scrollYRef = useRef(0);
+  // Set to `true` right before we navigate to a detail screen the user
+  // opened from the history list (feud or public profile). On the
+  // subsequent focus event we restore the previous scroll offset
+  // instead of scrolling back to the top, so the user can keep
+  // browsing where they left off.
+  const restoreScrollRef = useRef(false);
   const [photos, setPhotos] = useState<UserPhoto[]>([]);
   const [loadingPhotos, setLoadingPhotos] = useState(false);
   const [bio, setBio] = useState<string>("");
@@ -135,23 +141,36 @@ export default function Profile() {
   // etc). On native we keep the SPA-style flow because deep-linked
   // deep-linking + WebBrowser session results only survive if we
   // don't tear the JS runtime down mid-flight.
+  //
+  // On web we also navigate FIRST (before `logout()` clears `user`)
+  // so no in-tree component re-renders with a null user during the
+  // race window. That was the source of the dev-mode red-screen crash
+  // the user hit: after `logout()` returned, React tried to re-render
+  // detail screens still holding stale `user.xxx` references before
+  // window.location.replace had a chance to actually navigate.
   const doLogout = useCallback(async () => {
-    try { await logout(); } catch { /* still navigate away */ }
-    // Reset the custom nav stack so a re-login starts from a clean slate.
-    try {
-      const { navStack } = await import("@/src/utils/navStack");
-      navStack.clear();
-    } catch { /* noop */ }
     if (Platform.OS === "web" && typeof window !== "undefined") {
-      // Hard reload — nukes every provider + route + timer that may
-      // have been holding references to the previous user. Prevents
-      // the crash the user was seeing when logging in again right
-      // after signing out from a Google profile.
+      // Fire-and-forget the backend logout; the hard reload nukes the
+      // tree so we don't need to await it. Wrap in try/catch so a
+      // failing /auth/logout call (offline, 5xx, etc) doesn't block
+      // the redirect.
+      try { logout(); } catch { /* noop */ }
+      try {
+        const { navStack } = await import("@/src/utils/navStack");
+        navStack.clear();
+      } catch { /* noop */ }
       try {
         window.location.replace("/auth");
         return;
       } catch { /* fall through to router.replace below */ }
     }
+    // Native path: await the API call so SecureStore is really cleared
+    // before we mount /auth again.
+    try { await logout(); } catch { /* still navigate away */ }
+    try {
+      const { navStack } = await import("@/src/utils/navStack");
+      navStack.clear();
+    } catch { /* noop */ }
     try { (router as any).dismissAll?.(); } catch { /* noop */ }
     router.replace("/auth");
   }, [logout, router]);
@@ -177,18 +196,27 @@ export default function Profile() {
     }, [uid, isAnon, loadBlocked])
   );
 
-  // On tab re-focus, reset the scroll offset to the TOP so the profile
-  // always feels "fresh" (avatar + stats visible). The user prefers
-  // this behaviour over restoring the previous position — a page that
-  // silently keeps its old scroll can feel stale when they come back
-  // from a feud or a modal. `scrollYRef` is still tracked for
-  // future/other uses but is intentionally NOT applied here.
+  // On tab re-focus, decide whether to preserve scroll or reset to top.
+  // Default UX: reset to top so the profile always feels fresh (avatar
+  // + stats visible) when coming from another tab. EXCEPTION: if the
+  // user just navigated INTO a detail screen (feud/user) from within
+  // the history list, `restoreScrollRef` is set to true — in that
+  // case we restore the previous offset so they can keep browsing
+  // exactly where they left off.
   useFocusEffect(
     useCallback(() => {
+      const y = scrollYRef.current;
+      const shouldRestore = restoreScrollRef.current;
+      // Consume the flag either way.
+      restoreScrollRef.current = false;
       requestAnimationFrame(() => {
-        scrollRef.current?.scrollTo({ y: 0, animated: false });
+        if (shouldRestore && y > 0) {
+          scrollRef.current?.scrollTo({ y, animated: false });
+        } else {
+          scrollRef.current?.scrollTo({ y: 0, animated: false });
+          scrollYRef.current = 0;
+        }
       });
-      scrollYRef.current = 0;
     }, []),
   );
 
@@ -238,16 +266,14 @@ export default function Profile() {
     }
   }, [histPublicGeneric, histPublicMutual]);
 
-  // Auto-refresh the vote history every 30s while the section is expanded.
-  // The per-vote `aligned` badge is recomputed by the backend on every call
-  // against the CURRENT feud vote counts, so this keeps the "MAGGIORANZA /
-  // MINORANZA" labels in sync with real-time majority flips caused by other
-  // users voting after us. Cleanup on collapse/unmount avoids leaks.
-  useEffect(() => {
-    if (!historyExpanded) return;
-    const t = setInterval(() => { loadHistory(filter); }, 30000);
-    return () => clearInterval(t);
-  }, [historyExpanded, filter, loadHistory]);
+  // Note: we previously auto-refreshed the vote history every 30s via
+  // setInterval so the MAGGIORANZA/MINORANZA badges could reflect
+  // real-time majority flips. That turned out to jarringly reset the
+  // scroll position and re-render the list while the user was still
+  // reading it. We removed the interval: the focus-based refresh
+  // above (which re-fires whenever the Profile tab regains focus) is
+  // more than enough for the intended UX. Users who want the very
+  // latest state can simply leave the tab and come back.
 
   useEffect(() => {
     (async () => {
@@ -1071,7 +1097,15 @@ export default function Profile() {
                       <Pressable
                         key={h.feud_id + h.voted_at}
                         style={styles.historyItem}
-                        onPress={() => router.push(`/feud/${h.feud_id}`)}
+                        onPress={() => {
+                          // Mark the current scroll position for
+                          // restoration when the user comes back
+                          // from the feud detail — they expect the
+                          // history list to be exactly where they
+                          // left it, not scrolled back to the top.
+                          restoreScrollRef.current = true;
+                          router.push(`/feud/${h.feud_id}`);
+                        }}
                         testID={`history-${h.feud_id}`}
                       >
                         <View style={[styles.sideBar, { backgroundColor: sideColor(h.side_voted) }]} />

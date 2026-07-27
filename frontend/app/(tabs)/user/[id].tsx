@@ -200,14 +200,12 @@ export default function UserPublicScreen() {
     loadHistory(id, filter);
   }, [id, filter, loadHistory, profile?.is_anonymous, historyExpanded]);
 
-  // Auto-refresh public user history every 30s while section is expanded, so
-  // the per-vote MAGGIORANZA/MINORANZA labels reflect real-time majority
-  // flips even when the observer stays on the page.
-  useEffect(() => {
-    if (!id || profile?.is_anonymous || !historyExpanded) return;
-    const t = setInterval(() => { loadHistory(id, filter); }, 30000);
-    return () => clearInterval(t);
-  }, [id, filter, loadHistory, profile?.is_anonymous, historyExpanded]);
+  // Note: we previously auto-refreshed this public history every 30s
+  // to keep MAGGIORANZA/MINORANZA labels in real-time sync. That
+  // silently reset the scroll position while the observer was still
+  // reading — jarring UX. The `useSmartBack`-driven re-focus of this
+  // screen already covers the update case when the viewer navigates
+  // elsewhere and back.
 
   if (loading) {
     return (
