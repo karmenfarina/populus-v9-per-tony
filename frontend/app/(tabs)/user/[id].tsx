@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import {
   View, Text, StyleSheet, Pressable, ActivityIndicator, ScrollView, Image, Linking, Modal, TextInput, Alert,
 } from "react-native";
@@ -9,6 +9,7 @@ import { api, PublicUser, HistoryItem } from "@/src/api";
 import { useAuth } from "@/src/auth/AuthContext";
 import { colors, spacing, font, sideColor } from "@/src/theme";
 import { useSmartBack } from "@/src/utils/useSmartBack";
+import { scrollMemory } from "@/src/utils/scrollMemory";
 import { PhotoGalleryViewer } from "@/src/components/PhotoGalleryViewer";
 import CategoryBadgesModal from "@/src/components/CategoryBadgesModal";
 
@@ -34,6 +35,13 @@ export default function UserPublicScreen() {
   const router = useRouter();
   const goBack = useSmartBack("/");
   const { user: me } = useAuth();
+  // Cross-mount scroll memory — keyed by the profile's user_id so
+  // multiple public profiles visited in the same session don't
+  // clobber each other's offsets. Same mechanism as the Own Profile
+  // page: survives tab-navigator remounts while jumping to /feud/[id].
+  const scrollRef = useRef<ScrollView>(null);
+  const pendingScrollYRef = useRef<number | null>(null);
+  const scrollKey = `user-profile:${id || 'unknown'}`;
   const [profile, setProfile] = useState<PublicUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -207,6 +215,37 @@ export default function UserPublicScreen() {
   // screen already covers the update case when the viewer navigates
   // elsewhere and back.
 
+  // Scroll restoration when returning from a detail screen (e.g. the
+  // viewer tapped a feud in this user's history and hit back). Same
+  // pattern as the Own Profile page — retry loop + content-size
+  // observer to survive late layout changes. Keyed by user_id via
+  // `scrollKey` so viewing multiple users doesn't cross-contaminate.
+  useFocusEffect(
+    useCallback(() => {
+      const y = scrollMemory.getY(scrollKey);
+      const shouldRestore = scrollMemory.consumeRestore(scrollKey);
+      if (shouldRestore && y > 0) {
+        pendingScrollYRef.current = y;
+        const attempts = [0, 60, 180, 400, 800, 1200];
+        const timers: any[] = [];
+        attempts.forEach((ms) => {
+          timers.push(setTimeout(() => {
+            const target = pendingScrollYRef.current;
+            if (target != null) {
+              scrollRef.current?.scrollTo({ y: target, animated: false });
+            }
+          }, ms));
+        });
+        timers.push(setTimeout(() => { pendingScrollYRef.current = null; }, 1400));
+        return () => { timers.forEach((t) => clearTimeout(t)); };
+      }
+      // Fresh entry into this profile → no explicit restoration needed.
+      // Reset the stored offset so a later navigation to a different
+      // user's profile doesn't accidentally inherit our value.
+      pendingScrollYRef.current = null;
+    }, [scrollKey]),
+  );
+
   if (loading) {
     return (
       <SafeAreaView style={styles.safe}>
@@ -277,7 +316,20 @@ export default function UserPublicScreen() {
         )}
       </View>
 
-      <ScrollView contentContainerStyle={{ paddingBottom: spacing.xxxl }}>
+      <ScrollView
+        ref={scrollRef}
+        contentContainerStyle={{ paddingBottom: spacing.xxxl }}
+        onScroll={(e) => {
+          scrollMemory.setY(scrollKey, e.nativeEvent.contentOffset.y);
+        }}
+        scrollEventThrottle={16}
+        onContentSizeChange={() => {
+          const target = pendingScrollYRef.current;
+          if (target != null) {
+            scrollRef.current?.scrollTo({ y: target, animated: false });
+          }
+        }}
+      >
         <View style={styles.galleryWrap}>
           <View style={styles.avatarRing}>
             {hasPhotos ? (
@@ -549,7 +601,14 @@ export default function UserPublicScreen() {
                         <Pressable
                           key={h.feud_id + h.voted_at}
                           style={styles.historyItem}
-                          onPress={() => router.push(`/feud/${h.feud_id}`)}
+                          onPress={() => {
+                            // Arm scroll-restoration for this public
+                            // profile before navigating away — the
+                            // key includes the user id so multiple
+                            // profile visits don't share state.
+                            scrollMemory.markRestore(scrollKey);
+                            router.push(`/feud/${h.feud_id}`);
+                          }}
                           testID={`public-history-${h.feud_id}`}
                         >
                           <View style={[styles.sideBar, { backgroundColor: sideColor(h.side_voted) }]} />

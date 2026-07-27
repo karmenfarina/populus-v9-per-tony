@@ -17,6 +17,13 @@ import EditProfileModal from "@/src/components/profile/EditProfileModal";
 import { validateNickname, sanitizeNicknameInput } from "@/src/utils/nickname";
 import { resolvePhotoUri } from "@/src/utils/photoCache";
 import { Socials, EMPTY_SOCIALS } from "@/src/utils/socials";
+import { scrollMemory } from "@/src/utils/scrollMemory";
+
+// Module-level key used to identify this screen's entry in the
+// cross-mount scroll memory. `MY_PROFILE` is a stable string so the
+// state survives component remounts triggered by Expo Router's tabs
+// navigator when navigating to href:null detail screens.
+const SCROLL_KEY = "my-profile";
 
 type Filter = "all" | "majority" | "minority";
 
@@ -56,18 +63,17 @@ export default function Profile() {
   // main alignment badge (or its label) on the profile.
   const [badgesOpen, setBadgesOpen] = useState(false);
 
-  // Scroll-position preservation across tab focus changes. The
-  // ScrollView resets to top by default when the Profile tab is
-  // re-focused — we track the last offset in a ref and restore it
-  // via `useFocusEffect` after Layout is done.
+  // Scroll-position preservation across tab focus changes AND across
+  // component remounts. Expo Router's tabs navigator can unmount the
+  // profile screen when navigating to a hidden detail route (e.g.
+  // /feud/[id]), which loses component-local refs. `scrollMemory`
+  // stores the offset + restore flag at module scope so they
+  // survive the round-trip.
   const scrollRef = useRef<ScrollView>(null);
-  const scrollYRef = useRef(0);
-  // Set to `true` right before we navigate to a detail screen the user
-  // opened from the history list (feud or public profile). On the
-  // subsequent focus event we restore the previous scroll offset
-  // instead of scrolling back to the top, so the user can keep
-  // browsing where they left off.
-  const restoreScrollRef = useRef(false);
+  // Local mirror of the target offset applied by the retry-loop
+  // during a restoration. Cleared once we've stopped chasing the
+  // offset so normal user scrolling isn't fought.
+  const pendingScrollYRef = useRef<number | null>(null);
   const [photos, setPhotos] = useState<UserPhoto[]>([]);
   const [loadingPhotos, setLoadingPhotos] = useState(false);
   const [bio, setBio] = useState<string>("");
@@ -169,6 +175,8 @@ export default function Profile() {
   // detail screens still holding stale `user.xxx` references before
   // window.location.replace had a chance to actually navigate.
   const doLogout = useCallback(async () => {
+    // Reset scroll memory so the next user doesn't inherit our offset.
+    try { scrollMemory.reset(); } catch { /* noop */ }
     if (Platform.OS === "web" && typeof window !== "undefined") {
       // Fire-and-forget the backend logout; the hard reload nukes the
       // tree so we don't need to await it. Wrap in try/catch so a
@@ -217,55 +225,45 @@ export default function Profile() {
   );
 
   // On tab re-focus, decide whether to preserve scroll or reset to top.
-  // Default UX: reset to top so the profile always feels fresh (avatar
-  // + stats visible) when coming from another tab. EXCEPTION: if the
-  // user just navigated INTO a detail screen (feud/user) from within
-  // the history list, `restoreScrollRef` is set to true — in that
-  // case we restore the previous offset so they can keep browsing
-  // exactly where they left off.
+  // Uses the module-scoped `scrollMemory` singleton so the state
+  // survives even if the profile component was unmounted during the
+  // trip to a detail screen (as happens with `href: null` routes in
+  // the Expo Router tabs navigator).
   //
-  // Why the pending-target ref? On focus, `refreshMe()` + focus-based
-  // effects can trigger a re-render / content resize AFTER our first
-  // scrollTo — the layout shifts and the browser silently snaps to
-  // the top. To defeat that, we stash the target offset and reapply
-  // it whenever the ScrollView's content size changes (see
-  // `onContentSizeChange` on the ScrollView below). The ref is
-  // cleared once we've been on the screen long enough for the layout
-  // to have settled.
-  const pendingScrollYRef = useRef<number | null>(null);
+  // Why the retry loop? On focus, `refreshMe()` and other on-focus
+  // effects can shift the ScrollView content (avatar image loads,
+  // history rows swap in). Applying `scrollTo` a single time gets
+  // silently undone by those layout changes. We reapply repeatedly
+  // for ~1.2s and also on every `onContentSizeChange` event.
+  const pendingScrollYRef2 = pendingScrollYRef; // alias for clarity
   useFocusEffect(
     useCallback(() => {
-      const y = scrollYRef.current;
-      const shouldRestore = restoreScrollRef.current;
-      // Consume the flag either way.
-      restoreScrollRef.current = false;
+      const y = scrollMemory.getY(SCROLL_KEY);
+      const shouldRestore = scrollMemory.consumeRestore(SCROLL_KEY);
       if (shouldRestore && y > 0) {
-        // Reapply repeatedly for ~1.2s so late layout changes
-        // (avatar images, history refetch swapping the list) can't
-        // undo our restoration.
-        pendingScrollYRef.current = y;
+        pendingScrollYRef2.current = y;
         const attempts = [0, 60, 180, 400, 800, 1200];
         const timers: any[] = [];
         attempts.forEach((ms) => {
           timers.push(setTimeout(() => {
-            const target = pendingScrollYRef.current;
+            const target = pendingScrollYRef2.current;
             if (target != null) {
               scrollRef.current?.scrollTo({ y: target, animated: false });
             }
           }, ms));
         });
-        // After the last attempt, stop chasing the offset so normal
-        // user scrolling isn't fought.
-        timers.push(setTimeout(() => { pendingScrollYRef.current = null; }, 1400));
+        timers.push(setTimeout(() => { pendingScrollYRef2.current = null; }, 1400));
         return () => { timers.forEach((t) => clearTimeout(t)); };
       }
-      // Not restoring → snap to top.
-      pendingScrollYRef.current = null;
+      // Not restoring → snap to top and reset stored offset so the
+      // next tab-bar re-tap also lands at the top instead of the
+      // previously-remembered offset.
+      pendingScrollYRef2.current = null;
+      scrollMemory.setY(SCROLL_KEY, 0);
       requestAnimationFrame(() => {
         scrollRef.current?.scrollTo({ y: 0, animated: false });
       });
-      scrollYRef.current = 0;
-    }, []),
+    }, [pendingScrollYRef2]),
   );
 
   // Mount / auth-ready refresh: if the user was still loading when the
@@ -779,7 +777,11 @@ export default function Profile() {
       <ScrollView
         ref={scrollRef}
         contentContainerStyle={styles.content}
-        onScroll={(e) => { scrollYRef.current = e.nativeEvent.contentOffset.y; }}
+        onScroll={(e) => {
+          // Persist to module scope so a component remount during
+          // navigation to a detail screen doesn't wipe the offset.
+          scrollMemory.setY(SCROLL_KEY, e.nativeEvent.contentOffset.y);
+        }}
         // 16ms throttle is enough to persist the offset without
         // adding perceptible lag to the scroll gesture.
         scrollEventThrottle={16}
@@ -1157,12 +1159,11 @@ export default function Profile() {
                         key={h.feud_id + h.voted_at}
                         style={styles.historyItem}
                         onPress={() => {
-                          // Mark the current scroll position for
-                          // restoration when the user comes back
-                          // from the feud detail — they expect the
-                          // history list to be exactly where they
-                          // left it, not scrolled back to the top.
-                          restoreScrollRef.current = true;
+                          // Arm scroll-restoration BEFORE navigating.
+                          // Uses module-scope memory so it survives
+                          // if the tabs navigator unmounts this
+                          // component during the round-trip.
+                          scrollMemory.markRestore(SCROLL_KEY);
                           router.push(`/feud/${h.feud_id}`);
                         }}
                         testID={`history-${h.feud_id}`}
