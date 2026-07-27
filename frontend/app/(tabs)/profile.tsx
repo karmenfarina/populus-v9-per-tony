@@ -24,8 +24,21 @@ export default function Profile() {
   const { user, logout, refreshMe } = useAuth();
   const router = useRouter();
   const [filter, setFilter] = useState<Filter>("all");
-  const [history, setHistory] = useState<HistoryItem[]>([]);
-  const [loadingH, setLoadingH] = useState(false);
+  // Per-filter cache. Prevents a jarring "loading" flash every time
+  // the user flips between all/majority/minority — the previous
+  // result stays on screen and we only refetch in the background if
+  // the cache is older than the TTL.
+  const [historyCache, setHistoryCache] = useState<Record<Filter, HistoryItem[]>>(
+    {} as Record<Filter, HistoryItem[]>,
+  );
+  const historyLoadedAtRef = useRef<Record<Filter, number>>({} as Record<Filter, number>);
+  const HISTORY_CACHE_TTL_MS = 60_000; // 1 minute — same feel as the AI summary cache
+  const history = historyCache[filter] || [];
+  // Only surface the spinner when we have absolutely nothing to show
+  // for the current filter. If cached rows exist we keep them visible
+  // while a silent background refetch (if any) is in flight.
+  const [refreshingH, setRefreshingH] = useState(false);
+  const loadingH = refreshingH && !historyCache[filter];
   const [prefsOpen, setPrefsOpen] = useState(false);
   const [pushEnabled, setPushEnabled] = useState<boolean>(user?.push_notifications !== false);
   const [cats, setCats] = useState<{ id: string; label: string }[]>([]);
@@ -124,12 +137,19 @@ export default function Profile() {
     }
   };
 
-  const loadHistory = useCallback(async (f: Filter) => {
-    setLoadingH(true);
+  const loadHistory = useCallback(async (f: Filter, opts?: { force?: boolean }) => {
+    const now = Date.now();
+    const lastLoaded = historyLoadedAtRef.current[f] || 0;
+    const isFresh = now - lastLoaded < HISTORY_CACHE_TTL_MS;
+    // Cache hit AND user isn't forcing a refresh → skip entirely.
+    // No network call, no spinner, no re-render churn.
+    if (isFresh && !opts?.force) return;
+    setRefreshingH(true);
     try {
       const r = await api.history(f);
-      setHistory(r.history);
-    } finally { setLoadingH(false); }
+      setHistoryCache((prev) => ({ ...prev, [f]: r.history }));
+      historyLoadedAtRef.current[f] = Date.now();
+    } finally { setRefreshingH(false); }
   }, []);
 
   // Centralised logout. On web we hard-reload to /auth after clearing
@@ -203,20 +223,48 @@ export default function Profile() {
   // the history list, `restoreScrollRef` is set to true — in that
   // case we restore the previous offset so they can keep browsing
   // exactly where they left off.
+  //
+  // Why the pending-target ref? On focus, `refreshMe()` + focus-based
+  // effects can trigger a re-render / content resize AFTER our first
+  // scrollTo — the layout shifts and the browser silently snaps to
+  // the top. To defeat that, we stash the target offset and reapply
+  // it whenever the ScrollView's content size changes (see
+  // `onContentSizeChange` on the ScrollView below). The ref is
+  // cleared once we've been on the screen long enough for the layout
+  // to have settled.
+  const pendingScrollYRef = useRef<number | null>(null);
   useFocusEffect(
     useCallback(() => {
       const y = scrollYRef.current;
       const shouldRestore = restoreScrollRef.current;
       // Consume the flag either way.
       restoreScrollRef.current = false;
+      if (shouldRestore && y > 0) {
+        // Reapply repeatedly for ~1.2s so late layout changes
+        // (avatar images, history refetch swapping the list) can't
+        // undo our restoration.
+        pendingScrollYRef.current = y;
+        const attempts = [0, 60, 180, 400, 800, 1200];
+        const timers: any[] = [];
+        attempts.forEach((ms) => {
+          timers.push(setTimeout(() => {
+            const target = pendingScrollYRef.current;
+            if (target != null) {
+              scrollRef.current?.scrollTo({ y: target, animated: false });
+            }
+          }, ms));
+        });
+        // After the last attempt, stop chasing the offset so normal
+        // user scrolling isn't fought.
+        timers.push(setTimeout(() => { pendingScrollYRef.current = null; }, 1400));
+        return () => { timers.forEach((t) => clearTimeout(t)); };
+      }
+      // Not restoring → snap to top.
+      pendingScrollYRef.current = null;
       requestAnimationFrame(() => {
-        if (shouldRestore && y > 0) {
-          scrollRef.current?.scrollTo({ y, animated: false });
-        } else {
-          scrollRef.current?.scrollTo({ y: 0, animated: false });
-          scrollYRef.current = 0;
-        }
+        scrollRef.current?.scrollTo({ y: 0, animated: false });
       });
+      scrollYRef.current = 0;
     }, []),
   );
 
@@ -735,6 +783,17 @@ export default function Profile() {
         // 16ms throttle is enough to persist the offset without
         // adding perceptible lag to the scroll gesture.
         scrollEventThrottle={16}
+        onContentSizeChange={() => {
+          // If we're in the middle of a scroll restoration and the
+          // content resized (avatar image loaded, history data swapped
+          // in, etc.), immediately re-apply the target offset. Without
+          // this the ScrollView silently snaps back to top when its
+          // content grows/shrinks under us.
+          const target = pendingScrollYRef.current;
+          if (target != null) {
+            scrollRef.current?.scrollTo({ y: target, animated: false });
+          }
+        }}
       >
         <View style={styles.header}>
           <View style={styles.headerRow}>
