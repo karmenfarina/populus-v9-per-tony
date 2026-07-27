@@ -10,7 +10,7 @@
  *     dev accounts (DEV_ACCOUNT_EMAILS).
  */
 import React, { useCallback, useEffect, useState } from "react";
-import { View, Text, StyleSheet, Pressable, ActivityIndicator, ScrollView } from "react-native";
+import { View, Text, StyleSheet, Pressable, ActivityIndicator, ScrollView, Alert } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { colors, spacing, font } from "@/src/theme";
 
@@ -99,6 +99,31 @@ export default function AnalyticsPanel({ adminKey }: { adminKey: string }) {
 
   useEffect(() => { load(); }, [load]);
 
+  const doReset = useCallback(async () => {
+    const go = async () => {
+      try {
+        const res = await fetch(`${BASE}/api/admin/analytics/reset`, {
+          method: "POST",
+          headers: { "X-Admin-Key": adminKey },
+        });
+        const text = await res.text();
+        if (!res.ok) throw new Error(text || `HTTP ${res.status}`);
+        await load();
+      } catch (e: any) {
+        Alert.alert("Errore", e?.message || "Reset non riuscito");
+      }
+    };
+    // Confirm before wiping.
+    Alert.alert(
+      "Azzerare tutte le statistiche?",
+      "Le KPI del dashboard torneranno a zero (voti, commenti, categorie, demografia, DAU/WAU/MAU). Utenti e voti reali NON verranno cancellati — solo il dashboard riparte da zero.",
+      [
+        { text: "Annulla", style: "cancel" },
+        { text: "Azzera", style: "destructive", onPress: go },
+      ],
+    );
+  }, [adminKey, load]);
+
   if (loading) {
     return (
       <View style={styles.centered}>
@@ -121,13 +146,19 @@ export default function AnalyticsPanel({ adminKey }: { adminKey: string }) {
     <ScrollView contentContainerStyle={styles.content}>
       <View style={styles.headerRow}>
         <Text style={styles.moduleTitle}>KPI PIANO DI CRESCITA</Text>
-        <Pressable onPress={load} style={styles.iconBtn} testID="analytics-refresh">
-          <Ionicons name="refresh" size={18} color={colors.brandSecondary} />
-        </Pressable>
+        <View style={{ flexDirection: "row", gap: 6 }}>
+          <Pressable onPress={doReset} style={styles.iconBtn} testID="analytics-reset">
+            <Ionicons name="trash-outline" size={18} color="#c81f1f" />
+          </Pressable>
+          <Pressable onPress={load} style={styles.iconBtn} testID="analytics-refresh">
+            <Ionicons name="refresh" size={18} color={colors.brandSecondary} />
+          </Pressable>
+        </View>
       </View>
       <Text style={styles.moduleHint}>
         Le soglie sono quelle di pag. 14 del piano di crescita. Gli account di
         sviluppo (elencati sotto) sono esclusi da tutti i calcoli.
+        {overview?.baseline_at ? `\nBaseline azzeramento: ${new Date(overview.baseline_at).toLocaleString("it-IT")}` : ""}
       </Text>
 
       {/* KPI cards */}
