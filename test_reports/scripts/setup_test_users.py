@@ -13,7 +13,7 @@ import sys
 import requests
 from pymongo import MongoClient
 
-BASE_URL = "https://cerchia-app.preview.emergentagent.com"
+BASE_URL = "https://populus-gossip.preview.emergentagent.com"
 MONGO_URL = "mongodb://localhost:27017"
 DB_NAME = "test_database"
 

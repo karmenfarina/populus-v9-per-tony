@@ -277,7 +277,16 @@ export default function Profile() {
   useFocusEffect(
     useCallback(() => {
       refreshMe();
-      if (historyExpanded) loadHistory(filter);
+      if (historyExpanded) {
+        // Silent background refresh on focus: invalidate every filter's
+        // freshness so tapping other tabs also re-fetches, then force-
+        // refetch the current one. Cached rows stay visible during the
+        // refetch (no spinner) so the user sees updated votes without
+        // any loading flash. This is what makes newly-cast votes appear
+        // immediately upon returning to the profile tab.
+        historyLoadedAtRef.current = {} as Record<Filter, number>;
+        loadHistory(filter, { force: true });
+      }
     }, [refreshMe, historyExpanded, loadHistory, filter])
   );
 

@@ -51,6 +51,7 @@ export default function UserPublicScreen() {
   // all/majority/minority sub-tabs. Same pattern as the own-profile
   // screen — the previous rows stay visible while a silent background
   // refresh runs (only if the cache is older than the TTL).
+  const [filter, setFilter] = useState<HFilter>("all");
   const [historyCache, setHistoryCache] = useState<Record<HFilter, HistoryItem[]>>(
     {} as Record<HFilter, HistoryItem[]>,
   );
@@ -59,7 +60,6 @@ export default function UserPublicScreen() {
   const history = historyCache[filter] || [];
   const [refreshingH, setRefreshingH] = useState(false);
   const loadingH = refreshingH && !historyCache[filter];
-  const [filter, setFilter] = useState<HFilter>("all");
   const [historyExpanded, setHistoryExpanded] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
@@ -228,6 +228,24 @@ export default function UserPublicScreen() {
     if (!historyExpanded) return;
     loadHistory(id, filter);
   }, [id, filter, loadHistory, profile?.is_anonymous, historyExpanded]);
+
+  // On focus (e.g. returning from a feud where the viewer may have voted,
+  // or coming back to this profile after any action) do a **silent
+  // background refresh** of the currently-selected filter and invalidate
+  // the cache timestamps for the other filters so tapping them re-fetches
+  // as well. The previously-cached rows stay visible during the refetch
+  // (no spinner) because `loadingH` only fires when the cache is empty.
+  useFocusEffect(
+    useCallback(() => {
+      if (!id) return;
+      if (profile?.is_anonymous) return;
+      if (!historyExpanded) return;
+      // Invalidate every filter's freshness so subsequent tab clicks also
+      // hit the network — but keep the cached data so no loader shows.
+      historyLoadedAtRef.current = {} as Record<HFilter, number>;
+      loadHistory(id, filter, { force: true });
+    }, [id, profile?.is_anonymous, historyExpanded, filter, loadHistory]),
+  );
 
   // Note: we previously auto-refreshed this public history every 30s
   // to keep MAGGIORANZA/MINORANZA labels in real-time sync. That

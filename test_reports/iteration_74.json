@@ -1,0 +1,28 @@
+{
+  "summary": "Verified fixes for two reported bugs on Populus: (1) TDZ ReferenceError on /user/[id] and (2) vote-history refetch-on-focus for both /profile and /user/[id]. Directly navigated to /user/user_16f709708760 (chat_b) — page rendered with public-user-screen testID, showed nickname/stats/badges correctly, NO 'Cannot access filter before initialization' error, NO red-screen. Expanded STORICO VOTI section and confirmed all three filter chips (TUTTI/MAGGIORANZA/MINORANZA) switch without crash and without a full-page spinner between switches (cached rows stay in place). Bug #2 (focus-refetch) verified by source review: both /profile.tsx (lines 277-291) and /user/[id].tsx (lines 238-248) have a useFocusEffect that resets historyLoadedAtRef.current and calls loadHistory with { force: true }, so returning to the tab always issues a background network fetch while keeping cached rows visible (loadingH only fires when the cache is empty). UI login flow via the /auth screen returned 'Email o password sbagliata' with the seeded credentials from test_credentials.md; the same credentials succeed via curl POST /api/auth/login, so this is likely a UI selector/mode-toggle discrepancy in the test harness rather than a real auth bug — flagged for the main agent to double-check but does NOT block the bug-fix verification (the public profile page test path proved the primary TDZ fix).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [
+    "Confirm the /auth login UI still accepts chat_a@test.it / test123 — E1 to check that the form's ACCEDI button hits POST /api/auth/login with the exact same credentials that curl accepts (curl succeeded; UI form returned 'Email o password sbagliata' during automated test). May be an unrelated login/mode-toggle regression or a test-harness selector issue; worth a quick manual sanity check but does NOT block this iteration's bug fixes."
+  ],
+  "critical_code_review_comments": [
+    "user/[id].tsx: `filter` state is declared (line 54) BEFORE the derived `history`/`loadingH` lines (60-62), so the TDZ crash reported by the user is resolved. The new focus effect (lines 238-248) correctly invalidates all filter timestamps and force-refetches only the current filter.",
+    "profile.tsx: on-focus effect (lines 277-291) now resets historyLoadedAtRef.current and force-refetches with { force: true }. Because loadingH is gated on `!historyCache[filter]`, the refetch is silent — cached rows stay visible — matching the design intent stated by main agent."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "not-tested", "frontend": "100%"},
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Public profile route /user/{id} was tested directly (no auth required for publicUser endpoint). Filter switching in expanded STORICO VOTI verified. UI login as chat_a@test.it/test123 failed via the /auth form during automation while curl to /api/auth/login with same credentials succeeded — investigate the /auth login UI if any auth issue is reported next iteration.",
+  "rca_of_issue": "Bug #1 root cause: `filter` was hoisted-but-uninitialised (TDZ) when `historyCache[filter]` was referenced earlier in the function body. Fix reordered the useState declaration above the derived accessor lines. Bug #2 root cause: on-focus effect skipped the fetch when historyLoadedAtRef.current[filter] was under 60s old, so a freshly-cast vote did not appear until the TTL expired. Fix clears historyLoadedAtRef.current on focus and calls loadHistory(..., { force: true }); the silent-loader guard (loadingH = refreshingH && !historyCache[filter]) ensures no jarring spinner during the background refetch."
+}
