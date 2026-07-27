@@ -1,0 +1,146 @@
+<analysis>**original_problem_statement**: 
+Build a mobile app called Populus (App di faide gossip). Every day, the app fetches controversies from news/RSS across various categories and builds a split poll where users take a side (Team A vs Team B) and leave comments. 
+PRODUCT REQUIREMENTS: 
+- Authentication: Google Sign-In (Emergent Managed) and Email/Password (Firebase Auth with email verification). Anonymous login also supported.
+- AI Moderation for comments/replies and AI Summaries for feuds.
+- Cerchia del Gossip (Friend Circle) feature allows adding up to 45 friends.
+- Navigation memory ensures the user returns to the exact previous screen when hitting the back button.
+- Badges (Spille) system based on user activity across categories, which can be shared to stories.
+- Instagram-style Stories feature allowing users to share feuds with their Circle, including privacy controls and daily limits.
+- AdMob Banner integration for monetization.
+- (NEW) Comprehensive Developer-only Analytics Dashboard tracking KPIs like DAU/WAU/MAU, user retention, deep-action rates, and category statistics.
+
+**User's preferred language**: **Italian** (You MUST automatically detect the user's primary language from their messages inside the <trajectory> tag and INSTRUCT next agent to respond in the user's preferred language only)
+
+**what currently exists?** 
+A fully functional Expo frontend and FastAPI backend with MongoDB. Features include AI Faction summaries, chat, polling, HYPE, Blocked Users, Friend Circle, Badges, and Stories. In the latest session, several critical updates were added: AI semantic deduplication for generated feuds, a new Context (Contesto) AI section for feuds, persistent tracking for anonymous users via device ID, priority comment sorting for profile owners, and a fully functional Developer Analytics Dashboard located in the Admin tab.
+
+**Last working item**:
+    - Last item agent was working: Resetting the analytics statistics (, , and ) to zero so that the newly implemented Dev Analytics Dashboard starts fresh for the user, while preserving historic user accounts, comments, and votes.
+    - Status: NONE (Completed, but marked as NONE as user verification is pending for the reset state)
+    - Agent Testing Done: Y (via bash verification)
+    - Which testing method agent to use? NA
+    - User Testing Done: N
+
+**All Pending/In progress Issue list**:  
+  None. All identified bugs and tasks from the session were resolved.
+
+**In progress Task List**: 
+  None.
+
+**Upcoming and Future Tasks**
+  Task 1: Complete Backend & Frontend Refactoring (Priority P2)
+  - Where to resume:  and 
+  - What will be achieved with this:  is currently over 6700 lines.  is around 1500 lines. The user had requested a full refactor in previous sessions. (Note: Wait for explicit user approval before beginning this massive task, as it requires high credit consumption).
+
+**Completed work in this session**
+- Fixed crashing bug (TDZ ReferenceError) on external user profile screen () (DONE)
+- Implemented silent background data refresh for vote history caching on profile screens to eliminate loading spinners while ensuring data stays up-to-date (DONE)
+- AI Semantic Deduplication: Passed recent feuds to the AI generation prompt to prevent redundant articles on the same subject (DONE)
+- Profile Owner Comments First: Updated backend logic to force the profile owner's comments to the top (bucket -1) when browsing their specific vote history and clicking a post (DONE)
+- Persistent Anonymous Users: Created  frontend utility to tie anonymous accounts to device IDs, preventing single devices from casting hundreds of votes (DONE)
+- Fixed TypeError: Depends object is not subscriptable crash on AI Faction Summary caused by an internal caller param misalignment (DONE)
+- Silenced missing bearer token uncaught errors that fired from background pollers (notifications/messages) during the logout sequence (DONE)
+- Feud Context Section: Instructed AI to generate contextual backstory for new feuds, accessible via a toggleable i icon next to the feud title (DONE)
+- Developer Analytics Dashboard: Created a complete analytics system ( and ) tracking DAU/WAU/MAU, retention, and funnel metrics, excluding 5 designated developer email accounts (DONE)
+- Reset analytics counters (, ) to zero to start tracking fresh (DONE)
+
+**Earlier issues found/mentioned but not fixed**
+None.
+
+**Known issue recurrence from previous fork**
+  - Issue recurrence in previous fork: None observed in this session. The previous agent's fix for  from  screens using  continues to hold up well.
+  - Recurrence count: 0
+  - Status: RESOLVED
+
+**Code Architecture**
+- :
+  - : Main FastAPI backend (~6700 lines).
+  -  (NEW): Extracted analytics metrics logic and KPI calculations to keep  from growing further.
+  - : Pydantic request schemas.
+- :
+  - : Admin panel, now contains an Analytics tab.
+  - : Feud detail page, now contains the Context toggle logic.
+- :
+  -  (NEW): Generates and stores a persistent unique device ID for anonymous auth.
+  -  (NEW): Dashboard UI components for developer stats.
+
+**Key Technical Concepts**
+- Frontend: Expo Router, React Context API, Firebase Web SDK, custom singleton state managers (, ).
+- Backend: FastAPI, MongoDB,  / Claude for AI generation and moderation.
+- Analytics: Custom event ingestion pipeline ( collection) to track user behavior (DAU, WAU, MAU, deep-actions) asynchronously.
+
+**key DB schema**
+- : {email, nickname, is_anonymous, auth_provider, is_dev_account (NEW)}
+- : {comment_id, user_id, feud_id, text, reply_count} 
+- : {..., context_text (NEW)}
+-  (NEW): {event_type, user_id, ts, category, feud_id, meta}
+
+**changes in tech stack**
+- None in this session.
+
+**All files of reference**
+-  (Created)
+-  (Updated)
+-  (Created)
+-  (Created)
+-  (Updated)
+-  (Updated)
+-  (Updated)
+-  (Updated)
+-  (Updated)
+
+**Areas that need refactoring**
+-  (~6700 lines) - Though  was separated out, the core routing file remains massive.
+-  (~1500 lines)
+
+**key api endpoints**
+- : Modified to optionally accept  to hoist specific comments.
+- : Series of new endpoints to power the dev dashboard (e.g., , , ).
+- : Now consumes .
+
+**Critical Info for New Agent**
+- **Language Requirements**: MUST communicate with the user in **Italian**.
+- **Analytics Tracking**: 5 specific admin/dev emails (, etc.) are tagged with  in the database. The analytics queries automatically filter these out to avoid polluting KPI metrics.
+- **Anonymous Persistence**: Anonymous users are now tracked by a permanent  generated on the frontend. This restricts users to one anonymous vote per device.
+- **Feud Context**: The AI now generates a  alongside the standard feud content, accessible via the UI toggle on the feud page.
+
+**documents and test reports created in this job**
+- 
+- 
+- 
+-  (Updated)
+
+**Last 10 User Messages and any pending HUMAN messages** 
+1. (Bug) User reported crash opening another user's profile and requested vote history background silent refreshing. -> Fixed.
+2. (Feature) Requested: 1. AI semantic deduplication to avoid redundant news. 2. Profile owner comments to show at top when browsing from their history. 3. Anon users restricted via device recognition. -> Fixed.
+3. (Clarification) Clarified AI deduplication task instructions. -> Acknowledged.
+4. (Bug) la sintesi del pensiero non funziona più dice errore del server -> Fixed param kwarg issue.
+5. (Bug/Feature) uncaught error missing bearer token al logout + add Context section generated by AI with info icon toggle. -> Fixed.
+6. (Feedback) Make the i context icon smaller, without the circle, and unobtrusive. -> Fixed.
+7. (Feedback) Move the i icon closer to the LA FAIDA text. -> Fixed.
+8. (Question) Asked if the app has a way to track WAU/MAU and growth metrics (referencing p.7 & p.14 of an external PDF). -> Agent proposed an Analytics Dashboard.
+9. (Requirement) Uploaded PDF. Instructed to build the dev-only Analytics dashboard, excluding 5 specific testing emails, starting from zero. -> Built dashboard.
+10. (Task) ok fantastico. però resetta le stats, così che partiamo da 0 ora. -> Reset  and user  successfully.
+
+**Project Health Check:**
+App is stable. Multiple complex data flow features and a full custom analytics engine were successfully integrated and tested.
+
+**3rd Party Integrations**
+- Google Auth — Emergent Managed
+- Claude Sonnet 4.6 — uses Emergent LLM Key (Used for Poll Faction Summaries & Daily Generation)
+- Firebase Auth — requires User Firebase Config & Admin Service Account
+- Google AdMob — requires User AdMob App IDs
+
+**Testing status**
+  - Testing agent used after significant changes: YES (Tested Backend flows for Device ID, AI context, and Analytics metrics)
+  - Troubleshoot agent used after agent stuck in loop: NO
+  - Test files created: , 
+  - Known regressions: None.
+
+**Credentials to test flow:**
+Check  for user credentials. 
+Use Header  or login to  to access the Analytics Dashboard.
+
+**What agent forgot to execute**
+N/A. All requested tasks, constraints, and fixes were completed thoroughly.</analysis>
