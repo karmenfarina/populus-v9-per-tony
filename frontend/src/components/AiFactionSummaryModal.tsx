@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -48,6 +48,15 @@ export default function AiFactionSummaryModal({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<AiSummary | null>(null);
+  // Timestamp (ms) of the last successful fetch. Used to decide whether
+  // to reuse the cached result on the next modal open or refetch. Kept
+  // in a ref because we don't need it to trigger re-renders.
+  const lastFetchedAtRef = useRef<number>(0);
+  // Cache TTL: 60 seconds. Under this threshold the modal reopens
+  // instantly with the previous result (fast reading, no LLM latency).
+  // Beyond it, we auto-refresh so slow re-openers still see a fresh
+  // synthesis. The user can always force a refresh via the ↻ button.
+  const CACHE_TTL_MS = 60_000;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -55,6 +64,7 @@ export default function AiFactionSummaryModal({
     try {
       const r: any = await api.feudAiSummary(feudId);
       setData(r);
+      lastFetchedAtRef.current = Date.now();
     } catch (e: any) {
       setError(e?.detail || "Sintesi non disponibile. Riprova.");
     } finally {
@@ -62,22 +72,16 @@ export default function AiFactionSummaryModal({
     }
   }, [feudId]);
 
-  // Auto-run every time the modal opens. Comments arrive continuously
-  // and the user's expectation is a fresh read every time they tap the
-  // "Sintesi del pensiero" button — not the stale result from the last
-  // open. On close we wipe the cached data so the next open shows the
-  // loading state (not the previous run flashing briefly).
+  // Smart auto-refresh on open:
+  //   • First open (no cache) → fetch.
+  //   • Cache older than CACHE_TTL_MS → fetch.
+  //   • Otherwise keep the cached result so re-reading is instant.
+  // The manual ↻ button always forces a fresh call regardless of cache.
   useEffect(() => {
-    if (!visible) {
-      setData(null);
-      setError(null);
-      return;
-    }
-    // Fire regardless of any cached data — the whole point is freshness.
-    load();
-    // We intentionally omit `load` and `data` from deps: `load` is stable
-    // via useCallback([feudId]) and re-adding it here would double-fire
-    // if the parent recreates the callback for any reason.
+    if (!visible) return;
+    const age = Date.now() - lastFetchedAtRef.current;
+    const stale = !data || age > CACHE_TTL_MS;
+    if (stale && !loading) load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, feudId]);
 
