@@ -47,8 +47,18 @@ export default function UserPublicScreen() {
   const [error, setError] = useState<string | null>(null);
   const [idx, setIdx] = useState(0);
   const [viewerOpen, setViewerOpen] = useState(false);
-  const [history, setHistory] = useState<HistoryItem[]>([]);
-  const [loadingH, setLoadingH] = useState(false);
+  // Per-filter cache to avoid the loading flash when flipping between
+  // all/majority/minority sub-tabs. Same pattern as the own-profile
+  // screen — the previous rows stay visible while a silent background
+  // refresh runs (only if the cache is older than the TTL).
+  const [historyCache, setHistoryCache] = useState<Record<HFilter, HistoryItem[]>>(
+    {} as Record<HFilter, HistoryItem[]>,
+  );
+  const historyLoadedAtRef = useRef<Record<HFilter, number>>({} as Record<HFilter, number>);
+  const HISTORY_CACHE_TTL_MS = 60_000;
+  const history = historyCache[filter] || [];
+  const [refreshingH, setRefreshingH] = useState(false);
+  const loadingH = refreshingH && !historyCache[filter];
   const [filter, setFilter] = useState<HFilter>("all");
   const [historyExpanded, setHistoryExpanded] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -184,19 +194,30 @@ export default function UserPublicScreen() {
 
   const [historyHidden, setHistoryHidden] = useState<null | "private" | "mutual_private" | "anonymous">(null);
 
-  const loadHistory = useCallback(async (uid: string, f: HFilter) => {
-    setLoadingH(true);
+  const loadHistory = useCallback(async (uid: string, f: HFilter, opts?: { force?: boolean }) => {
+    const now = Date.now();
+    const lastLoaded = historyLoadedAtRef.current[f] || 0;
+    const isFresh = now - lastLoaded < HISTORY_CACHE_TTL_MS;
+    // Skip network call + spinner if this filter's cache is still fresh.
+    // The user just flipped tabs — no need to hit the backend.
+    if (isFresh && !opts?.force) return;
+    setRefreshingH(true);
     try {
       const r: any = await api.publicUserHistory(uid, f);
-      setHistory(r.history || []);
+      setHistoryCache((prev) => ({ ...prev, [f]: r.history || [] }));
+      historyLoadedAtRef.current[f] = Date.now();
       // The backend surfaces a `hidden` flag + reason when the owner has
       // opted out of showing their voting history to this viewer. Store it
       // so the UI can render an informative empty state instead of a bare
       // "no votes" message.
       if (r.hidden) setHistoryHidden(r.reason || "private");
       else setHistoryHidden(null);
-    } catch { setHistory([]); setHistoryHidden(null); }
-    finally { setLoadingH(false); }
+    } catch {
+      setHistoryCache((prev) => ({ ...prev, [f]: [] }));
+      historyLoadedAtRef.current[f] = Date.now();
+      setHistoryHidden(null);
+    }
+    finally { setRefreshingH(false); }
   }, []);
 
   useEffect(() => {
@@ -607,7 +628,14 @@ export default function UserPublicScreen() {
                             // key includes the user id so multiple
                             // profile visits don't share state.
                             scrollMemory.markRestore(scrollKey);
-                            router.push(`/feud/${h.feud_id}`);
+                            // Pass `?from=/user/{id}` so the feud
+                            // back button returns to THIS profile,
+                            // not "/" (Expo Router tabs don't build
+                            // a real back-stack for href:null routes).
+                            router.push({
+                              pathname: "/feud/[id]" as any,
+                              params: { id: h.feud_id, from: `/user/${id}` },
+                            });
                           }}
                           testID={`public-history-${h.feud_id}`}
                         >

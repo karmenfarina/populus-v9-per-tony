@@ -1164,7 +1164,18 @@ export default function Profile() {
                           // if the tabs navigator unmounts this
                           // component during the round-trip.
                           scrollMemory.markRestore(SCROLL_KEY);
-                          router.push(`/feud/${h.feud_id}`);
+                          // Pass `?from=/profile` so the feud
+                          // detail's back button navigates back HERE
+                          // instead of falling through to "/".
+                          // Expo Router tabs don't grow a real
+                          // back-stack when jumping between hidden
+                          // href:null routes, so we rely on the
+                          // explicit `from` hint the feud screen
+                          // already understands.
+                          router.push({
+                            pathname: "/feud/[id]" as any,
+                            params: { id: h.feud_id, from: "/profile" },
+                          });
                         }}
                         testID={`history-${h.feud_id}`}
                       >

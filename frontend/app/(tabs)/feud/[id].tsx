@@ -68,6 +68,17 @@ export default function FeudDetail() {
       router.replace(`/archive${qs}`);
       return;
     }
+    // Explicit path override: the caller can pass any absolute path
+    // (starting with "/") via `?from=`. We use `router.replace` here
+    // rather than `router.back()` because the tabs navigator does NOT
+    // grow a real back-stack when jumping between hidden `href: null`
+    // routes — `back()` would land on "/" instead of the intended
+    // parent. Used by profile → /feud/X and /user/[id] → /feud/X so
+    // the user returns to the exact history list they were browsing.
+    if (typeof from === "string" && from.startsWith("/")) {
+      router.replace(from as any);
+      return;
+    }
     if (router.canGoBack && router.canGoBack()) router.back();
     else router.replace("/");
   };
