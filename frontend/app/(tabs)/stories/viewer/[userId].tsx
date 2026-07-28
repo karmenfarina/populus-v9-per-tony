@@ -917,7 +917,7 @@ export default function StoriesViewer() {
           {currentStory.kind !== 'badge' && currentStory.feud ? (
             <Pressable onPress={openFeud} style={styles.openFeudBtn} testID="story-open-feud">
               <Text style={styles.openFeudTxt}>APRI LA FAIDA</Text>
-              <Ionicons name="chevron-forward" size={16} color={colors.brandPrimary} />
+              <Ionicons name="chevron-forward" size={16} color={colors.brandSecondary} />
             </Pressable>
           ) : null}
           </View>
@@ -944,9 +944,9 @@ export default function StoriesViewer() {
               testID="story-reply-send"
             >
               {sending ? (
-                <ActivityIndicator color="#fff" />
+                <ActivityIndicator color={colors.onBrandSecondary} />
               ) : (
-                <Ionicons name="paper-plane" size={18} color="#fff" />
+                <Ionicons name="paper-plane" size={18} color={colors.onBrandSecondary} />
               )}
             </Pressable>
           </View>
@@ -1160,17 +1160,17 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 6,
     paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
+    paddingVertical: spacing.sm + 2,
     backgroundColor: colors.surface,
     borderRadius: 999,
-    borderWidth: 1,
-    borderColor: colors.brandPrimary,
+    borderWidth: 1.5,
+    borderColor: colors.brandSecondary,
     zIndex: 2,
   },
   openFeudTxt: {
-    color: colors.brandPrimary,
+    color: colors.brandSecondary,
     fontSize: 12,
-    fontWeight: "700",
+    fontWeight: "800",
     letterSpacing: 1.5,
   },
   cardMissing: {
@@ -1262,7 +1262,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: colors.brandPrimary,
+    backgroundColor: colors.brandSecondary,
     alignItems: "center",
     justifyContent: "center",
   },

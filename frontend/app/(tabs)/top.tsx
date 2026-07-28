@@ -7,7 +7,7 @@ import { useRouter, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { api, Feud } from "@/src/api";
 import { useAuth } from "@/src/auth/AuthContext";
-import { colors, spacing, font } from "@/src/theme";
+import { colors, spacing, font, radius } from "@/src/theme";
 import FeudCard from "@/src/components/FeudCard";
 
 export default function TopScreen() {
@@ -140,29 +140,27 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.surface },
   headerBar: {
     paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
-    borderBottomWidth: 2,
-    borderColor: colors.border,
+    paddingVertical: spacing.lg,
     backgroundColor: colors.surfaceInverse,
   },
-  title: { color: colors.brandSecondary, fontSize: font.sizes.xxxl, letterSpacing: 2, fontWeight: "500" },
-  subtitle: { color: colors.onSurfaceInverse, fontSize: font.sizes.sm, letterSpacing: 1, marginTop: 2 },
+  title: { color: colors.brandSecondary, fontSize: font.sizes.xxxl, letterSpacing: 1.5, fontWeight: "800" },
+  subtitle: { color: colors.muted, fontSize: font.sizes.sm, letterSpacing: 0.5, marginTop: 4, fontWeight: "600" },
   centerBox: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.xl, gap: spacing.md },
   lockCircle: {
     width: 120, height: 120, borderRadius: 60,
-    borderWidth: 2, borderColor: colors.brandSecondary,
+    borderWidth: 1.5, borderColor: colors.brandSecondary,
     alignItems: "center", justifyContent: "center",
     backgroundColor: colors.surfaceInverse,
     marginBottom: spacing.sm,
   },
-  emptyBig: { color: colors.onSurface, fontSize: font.sizes.xxl, letterSpacing: 1, fontWeight: "500", textAlign: "center" },
+  emptyBig: { color: colors.onSurface, fontSize: font.sizes.xxl, letterSpacing: 1, fontWeight: "800", textAlign: "center" },
   emptySmall: { color: colors.muted, fontSize: font.sizes.base, textAlign: "center", lineHeight: 22 },
   cta: {
     marginTop: spacing.md,
-    borderWidth: 2, borderColor: colors.brandPrimary,
     backgroundColor: colors.brandPrimary,
+    borderRadius: radius.md,
     paddingHorizontal: spacing.lg, paddingVertical: spacing.md,
   },
-  ctaTxt: { color: colors.onBrandPrimary, letterSpacing: 2, fontWeight: "500" },
-  list: { padding: spacing.lg, paddingBottom: spacing.xxxl },
+  ctaTxt: { color: colors.onBrandPrimary, letterSpacing: 1.5, fontWeight: "800" },
+  list: { padding: spacing.lg, paddingBottom: spacing.xxxl, gap: spacing.md },
 });
