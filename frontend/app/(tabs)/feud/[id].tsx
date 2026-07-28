@@ -564,7 +564,7 @@ export default function FeudDetail() {
                 {feud.revealed && <Text style={styles.pollPct}>{feud.pct_a}%</Text>}
                 <Text style={styles.pollName}>{feud.party_a}</Text>
                 <Text style={styles.pollVotes}>{feud.revealed ? `${feud.votes_a} voti` : "voti nascosti"}</Text>
-                {feud.my_vote === "A" && <View style={styles.checkPill}><Ionicons name="checkmark" size={14} color={colors.brandPrimary} /></View>}
+                {feud.my_vote === "A" && <View style={styles.checkPill}><Ionicons name="checkmark" size={14} color={colors.onBrandPrimary} /></View>}
               </Pressable>
               <Pressable
                 testID="vote-b-button"
@@ -575,7 +575,7 @@ export default function FeudDetail() {
                 {feud.revealed && <Text style={[styles.pollPct, { color: colors.onBrandSecondary }]}>{feud.pct_b}%</Text>}
                 <Text style={[styles.pollName, { color: colors.onBrandSecondary }]}>{feud.party_b}</Text>
                 <Text style={[styles.pollVotes, { color: colors.onBrandSecondary }]}>{feud.revealed ? `${feud.votes_b} voti` : "voti nascosti"}</Text>
-                {feud.my_vote === "B" && <View style={[styles.checkPill, { backgroundColor: colors.onBrandSecondary }]}><Ionicons name="checkmark" size={14} color={colors.brandSecondary} /></View>}
+                {feud.my_vote === "B" && <View style={[styles.checkPill, { borderColor: colors.onBrandSecondary }]}><Ionicons name="checkmark" size={14} color={colors.onBrandSecondary} /></View>}
               </Pressable>
             </View>
             {!feud.my_vote && <Text style={styles.pollHint}>Vota per svelare i risultati e sbloccare i commenti.</Text>}
@@ -907,25 +907,47 @@ function formatRelative(iso: string): string {
 }
 
 const cs = StyleSheet.create({
-  item: { flexDirection: "row", borderWidth: 2, borderColor: colors.border, backgroundColor: colors.surfaceSecondary, marginBottom: spacing.sm, overflow: "hidden" },
-  sideBar: { width: 6 },
+  item: {
+    flexDirection: "row",
+    backgroundColor: colors.surfaceSecondary,
+    borderRadius: radius.md,
+    marginBottom: spacing.sm,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  sideBar: { width: 4 },
   body: { flex: 1, padding: spacing.md, gap: 4 },
   headRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm },
-  headRight: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
+  headRight: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   delBtn: { padding: 2 },
   replyHeadRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  nick: { fontSize: font.sizes.sm, fontWeight: "500", letterSpacing: 0.5 },
-  time: { fontSize: font.sizes.xs, color: colors.muted, letterSpacing: 0.5 },
+  nick: { fontSize: font.sizes.sm, fontWeight: "700", letterSpacing: 0.3 },
+  time: { fontSize: font.sizes.xs, color: colors.muted, letterSpacing: 0.3 },
   text: { fontSize: font.sizes.base, color: colors.onSurface, lineHeight: 20, marginTop: 4 },
-  actions: { flexDirection: "row", gap: spacing.md, marginTop: spacing.sm },
-  actionTxt: { fontSize: font.sizes.xs, color: colors.muted, letterSpacing: 1 },
-  replies: { marginTop: spacing.sm, paddingLeft: spacing.sm, borderLeftWidth: 2, borderColor: colors.border, gap: spacing.xs },
+  actions: { flexDirection: "row", gap: spacing.lg, marginTop: spacing.sm },
+  actionTxt: { fontSize: font.sizes.sm, color: colors.muted, letterSpacing: 0.3, fontWeight: "500" },
+  replies: { marginTop: spacing.sm, paddingLeft: spacing.sm, borderLeftWidth: 1, borderColor: colors.border, gap: spacing.xs },
   reply: { flexDirection: "row", paddingVertical: spacing.xs, gap: spacing.sm, overflow: "hidden" },
   replySideBar: { width: 3, alignSelf: "stretch", borderRadius: 2 },
   replyInputWrap: { marginTop: spacing.sm, gap: spacing.xs },
-  replyInput: { borderWidth: 2, borderColor: colors.border, padding: spacing.xs, fontSize: font.sizes.sm, color: colors.onSurface, minHeight: 44, backgroundColor: colors.surface },
-  replySend: { backgroundColor: colors.onSurface, paddingVertical: spacing.xs, alignItems: "center" },
-  replySendTxt: { color: colors.onSurfaceInverse, fontSize: font.sizes.xs, letterSpacing: 1 },
+  replyInput: {
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+    borderRadius: radius.sm,
+    padding: spacing.sm,
+    fontSize: font.sizes.sm,
+    color: colors.onSurface,
+    minHeight: 44,
+    backgroundColor: colors.surfaceTertiary,
+  },
+  replySend: {
+    backgroundColor: colors.brandPrimary,
+    borderRadius: radius.sm,
+    paddingVertical: spacing.xs,
+    alignItems: "center",
+  },
+  replySendTxt: { color: colors.onBrandPrimary, fontSize: font.sizes.sm, letterSpacing: 1, fontWeight: "800" },
 });
 
 const styles = StyleSheet.create({
@@ -1037,20 +1059,20 @@ const styles = StyleSheet.create({
     color: colors.muted,
     marginBottom: 2,
   },
-  pollWrap: { padding: spacing.lg, backgroundColor: colors.surfaceInverse, borderBottomWidth: 2, borderColor: colors.border },
-  question: { color: colors.onSurfaceInverse, fontSize: font.sizes.xl, letterSpacing: 0.5, marginBottom: spacing.md, textAlign: "center" },
-  pollSplit: { flexDirection: "row", borderWidth: 2, borderColor: colors.border },
-  pollHalf: { flex: 1, paddingVertical: spacing.lg, alignItems: "center", justifyContent: "center", position: "relative" },
-  pollPct: { color: colors.onBrandPrimary, fontSize: font.sizes.giant, fontWeight: "500", letterSpacing: 1 },
-  pollName: { color: colors.onBrandPrimary, fontSize: font.sizes.base, letterSpacing: 1, marginTop: 4, textAlign: "center", paddingHorizontal: spacing.sm },
-  pollVotes: { color: colors.onBrandPrimary, fontSize: font.sizes.xs, opacity: 0.85, marginTop: 2 },
-  checkPill: { position: "absolute", top: 6, right: 6, width: 22, height: 22, borderRadius: 11, backgroundColor: colors.onBrandPrimary, alignItems: "center", justifyContent: "center" },
-  pollHint: { color: colors.brandSecondary, fontSize: font.sizes.sm, textAlign: "center", marginTop: spacing.md, letterSpacing: 1 },
+  pollWrap: { padding: spacing.lg, backgroundColor: colors.surface },
+  question: { color: colors.onSurface, fontSize: font.sizes.xl, letterSpacing: 0.2, marginBottom: spacing.lg, textAlign: "left", lineHeight: 28, fontWeight: "500" },
+  pollSplit: { flexDirection: "row", borderRadius: radius.lg, overflow: "hidden" },
+  pollHalf: { flex: 1, paddingVertical: spacing.xl, alignItems: "center", justifyContent: "center", position: "relative" },
+  pollPct: { color: colors.onBrandPrimary, fontSize: font.sizes.giant, fontWeight: "800", letterSpacing: 0.5 },
+  pollName: { color: colors.onBrandPrimary, fontSize: font.sizes.base, letterSpacing: 0.3, marginTop: 4, textAlign: "center", paddingHorizontal: spacing.sm, fontWeight: "600", lineHeight: 20 },
+  pollVotes: { color: colors.onBrandPrimary, fontSize: font.sizes.sm, opacity: 0.75, marginTop: 6, fontWeight: "600" },
+  checkPill: { position: "absolute", top: 10, right: 10, width: 24, height: 24, borderRadius: 12, borderWidth: 1.5, borderColor: colors.onBrandPrimary, backgroundColor: "transparent", alignItems: "center", justifyContent: "center" },
+  pollHint: { color: colors.brandSecondary, fontSize: font.sizes.sm, textAlign: "center", marginTop: spacing.md, letterSpacing: 0.3, fontWeight: "600" },
   statsIconBtn: {
     // Discreet round icon button placed alongside the poll section. Big
     // enough hit target (36×36 + hitSlop) without visual weight.
-    width: 40, height: 40, borderRadius: 20,
-    borderWidth: 2, borderColor: colors.brandPrimary,
+    width: 44, height: 44, borderRadius: 22,
+    borderWidth: 1.5, borderColor: colors.brandPrimary,
     backgroundColor: colors.surface,
     alignItems: "center", justifyContent: "center",
   },
@@ -1062,17 +1084,26 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
     gap: spacing.md,
   },
-  err: { color: colors.error, padding: spacing.md, borderWidth: 2, borderColor: colors.error, margin: spacing.lg },
-  commentInputWrap: { padding: spacing.md, borderBottomWidth: 2, borderColor: colors.border, backgroundColor: colors.surface, gap: spacing.sm },
-  commentInput: { borderWidth: 2, borderColor: colors.border, padding: spacing.sm, minHeight: 60, fontSize: font.sizes.base, color: colors.onSurface, backgroundColor: colors.surfaceSecondary },
-  postBtn: { paddingVertical: spacing.sm, alignItems: "center", borderWidth: 2, borderColor: colors.border },
-  postBtnTxt: { fontSize: font.sizes.base, letterSpacing: 2, fontWeight: "500" },
-  commentsTabs: { flexDirection: "row", borderTopWidth: 2, borderBottomWidth: 2, borderColor: colors.border },
-  commentsTab: { flex: 1, paddingVertical: spacing.md, paddingHorizontal: spacing.sm, alignItems: "center", gap: 2, position: "relative", overflow: "hidden" },
+  err: { color: colors.error, padding: spacing.md, borderWidth: 1.5, borderColor: colors.error, borderRadius: radius.sm, margin: spacing.lg },
+  commentInputWrap: { padding: spacing.lg, backgroundColor: colors.surface, gap: spacing.sm },
+  commentInput: {
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    minHeight: 60,
+    fontSize: font.sizes.base,
+    color: colors.onSurface,
+    backgroundColor: colors.surfaceSecondary,
+  },
+  postBtn: { paddingVertical: spacing.md, alignItems: "center", borderRadius: radius.md },
+  postBtnTxt: { fontSize: font.sizes.base, letterSpacing: 1.5, fontWeight: "800" },
+  commentsTabs: { flexDirection: "row", gap: spacing.sm, paddingHorizontal: spacing.lg, paddingBottom: spacing.sm },
+  commentsTab: { flex: 1, paddingVertical: spacing.md, paddingHorizontal: spacing.sm, alignItems: "center", gap: 2, position: "relative", overflow: "hidden", borderRadius: radius.md },
   commentsTabDim: { opacity: 0.42 },
-  commentsTabCount: { color: colors.onBrandPrimary, fontSize: font.sizes.xxl, fontWeight: "500", letterSpacing: 1 },
-  commentsTabLabel: { color: colors.onBrandPrimary, fontSize: font.sizes.xs, letterSpacing: 1.5, paddingHorizontal: spacing.xs },
-  commentsTabIndicator: { position: "absolute", left: 0, right: 0, bottom: 0, height: 4, backgroundColor: colors.onBrandPrimary },
+  commentsTabCount: { color: colors.onBrandPrimary, fontSize: font.sizes.xxl, fontWeight: "800", letterSpacing: 0.5 },
+  commentsTabLabel: { color: colors.onBrandPrimary, fontSize: font.sizes.xs, letterSpacing: 1, paddingHorizontal: spacing.xs, fontWeight: "700" },
+  commentsTabIndicator: { position: "absolute", left: 0, right: 0, bottom: 0, height: 3, backgroundColor: colors.onBrandPrimary },
   commentsList: { padding: spacing.md, backgroundColor: colors.surface },
   commentsIdle: { alignItems: "center", justifyContent: "center", paddingVertical: spacing.xxxl, gap: spacing.sm, backgroundColor: colors.surface },
   commentsIdleTxt: { color: colors.muted, fontSize: font.sizes.sm, letterSpacing: 1, textAlign: "center", paddingHorizontal: spacing.xl },
