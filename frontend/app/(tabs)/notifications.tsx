@@ -6,7 +6,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "@/src/api";
-import { colors, spacing, font } from "@/src/theme";
+import { colors, spacing, font, radius } from "@/src/theme";
 import { useNotifications } from "@/src/notifications/NotificationsContext";
 import { useAuth } from "@/src/auth/AuthContext";
 
@@ -156,18 +156,36 @@ export default function NotificationsScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.surface },
-  header: { paddingHorizontal: spacing.lg, paddingVertical: spacing.md, borderBottomWidth: 2, borderColor: colors.border, backgroundColor: colors.surfaceInverse },
-  brand: { color: colors.brandSecondary, fontSize: font.sizes.xxxl, letterSpacing: 2, fontWeight: "500" },
-  subtitle: { color: colors.onSurfaceInverse, fontSize: font.sizes.sm, letterSpacing: 1, marginTop: 2 },
-  list: { paddingBottom: spacing.xxxl },
-  sep: { height: 1, backgroundColor: colors.border },
-  row: { flexDirection: "row", alignItems: "flex-start", gap: spacing.md, padding: spacing.md, backgroundColor: colors.surface },
-  rowUnread: { backgroundColor: "rgba(240,26,26,0.04)" },
-  iconWrap: { width: 40, height: 40, borderWidth: 2, borderColor: colors.brandPrimary, alignItems: "center", justifyContent: "center" },
-  rowTitle: { color: colors.onSurface, fontSize: font.sizes.base, fontWeight: "500" },
-  rowBody: { color: colors.muted, fontSize: font.sizes.sm, marginTop: 2 },
-  rowMeta: { color: colors.muted, fontSize: font.sizes.xs, marginTop: 4, letterSpacing: 1 },
-  dot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.brandPrimary, marginTop: 6 },
+  header: { paddingHorizontal: spacing.lg, paddingVertical: spacing.lg, backgroundColor: colors.surfaceInverse },
+  brand: { color: colors.brandSecondary, fontSize: font.sizes.xxxl, letterSpacing: 1.5, fontWeight: "800" },
+  subtitle: { color: colors.muted, fontSize: font.sizes.sm, letterSpacing: 0.5, marginTop: 4, fontWeight: "600" },
+  list: { padding: spacing.md, paddingBottom: spacing.xxxl, gap: spacing.sm },
+  sep: { height: spacing.sm },
+  row: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: spacing.md,
+    padding: spacing.md,
+    backgroundColor: colors.surfaceSecondary,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+  },
+  rowUnread: { backgroundColor: "rgba(240,26,26,0.06)", borderColor: `${colors.brandPrimary}55` },
+  iconWrap: {
+    width: 44,
+    height: 44,
+    borderWidth: 1.5,
+    borderColor: colors.brandPrimary,
+    borderRadius: radius.sm,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "transparent",
+  },
+  rowTitle: { color: colors.onSurface, fontSize: font.sizes.base, fontWeight: "700" },
+  rowBody: { color: colors.muted, fontSize: font.sizes.sm, marginTop: 4, lineHeight: 20 },
+  rowMeta: { color: colors.muted, fontSize: font.sizes.xs, marginTop: 6, letterSpacing: 0.5 },
+  dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.brandPrimary, marginTop: 8 },
   center: { flex: 1, alignItems: "center", justifyContent: "center", gap: spacing.md, padding: spacing.xl },
   emptyTxt: { color: colors.muted, fontSize: font.sizes.base, textAlign: "center" },
 });
