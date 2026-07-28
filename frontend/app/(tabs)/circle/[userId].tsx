@@ -19,7 +19,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { api } from "@/src/api";
 import { useAuth } from "@/src/auth/AuthContext";
 import { useSmartBack } from "@/src/utils/useSmartBack";
-import { colors, spacing, font } from "@/src/theme";
+import { colors, spacing, font, radius } from "@/src/theme";
 
 type Member = {
   user_id: string;
@@ -219,7 +219,7 @@ export default function CircleScreen() {
     <SafeAreaView style={styles.safe} edges={["top"]}>
       <View style={styles.header}>
         <Pressable onPress={goBack} style={styles.backBtn} testID="circle-back">
-          <Ionicons name="chevron-back" size={22} color={colors.onSurfaceInverse} />
+          <Ionicons name="chevron-back" size={22} color={colors.brandSecondary} />
         </Pressable>
         <Text style={styles.title}>CERCHIA</Text>
         {/* Owner-only shortcut to the dedicated user-search screen where
@@ -235,7 +235,7 @@ export default function CircleScreen() {
             hitSlop={8}
             accessibilityLabel="Cerca amici da aggiungere alla Cerchia"
           >
-            <Ionicons name="person-add" size={22} color={colors.onSurfaceInverse} />
+            <Ionicons name="person-add" size={22} color={colors.brandSecondary} />
           </Pressable>
         ) : (
           <View style={styles.backBtn} />
@@ -317,6 +317,9 @@ export default function CircleScreen() {
           onPress={() => setConfirmRemove(null)}
         >
           <Pressable style={styles.confirmCard} onPress={() => { /* swallow */ }}>
+            <View style={styles.confirmIconWrap}>
+              <Ionicons name="close" size={26} color={colors.error} />
+            </View>
             <Text style={styles.confirmTitle}>Rimuovi dalla cerchia</Text>
             <Text style={styles.confirmBody}>
               Rimuovere <Text style={styles.confirmNick}>@{confirmRemove?.nickname}</Text> dalla tua cerchia?
@@ -352,58 +355,68 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.surface },
   header: {
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-    backgroundColor: colors.brandPrimary,
+    backgroundColor: colors.surfaceInverse,
     paddingHorizontal: spacing.md, paddingVertical: spacing.md,
-    borderBottomWidth: 2, borderColor: colors.border,
   },
   backBtn: { width: 32, height: 32, alignItems: "center", justifyContent: "center" },
-  title: { color: colors.onBrandPrimary, fontSize: font.sizes.xl, letterSpacing: 3, fontWeight: "500" },
+  title: { color: colors.onSurface, fontSize: font.sizes.xl, letterSpacing: 3, fontWeight: "800" },
   subhead: {
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-    paddingHorizontal: spacing.lg, paddingVertical: spacing.md,
-    borderBottomWidth: 1, borderColor: colors.border,
+    marginHorizontal: spacing.md, marginTop: spacing.md,
+    paddingHorizontal: spacing.md, paddingVertical: spacing.md,
+    borderWidth: 1, borderColor: colors.border, borderRadius: radius.md,
+    backgroundColor: colors.surfaceSecondary,
   },
-  subheadTxt: { color: colors.onSurface, fontSize: font.sizes.base, fontWeight: "600" },
+  subheadTxt: { color: colors.onSurface, fontSize: font.sizes.lg, fontWeight: "700" },
   privRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   privLabel: { color: colors.onSurface, fontSize: font.sizes.sm },
   searchWrap: {
     flexDirection: "row", alignItems: "center", gap: spacing.sm,
-    borderWidth: 1, borderColor: colors.border,
+    borderWidth: 1.5, borderColor: colors.brandSecondary,
+    borderRadius: radius.md,
     marginHorizontal: spacing.md, marginTop: spacing.md,
-    paddingHorizontal: spacing.md, paddingVertical: 8,
-    backgroundColor: colors.surfaceSecondary,
+    paddingHorizontal: spacing.md, paddingVertical: 10,
+    backgroundColor: "transparent",
   },
   searchInput: { flex: 1, color: colors.onSurface, fontSize: font.sizes.base, padding: 0 },
   row: {
-    flexDirection: "row", alignItems: "center", gap: spacing.sm,
-    paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
-    borderBottomWidth: 1, borderColor: colors.border,
+    flexDirection: "row", alignItems: "center", gap: spacing.md,
+    marginHorizontal: spacing.md, marginTop: spacing.sm,
+    paddingHorizontal: spacing.md, paddingVertical: spacing.md,
+    borderWidth: 1, borderColor: colors.border, borderRadius: radius.md,
+    backgroundColor: colors.surfaceSecondary,
   },
-  rowLeft: { flexDirection: "row", alignItems: "center", flex: 1, gap: spacing.sm },
-  avatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.surfaceSecondary },
+  rowLeft: { flexDirection: "row", alignItems: "center", flex: 1, gap: spacing.md },
+  avatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.surfaceTertiary },
   avatarFallback: { alignItems: "center", justifyContent: "center" },
-  nick: { color: colors.onSurface, fontSize: font.sizes.base, fontWeight: "600" },
+  nick: { color: colors.onSurface, fontSize: font.sizes.base, fontWeight: "800" },
   meTag: { color: colors.brandPrimary, fontSize: font.sizes.xs, fontWeight: "700", letterSpacing: 1 },
   dispname: { color: colors.muted, fontSize: font.sizes.sm, marginTop: 2 },
-  iconBtn: { padding: 8 },
+  iconBtn: {
+    width: 36, height: 36,
+    borderWidth: 1.5, borderColor: colors.error,
+    borderRadius: radius.sm,
+    alignItems: "center", justifyContent: "center",
+    backgroundColor: "transparent",
+  },
   iconBtnBusy: { opacity: 0.4 },
   addBtn: {
     flexDirection: "row", alignItems: "center", gap: 4,
     backgroundColor: colors.brandPrimary,
-    paddingHorizontal: 10, paddingVertical: 6,
+    paddingHorizontal: 12, paddingVertical: 8,
     borderRadius: 999,
   },
   addBtnOn: { backgroundColor: colors.brandSecondary },
   addBtnBusy: { opacity: 0.55 },
-  addBtnTxt: { color: colors.onBrandPrimary, fontSize: font.sizes.xs, fontWeight: "700", letterSpacing: 0.5 },
+  addBtnTxt: { color: colors.onBrandPrimary, fontSize: font.sizes.xs, fontWeight: "800", letterSpacing: 0.5 },
   addBtnTxtOn: { color: colors.onBrandSecondary },
   emptyBox: { alignItems: "center", justifyContent: "center", padding: spacing.xl, gap: spacing.sm },
-  emptyTitle: { color: colors.onSurface, fontSize: font.sizes.lg, fontWeight: "600", marginTop: spacing.sm },
+  emptyTitle: { color: colors.onSurface, fontSize: font.sizes.lg, fontWeight: "700", marginTop: spacing.sm },
   emptySub: { color: colors.muted, fontSize: font.sizes.sm, textAlign: "center" },
   // In-app confirmation modal (used for the "remove from circle" action).
   confirmBackdrop: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.55)",
+    backgroundColor: "rgba(0,0,0,0.65)",
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: spacing.xl,
@@ -411,47 +424,59 @@ const styles = StyleSheet.create({
   confirmCard: {
     width: "100%",
     maxWidth: 340,
-    backgroundColor: colors.surface,
-    borderWidth: 2,
+    backgroundColor: colors.surfaceSecondary,
+    borderWidth: 1,
     borderColor: colors.border,
-    padding: spacing.lg,
+    borderRadius: radius.lg,
+    padding: spacing.xl,
     gap: spacing.md,
+    alignItems: "center",
+  },
+  confirmIconWrap: {
+    width: 56, height: 56,
+    borderRadius: 28,
+    borderWidth: 1.5, borderColor: colors.error,
+    alignItems: "center", justifyContent: "center",
+    marginBottom: spacing.xs,
   },
   confirmTitle: {
     color: colors.onSurface,
-    fontSize: font.sizes.lg,
-    fontWeight: "700",
-    letterSpacing: 1,
+    fontSize: font.sizes.xl,
+    fontWeight: "800",
+    letterSpacing: 0.5,
+    textAlign: "center",
   },
   confirmBody: {
-    color: colors.onSurface,
+    color: colors.muted,
     fontSize: font.sizes.base,
-    lineHeight: 20,
+    lineHeight: 22,
+    textAlign: "center",
   },
   confirmNick: {
-    fontWeight: "700",
+    fontWeight: "800",
     color: colors.brandPrimary,
   },
   confirmBtnRow: {
     flexDirection: "row",
     gap: spacing.sm,
     marginTop: spacing.sm,
-    justifyContent: "flex-end",
+    width: "100%",
   },
   confirmBtn: {
+    flex: 1,
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    minWidth: 96,
+    paddingVertical: spacing.md,
     alignItems: "center",
+    borderRadius: radius.md,
   },
   confirmBtnGhost: {
-    borderWidth: 2,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
+    borderWidth: 1.5,
+    borderColor: colors.borderStrong,
+    backgroundColor: "transparent",
   },
   confirmBtnGhostTxt: {
     color: colors.onSurface,
-    fontWeight: "700",
+    fontWeight: "800",
     fontSize: font.sizes.sm,
     letterSpacing: 1,
   },
@@ -460,7 +485,7 @@ const styles = StyleSheet.create({
   },
   confirmBtnDangerTxt: {
     color: "#FFFFFF",
-    fontWeight: "700",
+    fontWeight: "800",
     fontSize: font.sizes.sm,
     letterSpacing: 1,
   },
