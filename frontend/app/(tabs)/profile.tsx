@@ -8,7 +8,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRouter, useFocusEffect } from "expo-router";
 import { useAuth } from "@/src/auth/AuthContext";
 import { api, HistoryItem, UserPhoto } from "@/src/api";
-import { colors, spacing, font, sideColor } from "@/src/theme";
+import { colors, spacing, font, sideColor, radius } from "@/src/theme";
 import PhotoCropper from "@/src/components/PhotoCropper";
 import CategoryBadgesModal from "@/src/components/CategoryBadgesModal";
 import ProfessionModal from "@/src/components/profile/ProfessionModal";
@@ -938,11 +938,11 @@ export default function Profile() {
             <Text style={styles.statValue}>{user.total_votes}</Text>
             <Text style={styles.statLabel}>VOTI</Text>
           </View>
-          <View style={[styles.statBox, { borderLeftWidth: 2 }]}>
+          <View style={styles.statBox}>
             <Text style={[styles.statValue, { color: colors.brandPrimary }]}>{user.majority_votes}</Text>
             <Text style={styles.statLabel}>MAGGIORANZA</Text>
           </View>
-          <View style={[styles.statBox, { borderLeftWidth: 2, backgroundColor: colors.surfaceInverse }]}>
+          <View style={styles.statBox}>
             <Text style={[styles.statValue, { color: colors.brandSecondary }]}>{user.minority_votes}</Text>
             <Text style={[styles.statLabel, { color: colors.brandSecondary }]}>MINORANZA</Text>
           </View>
@@ -1337,15 +1337,15 @@ export default function Profile() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.surface },
   content: { paddingBottom: spacing.xxxl },
-  header: { padding: spacing.lg, backgroundColor: colors.surfaceInverse, borderBottomWidth: 2, borderColor: colors.border, gap: spacing.md },
+  header: { padding: spacing.lg, backgroundColor: colors.surfaceInverse, gap: spacing.md },
   headerRow: { flexDirection: "row", alignItems: "center", gap: spacing.md },
   avatarWrap: { position: "relative" },
   avatarImg: { width: 80, height: 80, borderRadius: 40, borderWidth: 0, overflow: "hidden", backgroundColor: colors.surfaceInverse },
   avatarPlaceholder: { alignItems: "center", justifyContent: "center" },
   avatarEditBadge: { position: "absolute", right: -2, bottom: -2, width: 24, height: 24, borderRadius: 12, backgroundColor: colors.brandPrimary, borderWidth: 2, borderColor: colors.surface, alignItems: "center", justifyContent: "center" },
   headerBio: { fontSize: font.sizes.base, color: colors.onSurfaceInverse, lineHeight: 20, borderLeftWidth: 2, borderColor: colors.brandSecondary, paddingLeft: spacing.sm },
-  headerEditBtn: { flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start", borderWidth: 2, borderColor: colors.brandSecondary, paddingHorizontal: spacing.sm, paddingVertical: 6 },
-  headerEditTxt: { fontSize: font.sizes.xs, letterSpacing: 1, fontWeight: "500", color: colors.brandSecondary },
+  headerEditBtn: { flexDirection: "row", alignItems: "center", gap: 8, alignSelf: "flex-start", borderWidth: 1.5, borderColor: colors.brandSecondary, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
+  headerEditTxt: { fontSize: font.sizes.sm, letterSpacing: 1, fontWeight: "800", color: colors.brandSecondary },
   anonBanner: { borderWidth: 2, borderColor: colors.brandSecondary, padding: spacing.md, gap: spacing.sm, backgroundColor: "rgba(255,230,0,0.08)" },
   anonBannerTxt: { color: colors.brandSecondary, fontSize: font.sizes.sm, letterSpacing: 2, fontWeight: "500" },
   anonBannerBody: { color: colors.onSurfaceInverse, fontSize: font.sizes.sm, lineHeight: 18 },
@@ -1394,34 +1394,60 @@ const styles = StyleSheet.create({
     backgroundColor: colors.brandSecondary,
   },
   circleChipTxt: { color: colors.onBrandSecondary, fontSize: font.sizes.xs, fontWeight: "700", letterSpacing: 0.5 },
-  badgeBlock: { alignItems: "center", padding: spacing.xl, borderBottomWidth: 2, borderColor: colors.border },
-  badgeIcon: { width: 140, height: 140, borderWidth: 2, borderColor: colors.border, backgroundColor: colors.surfaceTertiary, alignItems: "center", justifyContent: "center" },
-  badgeTitle: { fontSize: font.sizes.xxl, letterSpacing: 2, fontWeight: "500", color: colors.onSurface, marginTop: spacing.md },
+  badgeBlock: {
+    alignItems: "center",
+    padding: spacing.xl,
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.md,
+    marginBottom: spacing.md,
+    backgroundColor: colors.surfaceSecondary,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.lg,
+  },
+  badgeIcon: {
+    width: 140,
+    height: 140,
+    borderRadius: radius.md,
+    backgroundColor: colors.surfaceTertiary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  badgeTitle: { fontSize: font.sizes.xxl, letterSpacing: 1.5, fontWeight: "800", color: colors.onSurface, marginTop: spacing.md },
   badgeSubtitle: { fontSize: font.sizes.base, color: colors.muted, marginTop: spacing.xs },
   badgeMoreHint: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    gap: 8,
     marginTop: spacing.md,
     paddingHorizontal: spacing.md,
-    paddingVertical: 6,
-    borderWidth: 1,
+    paddingVertical: 8,
+    borderWidth: 1.5,
     borderColor: colors.brandPrimary,
     borderRadius: 999,
   },
   badgeMoreHintTxt: {
     color: colors.brandPrimary,
-    fontSize: font.sizes.xs,
-    fontWeight: "700",
-    letterSpacing: 1.5,
+    fontSize: font.sizes.sm,
+    fontWeight: "800",
+    letterSpacing: 1.2,
   },
-  statsRow: { flexDirection: "row", borderBottomWidth: 2, borderColor: colors.border },
-  statBox: { flex: 1, padding: spacing.md, alignItems: "center", borderColor: colors.border, backgroundColor: colors.surfaceSecondary },
-  statValue: { fontSize: font.sizes.xxxl, fontWeight: "500", color: colors.onSurface },
-  statLabel: { fontSize: font.sizes.xs, color: colors.muted, letterSpacing: 1, marginTop: 2 },
+  statsRow: { flexDirection: "row", gap: spacing.sm, paddingHorizontal: spacing.lg, marginBottom: spacing.md },
+  statBox: {
+    flex: 1,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.sm,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    backgroundColor: colors.surfaceSecondary,
+  },
+  statValue: { fontSize: font.sizes.xxxl, fontWeight: "800", color: colors.onSurface },
+  statLabel: { fontSize: font.sizes.xs, color: colors.muted, letterSpacing: 1, marginTop: 4, fontWeight: "700" },
   historyHeader: { paddingHorizontal: spacing.lg, paddingTop: spacing.lg, paddingBottom: spacing.sm },
   historyTitle: { fontSize: font.sizes.xxl, letterSpacing: 2, fontWeight: "500", color: colors.onSurface },
-  historySection: { paddingHorizontal: spacing.lg, paddingVertical: spacing.md, borderBottomWidth: 2, borderColor: colors.border },
+  historySection: { paddingHorizontal: spacing.lg, paddingVertical: spacing.md, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: colors.border },
   historyHeadRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: spacing.xs },
   sectionHeadRight: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   sectionCountBadge: { color: colors.muted, fontSize: font.sizes.sm, letterSpacing: 1, minWidth: 20, textAlign: "right" },
@@ -1456,16 +1482,45 @@ const styles = StyleSheet.create({
   hBadge: { fontSize: font.sizes.xs, letterSpacing: 1, paddingHorizontal: 6, paddingVertical: 2, borderWidth: 1, borderColor: colors.border },
   hBadgeMaj: { backgroundColor: colors.brandPrimary, color: colors.onBrandPrimary },
   hBadgeMin: { backgroundColor: colors.brandSecondary, color: colors.onBrandSecondary },
-  logout: { margin: spacing.lg, borderWidth: 2, borderColor: colors.border, padding: spacing.md, alignItems: "center", backgroundColor: colors.brandPrimary },
-  pushRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, marginHorizontal: spacing.lg, marginTop: spacing.md, padding: spacing.md, borderWidth: 2, borderColor: colors.border, backgroundColor: colors.surfaceInverse },
-  pushLabel: { color: colors.brandSecondary, fontSize: font.sizes.sm, letterSpacing: 2, fontWeight: "500" },
-  pushHint: { color: colors.onSurfaceInverse, fontSize: font.sizes.xs, marginTop: 4, opacity: 0.75 },
-  supportBtn: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginHorizontal: spacing.lg, marginTop: spacing.md, padding: spacing.md, borderWidth: 2, borderColor: colors.brandSecondary, backgroundColor: colors.surfaceInverse },
-  supportTxt: { flex: 1, color: colors.brandSecondary, fontSize: font.sizes.sm, letterSpacing: 2, fontWeight: "500" },
-  logoutText: { color: colors.onBrandPrimary, fontSize: font.sizes.lg, letterSpacing: 2, fontWeight: "500" },
+  logout: {
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.md,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    alignItems: "center",
+    backgroundColor: colors.brandPrimary,
+  },
+  pushRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.md,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    backgroundColor: colors.surfaceSecondary,
+  },
+  pushLabel: { color: colors.brandSecondary, fontSize: font.sizes.sm, letterSpacing: 1.5, fontWeight: "800" },
+  pushHint: { color: colors.onSurfaceInverse, fontSize: font.sizes.xs, marginTop: 4, opacity: 0.7 },
+  supportBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.md,
+    padding: spacing.md,
+    borderWidth: 1.5,
+    borderColor: colors.brandSecondary,
+    borderRadius: radius.md,
+    backgroundColor: "transparent",
+  },
+  supportTxt: { flex: 1, color: colors.brandSecondary, fontSize: font.sizes.sm, letterSpacing: 1.5, fontWeight: "800" },
+  logoutText: { color: colors.onBrandPrimary, fontSize: font.sizes.lg, letterSpacing: 1.5, fontWeight: "800" },
   adminLink: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: spacing.md, marginBottom: spacing.lg },
   adminLinkTxt: { fontSize: font.sizes.xs, letterSpacing: 2, color: colors.muted, fontWeight: "500" },
-  prefsSection: { padding: spacing.lg, borderBottomWidth: 2, borderColor: colors.border, gap: spacing.sm },
+  prefsSection: { padding: spacing.lg, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: colors.border, gap: spacing.sm },
   blockedEmpty: { color: colors.muted, fontSize: font.sizes.sm, fontStyle: "italic" },
   storyPrivacyRow: {
     flexDirection: "row",
