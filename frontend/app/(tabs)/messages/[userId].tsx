@@ -22,7 +22,7 @@ import * as FileSystem from "expo-file-system/legacy";
 import { api, ChatMessage, MiniUser } from "@/src/api";
 import { useAuth } from "@/src/auth/AuthContext";
 import { useMessaging } from "@/src/messaging/MessagingContext";
-import { colors, spacing, font } from "@/src/theme";
+import { colors, spacing, font, radius } from "@/src/theme";
 import { useSmartBack } from "@/src/utils/useSmartBack";
 
 const REACTIONS = ["❤️", "😂", "😮", "😢", "😡", "👍", "👎", "🔥"];
@@ -1001,8 +1001,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surfaceInverse,
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.sm,
-    borderBottomWidth: 2,
-    borderColor: colors.border,
     gap: spacing.sm,
   },
   backBtn: { padding: spacing.sm },
@@ -1010,7 +1008,7 @@ const styles = StyleSheet.create({
   headerCenter: { flex: 1, flexDirection: "row", alignItems: "center", gap: spacing.sm },
   headerAvatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.surfaceTertiary },
   headerAvatarPh: { alignItems: "center", justifyContent: "center" },
-  headerNick: { color: colors.brandSecondary, fontSize: font.sizes.base, letterSpacing: 1, flexShrink: 1 },
+  headerNick: { color: colors.brandSecondary, fontSize: font.sizes.base, letterSpacing: 0.5, flexShrink: 1, fontWeight: "800" },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
   list: { padding: spacing.sm, gap: 2 },
   dayDivider: { alignItems: "center", marginVertical: spacing.md },
@@ -1034,37 +1032,38 @@ const styles = StyleSheet.create({
   msgImg: { width: 220, height: 220, borderRadius: 8, marginBottom: 6, backgroundColor: colors.surfaceTertiary },
   sharedFeudCard: {
     width: 240,
-    borderWidth: 2,
+    borderWidth: 1,
     borderColor: colors.border,
-    backgroundColor: colors.surface,
+    backgroundColor: colors.surfaceSecondary,
+    borderRadius: radius.md,
     marginBottom: 6,
     overflow: "hidden",
   },
   sharedFeudImg: { width: 240, height: 140, backgroundColor: colors.surfaceTertiary },
-  sharedFeudBody: { padding: 10, gap: 6 },
+  sharedFeudBody: { padding: 12, gap: 6 },
   sharedFeudCat: {
     fontSize: 10,
     letterSpacing: 2,
     color: colors.brandPrimary,
-    fontWeight: "500",
+    fontWeight: "800",
   },
   sharedFeudTitle: {
     fontSize: font.sizes.base,
     color: colors.onSurface,
-    fontWeight: "500",
-    lineHeight: 18,
+    fontWeight: "700",
+    lineHeight: 20,
   },
   sharedFeudCta: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 4,
+    gap: 6,
     marginTop: 4,
   },
   sharedFeudCtaTxt: {
     color: colors.brandPrimary,
     fontSize: 11,
-    letterSpacing: 1,
-    fontWeight: "500",
+    letterSpacing: 1.2,
+    fontWeight: "800",
   },
   metaRow: { flexDirection: "row", alignItems: "center", justifyContent: "flex-end", marginTop: 2 },
   metaTxt: { fontSize: 10 },
@@ -1092,9 +1091,9 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "flex-end",
     padding: spacing.sm,
-    gap: spacing.xs,
-    borderTopWidth: 1,
-    borderColor: colors.surfaceTertiary,
+    gap: spacing.sm,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
     backgroundColor: colors.surface,
   },
   composeBtn: {
@@ -1103,15 +1102,17 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderRadius: 20,
-    backgroundColor: colors.surfaceSecondary,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+    backgroundColor: "transparent",
   },
   input: {
     flex: 1,
     minHeight: 40,
     maxHeight: 120,
     borderWidth: 1,
-    borderColor: colors.surfaceTertiary,
-    borderRadius: 20,
+    borderColor: colors.borderStrong,
+    borderRadius: radius.pill,
     paddingHorizontal: spacing.md,
     paddingVertical: 10,
     color: colors.onSurface,

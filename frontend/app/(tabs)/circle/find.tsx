@@ -15,7 +15,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { api } from "@/src/api";
 import { useAuth } from "@/src/auth/AuthContext";
 import { navStack } from "@/src/utils/navStack";
-import { colors, font, spacing } from "@/src/theme";
+import { colors, font, spacing, radius } from "@/src/theme";
 
 /**
  * Dedicated "find friends" screen. Reachable via the `+` button in the
@@ -392,9 +392,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderBottomWidth: 2,
-    borderBottomColor: colors.border,
+    paddingVertical: spacing.md,
   },
   backBtn: {
     width: 40,
@@ -406,18 +404,19 @@ const styles = StyleSheet.create({
     flex: 1,
     marginLeft: spacing.sm,
   },
-  title: { color: colors.onSurface, fontSize: font.sizes.lg, fontWeight: "700", letterSpacing: 2 },
-  subtitle: { color: colors.muted, fontSize: font.sizes.xs, marginTop: 2 },
+  title: { color: colors.onSurface, fontSize: font.sizes.lg, fontWeight: "800", letterSpacing: 1.5 },
+  subtitle: { color: colors.muted, fontSize: font.sizes.sm, marginTop: 4, fontWeight: "600" },
   searchWrap: {
     flexDirection: "row",
     alignItems: "center",
     marginHorizontal: spacing.lg,
-    marginTop: spacing.md,
+    marginTop: spacing.sm,
     paddingHorizontal: spacing.md,
     paddingVertical: 10,
-    borderWidth: 2,
-    borderColor: colors.border,
-    backgroundColor: colors.surfaceSecondary,
+    borderWidth: 1.5,
+    borderColor: colors.brandSecondary,
+    borderRadius: radius.md,
+    backgroundColor: "transparent",
   },
   searchIconSlot: {
     width: 24,
@@ -442,7 +441,7 @@ const styles = StyleSheet.create({
   sectionHeaderTxt: {
     color: colors.brandPrimary,
     fontSize: font.sizes.xs,
-    fontWeight: "700",
+    fontWeight: "800",
     letterSpacing: 2,
   },
   reasonRow: {
@@ -467,27 +466,31 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
-    gap: spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    gap: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    backgroundColor: colors.surfaceSecondary,
   },
-  rowLeft: { flexDirection: "row", alignItems: "center", flex: 1, gap: spacing.sm },
-  avatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.surfaceSecondary },
+  rowLeft: { flexDirection: "row", alignItems: "center", flex: 1, gap: spacing.md },
+  avatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.surfaceTertiary },
   avatarFallback: { alignItems: "center", justifyContent: "center" },
-  nick: { color: colors.onSurface, fontSize: font.sizes.base, fontWeight: "600" },
+  nick: { color: colors.brandSecondary, fontSize: font.sizes.base, fontWeight: "800" },
   meTag: { color: colors.brandPrimary, fontSize: font.sizes.xs, fontWeight: "700", letterSpacing: 1 },
   dispname: { color: colors.muted, fontSize: font.sizes.sm, marginTop: 2 },
   addBtn: {
     flexDirection: "row", alignItems: "center", gap: 4,
     backgroundColor: colors.brandPrimary,
-    paddingHorizontal: 10, paddingVertical: 6,
+    paddingHorizontal: 12, paddingVertical: 8,
     borderRadius: 999,
   },
   addBtnOn: { backgroundColor: colors.brandSecondary },
   addBtnBusy: { opacity: 0.55 },
-  addBtnTxt: { color: colors.onBrandPrimary, fontSize: font.sizes.xs, fontWeight: "700", letterSpacing: 0.5 },
+  addBtnTxt: { color: colors.onBrandPrimary, fontSize: font.sizes.xs, fontWeight: "800", letterSpacing: 0.5 },
   addBtnTxtOn: { color: colors.onBrandSecondary },
   empty: {
     alignItems: "center",
