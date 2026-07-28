@@ -11,7 +11,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { api, ApiError } from "@/src/api";
 import { useAuth } from "@/src/auth/AuthContext";
-import { colors, font, spacing } from "@/src/theme";
+import { colors, font, spacing, radius } from "@/src/theme";
 
 /**
  * Full badge shelf modal.
@@ -371,8 +371,8 @@ const styles = StyleSheet.create({
   },
   sheet: {
     backgroundColor: colors.surface,
-    borderTopLeftRadius: 8,
-    borderTopRightRadius: 8,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
     maxHeight: "88%",
     minHeight: "70%",
     paddingTop: spacing.md,
@@ -382,14 +382,14 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.md,
-    borderBottomWidth: 2,
+    borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
   },
   title: {
     color: colors.onSurface,
     fontSize: font.sizes.lg,
-    fontWeight: "700",
-    letterSpacing: 2,
+    fontWeight: "800",
+    letterSpacing: 1.5,
   },
   subtitle: {
     color: colors.muted,
@@ -439,6 +439,7 @@ const styles = StyleSheet.create({
   },
   retry: {
     backgroundColor: colors.brandPrimary,
+    borderRadius: radius.md,
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.sm,
     marginTop: spacing.sm,

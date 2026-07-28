@@ -978,7 +978,7 @@ export default function Profile() {
                   )}
                 </View>
                 <Pressable onPress={openPrefs} testID="prefs-edit-button" style={styles.prefsEditBtnFull}>
-                  <Ionicons name="pencil" size={14} color={colors.onSurface} />
+                  <Ionicons name="pencil" size={14} color={colors.brandSecondary} />
                   <Text style={styles.prefsEditTxt}>MODIFICA</Text>
                 </Pressable>
               </View>
@@ -993,7 +993,10 @@ export default function Profile() {
               testID="profession-open"
               style={styles.prefsHeadRow}
             >
-              <Text style={styles.prefsTitle}>PROFESSIONE</Text>
+              <View style={styles.sectionIcon}>
+                <Ionicons name="briefcase" size={18} color={colors.brandSecondary} />
+              </View>
+              <Text style={[styles.prefsTitle, { flex: 1 }]}>PROFESSIONE</Text>
               <View style={styles.sectionHeadRight}>
                 <Text
                   style={[styles.professionValue, !user.profession && { color: colors.muted }]}
@@ -1001,7 +1004,7 @@ export default function Profile() {
                 >
                   {user.profession || "Non impostata"}
                 </Text>
-                <Ionicons name="chevron-forward" size={20} color={colors.onSurface} />
+                <Ionicons name="chevron-forward" size={20} color={colors.muted} />
               </View>
             </Pressable>
           </View>
@@ -1018,10 +1021,13 @@ export default function Profile() {
               testID="blocked-toggle"
               style={styles.prefsHeadRow}
             >
-              <Text style={styles.prefsTitle}>UTENTI BLOCCATI</Text>
+              <View style={styles.sectionIcon}>
+                <Ionicons name="person-remove" size={18} color={colors.brandSecondary} />
+              </View>
+              <Text style={[styles.prefsTitle, { flex: 1 }]}>UTENTI BLOCCATI</Text>
               <View style={styles.sectionHeadRight}>
                 <Text style={styles.sectionCountBadge}>{blockedList.length}</Text>
-                <Ionicons name={blocksOpen ? "chevron-up" : "chevron-down"} size={20} color={colors.onSurface} />
+                <Ionicons name={blocksOpen ? "chevron-up" : "chevron-down"} size={20} color={colors.muted} />
               </View>
             </Pressable>
             {blocksOpen ? (<View style={{ marginTop: spacing.sm, gap: spacing.sm }}>
@@ -1084,10 +1090,13 @@ export default function Profile() {
               testID="history-section-toggle"
               style={{ flex: 1, flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}
             >
-              <Text style={styles.historyTitle}>STORICO VOTI</Text>
+              <View style={styles.sectionIcon}>
+                <Ionicons name="time" size={18} color={colors.brandSecondary} />
+              </View>
+              <Text style={[styles.historyTitle, { flex: 1, marginLeft: spacing.md }]}>STORICO VOTI</Text>
               <View style={styles.sectionHeadRight}>
                 <Text style={styles.sectionCountBadge}>{user.total_votes ?? 0}</Text>
-                <Ionicons name={historyExpanded ? "chevron-up" : "chevron-down"} size={20} color={colors.onSurface} />
+                <Ionicons name={historyExpanded ? "chevron-up" : "chevron-down"} size={20} color={colors.muted} />
               </View>
             </Pressable>
           </View>
@@ -1446,8 +1455,16 @@ const styles = StyleSheet.create({
   statValue: { fontSize: font.sizes.xxxl, fontWeight: "800", color: colors.onSurface },
   statLabel: { fontSize: font.sizes.xs, color: colors.muted, letterSpacing: 1, marginTop: 4, fontWeight: "700" },
   historyHeader: { paddingHorizontal: spacing.lg, paddingTop: spacing.lg, paddingBottom: spacing.sm },
-  historyTitle: { fontSize: font.sizes.xxl, letterSpacing: 2, fontWeight: "500", color: colors.onSurface },
-  historySection: { paddingHorizontal: spacing.lg, paddingVertical: spacing.md, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: colors.border },
+  historyTitle: { fontSize: font.sizes.xl, letterSpacing: 1.2, fontWeight: "800", color: colors.onSurface },
+  historySection: {
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.sm,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    backgroundColor: colors.surfaceSecondary,
+  },
   historyHeadRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: spacing.xs },
   sectionHeadRight: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   sectionCountBadge: { color: colors.muted, fontSize: font.sizes.sm, letterSpacing: 1, minWidth: 20, textAlign: "right" },
@@ -1520,27 +1537,37 @@ const styles = StyleSheet.create({
   logoutText: { color: colors.onBrandPrimary, fontSize: font.sizes.lg, letterSpacing: 1.5, fontWeight: "800" },
   adminLink: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: spacing.md, marginBottom: spacing.lg },
   adminLinkTxt: { fontSize: font.sizes.xs, letterSpacing: 2, color: colors.muted, fontWeight: "500" },
-  prefsSection: { padding: spacing.lg, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: colors.border, gap: spacing.sm },
+  prefsSection: {
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.sm,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    backgroundColor: colors.surfaceSecondary,
+    gap: spacing.sm,
+  },
   blockedEmpty: { color: colors.muted, fontSize: font.sizes.sm, fontStyle: "italic" },
   storyPrivacyRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: spacing.sm,
-    paddingHorizontal: spacing.lg,
+    gap: spacing.md,
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.sm,
+    paddingHorizontal: spacing.md,
     paddingVertical: spacing.md,
-    borderBottomWidth: 2,
-    borderBottomColor: colors.border,
-    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    backgroundColor: colors.surfaceSecondary,
   },
   storyPrivacyIcon: {
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: colors.surfaceSecondary,
+    backgroundColor: colors.surfaceTertiary,
     alignItems: "center",
     justifyContent: "center",
-    borderWidth: 1,
-    borderColor: colors.border,
   },
   storyPrivacyTitle: {
     color: colors.onSurface,
@@ -1572,15 +1599,30 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   unblockTxt: { color: colors.brandPrimary, fontSize: font.sizes.xs, letterSpacing: 1, fontWeight: "700" },
-  prefsHeadRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: spacing.xs },
+  prefsHeadRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: spacing.md, paddingVertical: spacing.xs },
+  sectionIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.surfaceTertiary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   prefsBody: { gap: spacing.sm, marginTop: spacing.xs },
-  prefsTitle: { fontSize: font.sizes.xxl, letterSpacing: 2, fontWeight: "500", color: colors.onSurface },
-  prefsEditBtn: { flexDirection: "row", alignItems: "center", gap: 6, borderWidth: 2, borderColor: colors.border, paddingHorizontal: spacing.sm, paddingVertical: 6, backgroundColor: colors.surfaceSecondary },
-  prefsEditBtnFull: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, borderWidth: 2, borderColor: colors.border, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, backgroundColor: colors.surfaceSecondary, alignSelf: "flex-start" },
-  prefsEditTxt: { fontSize: font.sizes.xs, letterSpacing: 1, fontWeight: "500", color: colors.onSurface },
+  prefsTitle: { fontSize: font.sizes.xl, letterSpacing: 1.2, fontWeight: "800", color: colors.onSurface },
+  prefsEditBtn: { flexDirection: "row", alignItems: "center", gap: 8, borderWidth: 1.5, borderColor: colors.brandSecondary, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: 8, backgroundColor: "transparent" },
+  prefsEditBtnFull: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, borderWidth: 1.5, borderColor: colors.brandSecondary, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, backgroundColor: "transparent", alignSelf: "flex-start" },
+  prefsEditTxt: { fontSize: font.sizes.sm, letterSpacing: 1, fontWeight: "800", color: colors.brandSecondary },
   prefsChipsRow: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, marginTop: spacing.xs },
-  prefChip: { borderWidth: 2, borderColor: colors.brandPrimary, backgroundColor: colors.brandPrimary, paddingHorizontal: spacing.sm, paddingVertical: 6 },
-  prefChipTxt: { color: colors.onBrandPrimary, fontSize: font.sizes.sm, letterSpacing: 1, fontWeight: "500" },
+  prefChip: {
+    borderWidth: 1.5,
+    borderColor: colors.brandSecondary,
+    backgroundColor: "transparent",
+    borderRadius: radius.sm,
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: 6,
+  },
+  prefChipTxt: { color: colors.brandSecondary, fontSize: font.sizes.sm, letterSpacing: 0.5, fontWeight: "700" },
   prefEmpty: { fontSize: font.sizes.base, color: colors.muted },
   modalBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
   modalSheet: { backgroundColor: colors.surface, borderTopWidth: 2, borderColor: colors.border, maxHeight: "85%" },
