@@ -10,11 +10,10 @@ import {
   Modal,
 } from "react-native";
 import { useRouter, useFocusEffect } from "expo-router";
-import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "@/src/api";
 import { useAuth } from "@/src/auth/AuthContext";
-import { colors, spacing } from "@/src/theme";
+import { colors, spacing, radius } from "@/src/theme";
 import AnimatedStoryRing from "@/src/components/AnimatedStoryRing";
 import { useStoryUpload } from "@/src/stories/StoryUploadContext";
 import { getInitials } from "@/src/utils/nickname";
@@ -228,7 +227,7 @@ export default function StoriesBar() {
       <View style={styles.collapsedContainer} testID="stories-bar-collapsed">
         <Pressable
           onPress={toggleCollapsed}
-          style={styles.pillPressable}
+          style={styles.collapsedCard}
           testID="stories-bar-pill"
           accessibilityRole="button"
           accessibilityLabel={
@@ -237,52 +236,21 @@ export default function StoriesBar() {
               : "Storie. Tocca per espandere."
           }
         >
+          <View style={styles.collapsedIconWrap}>
+            <Ionicons name="albums-outline" size={18} color={colors.onSurface} />
+          </View>
+          <Text style={styles.collapsedLabel} numberOfLines={1}>
+            {hasUnseen ? "Nuove storie" : "Storie"}
+          </Text>
           {hasUnseen ? (
-            // Highlight variant: gradient border + gradient fill hint
-            // to make the pill glow. Uses the same brand-red/brand-secondary
-            // pair as the unseen story ring so the visual language is
-            // consistent.
-            <LinearGradient
-              colors={[colors.brandPrimary, colors.brandSecondary]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={styles.pillGradient}
-            >
-              <View style={styles.pillInner}>
-                <View style={styles.pillDot} />
-                <Text style={styles.pillLabelHighlight} numberOfLines={1}>
-                  Nuove storie
-                </Text>
-                <View style={styles.pillCountBadge}>
-                  <Text style={styles.pillCountText} allowFontScaling={false}>
-                    {unseenCount}
-                  </Text>
-                </View>
-                <View style={{ flex: 1 }} />
-                <Ionicons
-                  name="chevron-down"
-                  size={16}
-                  color={colors.brandPrimary}
-                />
-              </View>
-            </LinearGradient>
-          ) : (
-            // Neutral variant: no new stories worth interrupting the
-            // feed for. Muted background, no glow.
-            <View style={styles.pillNeutral}>
-              <Ionicons
-                name="albums-outline"
-                size={14}
-                color={colors.muted}
-                style={{ marginRight: 6 }}
-              />
-              <Text style={styles.pillLabelNeutral} numberOfLines={1}>
-                Storie
+            <View style={styles.collapsedCountBadge}>
+              <Text style={styles.collapsedCountText} allowFontScaling={false}>
+                {unseenCount}
               </Text>
-              <View style={{ flex: 1 }} />
-              <Ionicons name="chevron-down" size={16} color={colors.muted} />
             </View>
-          )}
+          ) : null}
+          <View style={{ flex: 1 }} />
+          <Ionicons name="chevron-down" size={20} color={colors.muted} />
         </Pressable>
       </View>
     );
@@ -482,89 +450,69 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: spacing.md,
-    paddingBottom: 4,
+    paddingBottom: 6,
   },
   expandedHeaderLabel: {
     color: colors.muted,
-    fontSize: 11,
-    fontWeight: "600",
-    letterSpacing: 0.4,
-    textTransform: "uppercase",
-  },
-  expandedHeaderLabelHighlight: {
-    color: colors.brandPrimary,
-  },
-  // -------- Collapsed pill --------
-  // Same visual band as the expanded strip, but drastically shorter.
-  // Product ask: keep this pill as slim as possible so it doesn't
-  // steal vertical real estate from the feed. The expanded strip
-  // above uses its original circle/padding sizes untouched.
-  collapsedContainer: {
-    backgroundColor: colors.surface,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 6,
-  },
-  pillPressable: {
-    width: "100%",
-  },
-  // Gradient wrapper acts as the 1px "glowing" border. The inner
-  // View paints the actual pill background on top of it.
-  pillGradient: {
-    borderRadius: 16,
-    padding: 1,
-  },
-  pillInner: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: colors.surface,
-    borderRadius: 15,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  pillDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: colors.brandPrimary,
-    marginRight: 8,
-  },
-  pillLabelHighlight: {
-    color: colors.brandPrimary,
     fontSize: 12,
     fontWeight: "700",
-    letterSpacing: 0.3,
+    letterSpacing: 0.5,
   },
-  pillCountBadge: {
-    marginLeft: 6,
-    minWidth: 18,
-    height: 18,
-    paddingHorizontal: 5,
-    borderRadius: 9,
+  expandedHeaderLabelHighlight: {
+    color: colors.brandSecondary,
+  },
+  // -------- Collapsed card --------
+  // Prominent full-width tap target — reads as a "collapsible section
+  // header" rather than a discrete pill. Matches the phase 1b mockup:
+  // subtle elevated card, small albums icon on the left, "Storie"
+  // label, chevron-down anchored right.
+  collapsedContainer: {
+    backgroundColor: colors.surface,
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.sm,
+  },
+  collapsedCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    backgroundColor: colors.surfaceSecondary,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 10,
+    minHeight: 48,
+  },
+  collapsedIconWrap: {
+    width: 30,
+    height: 30,
+    borderRadius: 8,
+    backgroundColor: colors.surfaceTertiary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  collapsedLabel: {
+    color: colors.onSurface,
+    fontSize: 14,
+    fontWeight: "600",
+    letterSpacing: 0.2,
+  },
+  collapsedCountBadge: {
+    marginLeft: 2,
+    minWidth: 20,
+    height: 20,
+    paddingHorizontal: 6,
+    borderRadius: 10,
     backgroundColor: colors.brandPrimary,
     alignItems: "center",
     justifyContent: "center",
   },
-  pillCountText: {
+  collapsedCountText: {
     color: "#fff",
-    fontSize: 10,
-    fontWeight: "700",
-    lineHeight: 12,
-  },
-  pillNeutral: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: colors.surfaceSecondary || colors.surfaceTertiary,
-    borderRadius: 16,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  pillLabelNeutral: {
-    color: colors.muted,
-    fontSize: 12,
-    fontWeight: "600",
-    letterSpacing: 0.3,
+    fontSize: 11,
+    fontWeight: "800",
+    lineHeight: 13,
   },
   scrollBody: {
     paddingHorizontal: spacing.md,
