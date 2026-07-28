@@ -460,18 +460,7 @@ export default function FeudDetail() {
             </View>
             {showContext && feud.context_text ? (
               <View style={styles.contextBox} testID="feud-context-panel">
-                <View style={styles.contextHeader}>
-                  <Text style={styles.contextKicker}>CONTESTO</Text>
-                  <Pressable
-                    onPress={() => setShowContext(false)}
-                    hitSlop={10}
-                    testID="feud-context-close"
-                    accessibilityLabel="Chiudi il contesto"
-                    style={styles.contextClose}
-                  >
-                    <Ionicons name="close" size={16} color={colors.muted} />
-                  </Pressable>
-                </View>
+                <Text style={styles.contextKicker}>CONTESTO</Text>
                 {feud.context_text
                   .split(/\n{2,}/)
                   .filter((p) => p.trim())
@@ -991,22 +980,12 @@ const styles = StyleSheet.create({
     padding: spacing.md,
     marginBottom: spacing.md,
   },
-  contextHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: spacing.xs,
-  },
   contextKicker: {
     fontSize: font.sizes.xs,
     letterSpacing: 2,
     color: colors.brandPrimary,
     fontWeight: "600",
-  },
-  contextClose: {
-    padding: 2,
-    alignItems: "center",
-    justifyContent: "center",
+    marginBottom: spacing.xs,
   },
   contextText: {
     fontSize: font.sizes.base,
