@@ -9,7 +9,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { api, Feud } from "@/src/api";
 import { useAuth } from "@/src/auth/AuthContext";
-import { colors, spacing, font } from "@/src/theme";
+import { colors, spacing, font, radius } from "@/src/theme";
 import FeudCard from "@/src/components/FeudCard";
 import StoriesBar from "@/src/components/StoriesBar";
 
@@ -344,22 +344,75 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surfaceInverse, borderBottomWidth: 1, borderColor: colors.border,
   },
   refreshPillTxt: { color: colors.brandSecondary, fontSize: font.sizes.xs, letterSpacing: 1, fontWeight: "500" },
-  header: { paddingHorizontal: spacing.lg, paddingTop: spacing.sm, paddingBottom: spacing.md, borderBottomWidth: 2, borderColor: colors.border, backgroundColor: colors.surfaceInverse },
+  header: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.md,
+    backgroundColor: colors.surfaceInverse,
+  },
   headerTop: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
-  searchBtn: { width: 44, height: 44, borderWidth: 2, borderColor: colors.brandSecondary, alignItems: "center", justifyContent: "center", backgroundColor: colors.surfaceInverse },
-  archiveBtn: { width: 44, height: 44, borderWidth: 2, borderColor: colors.brandSecondary, alignItems: "center", justifyContent: "center", backgroundColor: colors.surfaceInverse },
+  searchBtn: {
+    width: 44, height: 44,
+    borderWidth: 1.5, borderColor: colors.brandSecondary,
+    borderRadius: radius.md,
+    alignItems: "center", justifyContent: "center",
+    backgroundColor: colors.surfaceInverse,
+  },
+  archiveBtn: {
+    width: 44, height: 44,
+    borderWidth: 1.5, borderColor: colors.brandSecondary,
+    borderRadius: radius.md,
+    alignItems: "center", justifyContent: "center",
+    backgroundColor: colors.surfaceInverse,
+  },
   searchWrap: { flexDirection: "row", alignItems: "center", marginTop: spacing.sm },
-  searchInput: { flex: 1, borderWidth: 2, borderColor: colors.brandSecondary, backgroundColor: colors.surfaceInverse, color: colors.onSurfaceInverse, padding: spacing.sm, fontSize: font.sizes.base },
-  brand: { color: colors.onSurfaceInverse, fontSize: font.sizes.xxxl, letterSpacing: 2, fontWeight: "500", marginLeft: -2 },
+  searchInput: {
+    flex: 1,
+    borderWidth: 1.5, borderColor: colors.brandSecondary,
+    borderRadius: radius.md,
+    backgroundColor: colors.surfaceInverse, color: colors.onSurfaceInverse,
+    padding: spacing.sm, fontSize: font.sizes.base,
+  },
+  brand: {
+    color: colors.onSurfaceInverse,
+    fontSize: font.sizes.xxxl,
+    letterSpacing: 1.5,
+    fontWeight: "800",
+    marginLeft: -2,
+  },
   brandRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   brandLogo: { width: 32, height: 32 },
-  date: { color: colors.brandSecondary, fontSize: font.sizes.sm, letterSpacing: 2, marginTop: 2 },
-  chipRowWrap: { height: 56, backgroundColor: colors.surfaceInverse, borderBottomWidth: 2, borderColor: colors.border },
+  date: {
+    color: colors.brandSecondary,
+    fontSize: font.sizes.xs,
+    letterSpacing: 2,
+    marginTop: 2,
+    fontWeight: "700",
+  },
+  chipRowWrap: {
+    height: 60,
+    backgroundColor: colors.surfaceInverse,
+  },
   chipRowContent: { paddingHorizontal: spacing.lg, gap: spacing.sm, alignItems: "center" },
-  chip: { height: 36, paddingHorizontal: spacing.md, borderWidth: 2, borderColor: colors.brandSecondary, justifyContent: "center", alignItems: "center", flexShrink: 0, backgroundColor: colors.surfaceInverse },
+  chip: {
+    height: 40,
+    paddingHorizontal: spacing.lg,
+    borderWidth: 1.5,
+    borderColor: colors.brandSecondary,
+    borderRadius: radius.pill,
+    justifyContent: "center",
+    alignItems: "center",
+    flexShrink: 0,
+    backgroundColor: "transparent",
+  },
   chipActive: { backgroundColor: colors.brandSecondary, borderColor: colors.brandSecondary },
-  chipText: { color: colors.brandSecondary, fontSize: font.sizes.sm, letterSpacing: 1 },
-  chipTextActive: { color: colors.onBrandSecondary, fontWeight: "500" },
+  chipText: {
+    color: colors.brandSecondary,
+    fontSize: font.sizes.sm,
+    letterSpacing: 1,
+    fontWeight: "700",
+  },
+  chipTextActive: { color: colors.onBrandSecondary, fontWeight: "800" },
   center: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.xxl },
   empty: { fontSize: font.sizes.xl, color: colors.onSurface, letterSpacing: 1 },
 });

@@ -73,17 +73,17 @@ export default function TabsLayout() {
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: colors.brandPrimary,
-        tabBarInactiveTintColor: colors.muted,
+        tabBarActiveTintColor: colors.brandSecondary,
+        tabBarInactiveTintColor: "#8A8A8E",
         // Icon-only tab bar: labels are permanently hidden per product decision.
         // Any new tab added in the future will automatically follow the same rule.
         tabBarShowLabel: false,
         tabBarStyle: {
           backgroundColor: colors.surfaceInverse,
-          borderTopWidth: 2,
+          borderTopWidth: 1,
           borderTopColor: colors.border,
-          height: 56 + bottomPad,
-          paddingTop: 8,
+          height: 60 + bottomPad,
+          paddingTop: 10,
           paddingBottom: bottomPad,
         },
         tabBarIconStyle: { marginTop: 2 },

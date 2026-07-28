@@ -4,7 +4,7 @@ import {
   FlatList, KeyboardAvoidingView, Platform, Image, Alert,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { colors, spacing, font } from "@/src/theme";
+import { colors, spacing, font, radius } from "@/src/theme";
 import { api } from "@/src/api";
 import { useAuth } from "@/src/auth/AuthContext";
 import StoryComposerModal from "@/src/components/StoryComposerModal";
@@ -365,7 +365,7 @@ export default function InAppShareSheet({
                 style={styles.externalBtn}
                 testID="share-open-external"
               >
-                <Ionicons name="share-outline" size={18} color={colors.onSurface} />
+                <Ionicons name="share-outline" size={18} color={colors.brandSecondary} />
                 <Text style={styles.externalBtnTxt}>ALTRE APP · COPIA LINK</Text>
               </Pressable>
             )}
@@ -397,28 +397,28 @@ const styles = StyleSheet.create({
   storyCta: {
     flexDirection: "row",
     alignItems: "center",
-    gap: spacing.sm,
+    gap: spacing.md,
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
+    paddingVertical: spacing.md,
     marginHorizontal: spacing.xs,
     marginTop: spacing.xs,
     marginBottom: spacing.sm,
     backgroundColor: colors.surfaceSecondary,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: 12,
+    borderRadius: radius.lg,
   },
   storyCtaIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: colors.brandPrimary,
     alignItems: "center",
     justifyContent: "center",
   },
   storyCtaTitle: {
     color: colors.onSurface,
-    fontSize: font.sizes.sm,
+    fontSize: font.sizes.base,
     fontWeight: "700",
   },
   storyCtaSub: {
@@ -428,8 +428,8 @@ const styles = StyleSheet.create({
   },
   sheet: {
     backgroundColor: colors.surface,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
     paddingHorizontal: spacing.md,
     paddingTop: spacing.xs,
     paddingBottom: spacing.md,
@@ -437,7 +437,7 @@ const styles = StyleSheet.create({
     minHeight: "70%",
   },
   handleWrap: { alignItems: "center", paddingVertical: spacing.xs },
-  handle: { width: 44, height: 4, borderRadius: 2, backgroundColor: colors.border },
+  handle: { width: 44, height: 4, borderRadius: 2, backgroundColor: colors.muted, opacity: 0.5 },
   modeRow: {
     flexDirection: "row",
     gap: spacing.sm,
@@ -449,24 +449,25 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 999,
-    backgroundColor: colors.surfaceSecondary,
-    borderWidth: 1,
-    borderColor: colors.border,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderRadius: radius.pill,
+    backgroundColor: "transparent",
+    borderWidth: 1.5,
+    borderColor: "rgba(255,255,255,0.35)",
   },
   modeChipOn: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
-  modeChipTxt: { color: colors.onSurface, fontSize: font.sizes.sm, fontWeight: "600" },
+  modeChipTxt: { color: colors.onSurface, fontSize: font.sizes.sm, fontWeight: "700" },
   modeChipTxtOn: { color: colors.onBrandPrimary },
   searchRow: {
     flexDirection: "row",
     alignItems: "center",
-    borderWidth: 2,
-    borderColor: colors.border,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
     backgroundColor: colors.surfaceSecondary,
+    borderRadius: radius.md,
     paddingHorizontal: spacing.md,
-    paddingVertical: 8,
+    paddingVertical: 10,
     marginBottom: spacing.sm,
   },
   searchInput: {
@@ -481,7 +482,8 @@ const styles = StyleSheet.create({
     color: colors.muted,
     marginTop: spacing.xs,
     marginBottom: spacing.sm,
-    fontWeight: "500",
+    fontWeight: "700",
+    paddingHorizontal: spacing.xs,
   },
   gridRow: {
     justifyContent: "flex-start",
@@ -505,8 +507,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surfaceSecondary,
     justifyContent: "center",
     alignItems: "center",
-    borderWidth: 2,
-    borderColor: colors.border,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
   },
   checkOverlay: {
     position: "absolute", top: 0, left: 0, right: 0, bottom: 0,
@@ -524,6 +526,7 @@ const styles = StyleSheet.create({
     color: colors.onSurface,
     textAlign: "center",
     maxWidth: 100,
+    fontWeight: "500",
   },
   emptyBox: { padding: spacing.xl, alignItems: "center", justifyContent: "center" },
   emptyTxt: { color: colors.muted, textAlign: "center", fontSize: font.sizes.base },
@@ -531,7 +534,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "flex-end",
     gap: spacing.sm,
-    borderTopWidth: 2,
+    borderTopWidth: 1,
     borderColor: colors.border,
     paddingTop: spacing.sm,
     paddingBottom: spacing.md,
@@ -539,9 +542,10 @@ const styles = StyleSheet.create({
   },
   captionInput: {
     flex: 1,
-    borderWidth: 2,
-    borderColor: colors.border,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
     backgroundColor: colors.surfaceSecondary,
+    borderRadius: radius.md,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
     fontSize: font.sizes.base,
@@ -556,35 +560,39 @@ const styles = StyleSheet.create({
     backgroundColor: colors.brandPrimary,
     paddingVertical: 12,
     paddingHorizontal: spacing.md,
-    borderWidth: 2,
-    borderColor: colors.border,
+    borderRadius: radius.md,
     minHeight: 44,
   },
   sendBtnBusy: { opacity: 0.7 },
   sendTxt: {
     color: colors.onBrandPrimary,
     fontSize: font.sizes.sm,
-    fontWeight: "500",
+    fontWeight: "700",
     letterSpacing: 1,
   },
   errorBox: {
     marginTop: spacing.sm,
     padding: spacing.sm,
-    borderWidth: 2,
+    borderWidth: 1,
     borderColor: colors.error,
-    backgroundColor: colors.surface,
+    borderRadius: radius.sm,
+    backgroundColor: colors.surfaceSecondary,
   },
   errorTxt: { color: colors.error, fontSize: font.sizes.sm },
   externalBtn: {
     flexDirection: "row", alignItems: "center", justifyContent: "center",
-    gap: 8,
-    borderWidth: 2, borderColor: colors.border,
-    backgroundColor: colors.surfaceSecondary,
-    paddingVertical: spacing.sm,
+    gap: 10,
+    borderWidth: 1.5,
+    borderColor: colors.brandSecondary,
+    borderRadius: radius.md,
+    backgroundColor: "transparent",
+    paddingVertical: spacing.md,
     marginTop: spacing.xs,
   },
   externalBtnTxt: {
-    color: colors.onSurface, fontSize: font.sizes.sm,
-    letterSpacing: 1, fontWeight: "500",
+    color: colors.brandSecondary,
+    fontSize: font.sizes.sm,
+    letterSpacing: 1,
+    fontWeight: "700",
   },
 });

@@ -1,7 +1,7 @@
 import { View, Text, StyleSheet, Pressable, ImageBackground } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Feud } from "@/src/api";
-import { colors, spacing, font } from "@/src/theme";
+import { colors, spacing, font, radius } from "@/src/theme";
 
 function formatRelativeTime(iso?: string): string {
   if (!iso) return "";
@@ -77,26 +77,95 @@ export default function FeudCard({ feud, onPress, showArchivedBadge = false }: {
       </View>
       <View style={styles.cardFooter}>
         <Text style={styles.cardFooterText}>{revealed ? `${feud.total_votes} VOTI` : "VOTA PER VEDERE"}</Text>
-        <Text style={styles.cardFooterText}>APRI ›</Text>
+        <Text style={styles.cardFooterOpen}>APRI ›</Text>
       </View>
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
-  card: { borderWidth: 2, borderColor: colors.border, backgroundColor: colors.surfaceSecondary },
-  cardImage: { height: 200, justifyContent: "flex-end" },
+  card: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceSecondary,
+    borderRadius: radius.lg,
+    overflow: "hidden",
+  },
+  cardImage: { height: 210, justifyContent: "flex-end" },
   cardImageContent: { padding: spacing.md, gap: spacing.xs },
-  cardCat: { color: colors.brandSecondary, fontSize: font.sizes.sm, letterSpacing: 2 },
-  cardTitle: { color: "#FFFFFF", fontSize: font.sizes.xxl, letterSpacing: 0.5, fontWeight: "500", lineHeight: 28 },
-  splitRow: { flexDirection: "row", borderTopWidth: 2, borderColor: colors.border },
-  splitHalf: { flex: 1, paddingVertical: spacing.md, alignItems: "center", justifyContent: "center" },
-  splitPct: { color: colors.onBrandPrimary, fontSize: font.sizes.xxl, fontWeight: "500", letterSpacing: 1 },
-  splitLabel: { color: colors.onBrandPrimary, fontSize: font.sizes.sm, letterSpacing: 1, textAlign: "center", marginTop: 2, paddingHorizontal: spacing.xs },
-  cardFooter: { flexDirection: "row", justifyContent: "space-between", padding: spacing.sm, borderTopWidth: 2, borderColor: colors.border, backgroundColor: colors.surfaceInverse },
-  cardFooterText: { color: colors.onSurfaceInverse, fontSize: font.sizes.sm, letterSpacing: 1 },
-  archivedBadge: { position: "absolute", top: spacing.sm, right: spacing.sm, backgroundColor: colors.brandSecondary, paddingHorizontal: spacing.sm, paddingVertical: 4, borderWidth: 2, borderColor: colors.onSurface, zIndex: 2 },
-  archivedBadgeTxt: { color: colors.onBrandSecondary, fontSize: font.sizes.xs, letterSpacing: 2, fontWeight: "500" },
-  timeBadge: { position: "absolute", top: spacing.sm, right: spacing.sm, backgroundColor: "rgba(0,0,0,0.6)", paddingHorizontal: spacing.sm, paddingVertical: 4, borderWidth: 1, borderColor: "rgba(255,255,255,0.35)", zIndex: 2 },
-  timeBadgeTxt: { color: "#FFFFFF", fontSize: font.sizes.xs, letterSpacing: 1.5, fontWeight: "500" },
+  cardCat: {
+    color: colors.brandSecondary,
+    fontSize: font.sizes.xs,
+    letterSpacing: 2,
+    fontWeight: "700",
+  },
+  cardTitle: {
+    color: "#FFFFFF",
+    fontSize: font.sizes.xxl,
+    letterSpacing: 0.3,
+    fontWeight: "800",
+    lineHeight: 30,
+  },
+  splitRow: { flexDirection: "row" },
+  splitHalf: {
+    flex: 1,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.sm,
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 56,
+  },
+  splitPct: {
+    color: colors.onBrandPrimary,
+    fontSize: font.sizes.xl,
+    fontWeight: "800",
+    letterSpacing: 0.5,
+  },
+  splitLabel: {
+    color: colors.onBrandPrimary,
+    fontSize: font.sizes.sm,
+    letterSpacing: 0.3,
+    textAlign: "center",
+    marginTop: 2,
+    paddingHorizontal: spacing.xs,
+    fontWeight: "600",
+  },
+  cardFooter: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
+    backgroundColor: colors.surfaceInverse,
+  },
+  cardFooterText: {
+    color: colors.muted,
+    fontSize: font.sizes.sm,
+    letterSpacing: 1,
+    fontWeight: "600",
+  },
+  cardFooterOpen: {
+    color: colors.brandSecondary,
+    fontSize: font.sizes.sm,
+    letterSpacing: 1,
+    fontWeight: "700",
+  },
+  archivedBadge: { position: "absolute", top: spacing.sm, right: spacing.sm, backgroundColor: colors.brandSecondary, paddingHorizontal: spacing.sm, paddingVertical: 4, borderRadius: radius.sm, zIndex: 2 },
+  archivedBadgeTxt: { color: colors.onBrandSecondary, fontSize: font.sizes.xs, letterSpacing: 2, fontWeight: "800" },
+  timeBadge: {
+    position: "absolute",
+    top: spacing.sm,
+    right: spacing.sm,
+    backgroundColor: "rgba(0,0,0,0.65)",
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: 4,
+    borderRadius: radius.sm,
+    zIndex: 2,
+  },
+  timeBadgeTxt: {
+    color: "#FFFFFF",
+    fontSize: font.sizes.xs,
+    letterSpacing: 1,
+    fontWeight: "700",
+  },
 });

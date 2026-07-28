@@ -13,7 +13,7 @@ import uuid
 import pytest
 import requests
 
-BASE_URL = os.environ["EXPO_BACKEND_URL"].rstrip("/") if os.environ.get("EXPO_BACKEND_URL") else "https://gossip-beta.preview.emergentagent.com"
+BASE_URL = os.environ["EXPO_BACKEND_URL"].rstrip("/") if os.environ.get("EXPO_BACKEND_URL") else "https://feud-dashboard.preview.emergentagent.com"
 
 
 @pytest.fixture(scope="module")
