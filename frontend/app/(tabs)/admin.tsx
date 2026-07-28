@@ -335,6 +335,25 @@ export default function AdminScreen() {
     }
   }, [buildHtmlReport]);
 
+  // Standalone "export report" flow — pulls a fresh snapshot and
+  // triggers the same downloadSnapshot pipeline used by the reset flow,
+  // but without touching any data. Bound to the download button in the
+  // header. `exporting` guards against double-taps and drives the
+  // spinner inside the icon.
+  const [exporting, setExporting] = useState(false);
+  const exportReport = useCallback(async () => {
+    if (exporting || !key) return;
+    setExporting(true);
+    try {
+      const snap = await fetchFullSnapshot(key);
+      await downloadSnapshot(snap);
+    } catch {
+      // Silent — the user will just not see a download; retry is safe.
+    } finally {
+      setExporting(false);
+    }
+  }, [exporting, key, fetchFullSnapshot, downloadSnapshot]);
+
   // Second half of the reset flow: hit the reset endpoint, reload the
   // active tab, then surface any error to the confirmation modal.
   const performReset = useCallback(async () => {
@@ -444,6 +463,18 @@ export default function AdminScreen() {
         </View>
         <Pressable onPress={refreshCurrent} style={styles.iconBtn} testID="admin-refresh">
           <Ionicons name="refresh" size={20} color={colors.brandSecondary} />
+        </Pressable>
+        <Pressable
+          onPress={exportReport}
+          style={styles.iconBtn}
+          testID="admin-export"
+          disabled={exporting}
+        >
+          {exporting ? (
+            <ActivityIndicator size="small" color={colors.brandSecondary} />
+          ) : (
+            <Ionicons name="download-outline" size={20} color={colors.brandSecondary} />
+          )}
         </Pressable>
         <Pressable onPress={openResetFlow} style={styles.iconBtn} testID="admin-reset">
           <Ionicons name="trash-outline" size={20} color="#ff5c5c" />
