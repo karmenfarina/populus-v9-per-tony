@@ -18,30 +18,53 @@ import { useAuth } from "@/src/auth/AuthContext";
  */
 const TAB_ROOTS = new Set(["/", "/top", "/messages", "/notifications", "/circle/find", "/profile"]);
 
-function NotifIcon({ color, size }: { color: string; size: number }) {
+function NotifIcon({ color, size, focused }: { color: string; size: number; focused: boolean }) {
   const { unread } = useNotifications();
   return (
-    <View>
+    <TabIcon focused={focused}>
       <Ionicons name="notifications" color={color} size={size} />
       {unread > 0 && (
         <View style={styles.badge} testID="tab-notif-badge">
           <Text style={styles.badgeTxt}>{unread > 99 ? "99+" : String(unread)}</Text>
         </View>
       )}
-    </View>
+    </TabIcon>
   );
 }
 
-function MessagesIcon({ color, size }: { color: string; size: number }) {
+function MessagesIcon({ color, size, focused }: { color: string; size: number; focused: boolean }) {
   const { unread } = useMessaging();
   return (
-    <View>
+    <TabIcon focused={focused}>
       <Ionicons name="chatbubbles" color={color} size={size} />
       {unread > 0 && (
         <View style={styles.badge} testID="tab-messages-badge">
           <Text style={styles.badgeTxt}>{unread > 99 ? "99+" : String(unread)}</Text>
         </View>
       )}
+    </TabIcon>
+  );
+}
+
+/**
+ * Wraps any tab icon and paints a small yellow underline bar beneath it
+ * when the tab is focused. The bar is anchored to the icon (not the tab
+ * cell), so it always sits directly under the glyph regardless of the
+ * tab's horizontal width.
+ */
+function TabIcon({ focused, children }: { focused: boolean; children: React.ReactNode }) {
+  return (
+    <View style={{ alignItems: "center", justifyContent: "center" }}>
+      <View>{children}</View>
+      <View
+        style={{
+          marginTop: 4,
+          height: 2,
+          width: 22,
+          borderRadius: 1,
+          backgroundColor: focused ? colors.brandSecondary : "transparent",
+        }}
+      />
     </View>
   );
 }
@@ -93,11 +116,10 @@ export default function TabsLayout() {
         name="index"
         options={{
           title: "FAIDE",
-          tabBarIcon: ({ color, size }) => (
-            // MaterialCommunityIcons render smaller than Ionicons at the same
-            // nominal size, so bump the scale-balance glyph by ~18 % to match
-            // the visual weight of the other tab icons (bookmark, chatbubbles, …).
-            <MaterialCommunityIcons name="scale-balance" color={color} size={Math.round(size * 1.18)} />
+          tabBarIcon: ({ color, size, focused }) => (
+            <TabIcon focused={focused}>
+              <MaterialCommunityIcons name="scale-balance" color={color} size={Math.round(size * 1.18)} />
+            </TabIcon>
           ),
         }}
       />
@@ -105,21 +127,25 @@ export default function TabsLayout() {
         name="top"
         options={{
           title: "TOP",
-          tabBarIcon: ({ color, size }) => <Ionicons name="bookmark" color={color} size={size} />,
+          tabBarIcon: ({ color, size, focused }) => (
+            <TabIcon focused={focused}>
+              <Ionicons name="bookmark" color={color} size={size} />
+            </TabIcon>
+          ),
         }}
       />
       <Tabs.Screen
         name="messages/index"
         options={{
           title: "MESSAGGI",
-          tabBarIcon: ({ color, size }) => <MessagesIcon color={color} size={size} />,
+          tabBarIcon: ({ color, size, focused }) => <MessagesIcon color={color} size={size} focused={focused} />,
         }}
       />
       <Tabs.Screen
         name="notifications"
         options={{
           title: "NOTIFICHE",
-          tabBarIcon: ({ color, size }) => <NotifIcon color={color} size={size} />,
+          tabBarIcon: ({ color, size, focused }) => <NotifIcon color={color} size={size} focused={focused} />,
         }}
       />
       {/* Dedicated "Cerca amici" tab — sits immediately to the LEFT of
@@ -134,14 +160,22 @@ export default function TabsLayout() {
           // the tab entry completely by setting `href: null` so it
           // doesn't render an icon in the tab bar at all.
           href: isAnon ? null : undefined,
-          tabBarIcon: ({ color, size }) => <Ionicons name="person-add" color={color} size={size} />,
+          tabBarIcon: ({ color, size, focused }) => (
+            <TabIcon focused={focused}>
+              <Ionicons name="person-add" color={color} size={size} />
+            </TabIcon>
+          ),
         }}
       />
       <Tabs.Screen
         name="profile"
         options={{
           title: "PROFILO",
-          tabBarIcon: ({ color, size }) => <Ionicons name="person" color={color} size={size} />,
+          tabBarIcon: ({ color, size, focused }) => (
+            <TabIcon focused={focused}>
+              <Ionicons name="person" color={color} size={size} />
+            </TabIcon>
+          ),
         }}
       />
       {/* Nested screens that must render inside the tab bar layout but should

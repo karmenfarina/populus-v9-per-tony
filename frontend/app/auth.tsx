@@ -5,10 +5,10 @@ import {
 } from "react-native";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useAuth } from "@/src/auth/AuthContext";
 // import { api } from "@/src/api"; // no longer used — Firebase handles email flow
-import { colors, spacing, font } from "@/src/theme";
+import { colors, spacing, font, radius } from "@/src/theme";
 import { sanitizeNicknameInput, validateNickname, NICKNAME_MAX } from "@/src/utils/nickname";
 
 type Mode = "email" | "google" | "anon";
@@ -174,26 +174,34 @@ export default function AuthScreen() {
           </View>
 
           <View style={styles.tabsRow}>
-            {VISIBLE_MODES.map((m) => (
-              <Pressable
-                key={m}
-                testID={`auth-tab-${m}`}
-                style={[styles.tab, mode === m && styles.tabActive]}
-                onPress={() => {
-                  setError(null);
-                  setPendingVerify(null);
-                  // All tabs (including Google) just switch mode. The
-                  // actual Google OAuth redirect is triggered by the red
-                  // CTA below ("CONTINUA CON GOOGLE") so the user has
-                  // a chance to confirm before leaving the app.
-                  setMode(m);
-                }}
-              >
-                <Text style={[styles.tabText, mode === m && styles.tabTextActive]}>
-                  {m === "email" ? "EMAIL" : m === "google" ? "GOOGLE" : "ANONIMO"}
-                </Text>
-              </Pressable>
-            ))}
+            {VISIBLE_MODES.map((m) => {
+              const active = mode === m;
+              const iconColor = active ? colors.brandSecondary : colors.onSurface;
+              const label = m === "email" ? "EMAIL" : m === "google" ? "GOOGLE" : "ANONIMO";
+              return (
+                <Pressable
+                  key={m}
+                  testID={`auth-tab-${m}`}
+                  style={[styles.tab, active && styles.tabActive]}
+                  onPress={() => {
+                    setError(null);
+                    setPendingVerify(null);
+                    setMode(m);
+                  }}
+                >
+                  {m === "email" ? (
+                    <Ionicons name="mail-outline" size={18} color={iconColor} />
+                  ) : m === "google" ? (
+                    <Ionicons name="logo-google" size={18} color={iconColor} />
+                  ) : (
+                    <MaterialCommunityIcons name="incognito" size={18} color={iconColor} />
+                  )}
+                  <Text style={[styles.tabText, active && styles.tabTextActive]}>
+                    {label}
+                  </Text>
+                </Pressable>
+              );
+            })}
           </View>
 
           {pendingVerify ? (
@@ -339,15 +347,20 @@ export default function AuthScreen() {
             {loading ? (
               <ActivityIndicator color={colors.onBrandPrimary} />
             ) : (
-              <Text style={styles.ctaText}>
-                {mode === "google"
-                  ? "CONTINUA CON GOOGLE"
-                  : mode === "anon"
-                  ? "ENTRA COME ANONIMO"
-                  : isSignup
-                  ? "CREA ACCOUNT"
-                  : "ACCEDI"}
-              </Text>
+              <View style={styles.ctaInner}>
+                {mode === "google" ? (
+                  <Ionicons name="logo-google" size={20} color={colors.onBrandPrimary} />
+                ) : null}
+                <Text style={styles.ctaText}>
+                  {mode === "google"
+                    ? "CONTINUA CON GOOGLE"
+                    : mode === "anon"
+                    ? "ENTRA COME ANONIMO"
+                    : isSignup
+                    ? "CREA ACCOUNT"
+                    : "ACCEDI"}
+                </Text>
+              </View>
             )}
           </Pressable>
         </ScrollView>
@@ -359,26 +372,53 @@ export default function AuthScreen() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.surface },
   scroll: { padding: spacing.lg, paddingBottom: spacing.xxl },
-  header: { paddingVertical: spacing.xl, borderBottomWidth: 2, borderColor: colors.border, marginBottom: spacing.lg, alignItems: "center" },
-  logo: { width: 120, height: 120, marginBottom: spacing.md },
-  brand: { fontSize: font.sizes.giant, color: colors.onSurface, letterSpacing: 1, fontWeight: "500" },
-  tagline: { fontSize: font.sizes.lg, color: colors.onSurface, marginTop: spacing.xs },
-  tabsRow: { flexDirection: "row", gap: spacing.sm, marginBottom: spacing.lg },
-  tab: { flex: 1, paddingVertical: spacing.md, borderWidth: 2, borderColor: colors.border, backgroundColor: colors.surfaceSecondary, alignItems: "center" },
-  tabActive: { backgroundColor: colors.surfaceInverse },
-  tabText: { fontSize: font.sizes.base, color: colors.onSurface, letterSpacing: 1 },
-  tabTextActive: { color: colors.onSurfaceInverse },
+  header: { paddingVertical: spacing.xl, marginBottom: spacing.lg, alignItems: "center" },
+  logo: { width: 132, height: 132, marginBottom: spacing.md, borderRadius: radius.lg },
+  brand: { fontSize: font.sizes.giant, color: colors.onSurface, letterSpacing: 1, fontWeight: "800" },
+  tagline: { fontSize: font.sizes.lg, color: colors.muted, marginTop: spacing.xs },
+  tabsRow: { flexDirection: "row", gap: spacing.sm, marginBottom: spacing.lg, paddingTop: spacing.md, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
+  tab: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingVertical: spacing.md,
+    borderWidth: 1.5,
+    borderColor: colors.borderStrong,
+    borderRadius: radius.md,
+    backgroundColor: "transparent",
+  },
+  tabActive: { borderColor: colors.brandSecondary, backgroundColor: "rgba(255,199,0,0.08)" },
+  tabText: { fontSize: font.sizes.base, color: colors.onSurface, letterSpacing: 1, fontWeight: "700" },
+  tabTextActive: { color: colors.brandSecondary, fontWeight: "800" },
   form: { gap: spacing.md, marginBottom: spacing.lg },
   switchRow: { flexDirection: "row", gap: spacing.sm },
-  switchBtn: { flex: 1, paddingVertical: spacing.sm, borderWidth: 2, borderColor: colors.border, alignItems: "center", backgroundColor: colors.surfaceSecondary },
-  switchActive: { backgroundColor: colors.brandSecondary },
-  switchTxt: { color: colors.onSurface, fontSize: font.sizes.base },
-  switchTxtActive: { color: colors.onBrandSecondary, fontWeight: "500" },
-  input: { borderWidth: 2, borderColor: colors.border, padding: spacing.md, fontSize: font.sizes.lg, color: colors.onSurface, backgroundColor: colors.surfaceSecondary },
-  help: { fontSize: font.sizes.base, color: colors.muted },
-  error: { color: colors.error, fontSize: font.sizes.base, marginBottom: spacing.md, borderWidth: 2, borderColor: colors.error, padding: spacing.sm },
-  cta: { backgroundColor: colors.brandPrimary, borderWidth: 2, borderColor: colors.border, paddingVertical: spacing.lg, alignItems: "center" },
-  ctaText: { color: colors.onBrandPrimary, fontSize: font.sizes.xl, letterSpacing: 1, fontWeight: "500" },
+  switchBtn: { flex: 1, paddingVertical: spacing.sm, borderWidth: 1.5, borderColor: colors.borderStrong, borderRadius: radius.md, alignItems: "center", backgroundColor: "transparent" },
+  switchActive: { backgroundColor: colors.brandSecondary, borderColor: colors.brandSecondary },
+  switchTxt: { color: colors.onSurface, fontSize: font.sizes.base, fontWeight: "600" },
+  switchTxtActive: { color: colors.onBrandSecondary, fontWeight: "800" },
+  input: {
+    borderWidth: 1.5,
+    borderColor: colors.borderStrong,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    fontSize: font.sizes.lg,
+    color: colors.onSurface,
+    backgroundColor: colors.surfaceSecondary,
+  },
+  help: { fontSize: font.sizes.base, color: colors.muted, textAlign: "center" },
+  error: { color: colors.error, fontSize: font.sizes.base, marginBottom: spacing.md, borderWidth: 1.5, borderColor: colors.error, borderRadius: radius.sm, padding: spacing.sm },
+  cta: {
+    backgroundColor: colors.brandPrimary,
+    borderRadius: radius.md,
+    paddingVertical: spacing.lg,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  ctaInner: { flexDirection: "row", alignItems: "center", gap: 10 },
+  ctaText: { color: colors.onBrandPrimary, fontSize: font.sizes.lg, letterSpacing: 1, fontWeight: "800" },
   verifyBox: {
     padding: spacing.lg,
     borderWidth: 2,

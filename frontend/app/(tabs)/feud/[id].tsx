@@ -10,7 +10,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import * as Clipboard from "expo-clipboard";
 import { api, ApiError, Comment, Feud, Reply, Sponsor } from "@/src/api";
-import { colors, spacing, font, sideColor, onSideColor } from "@/src/theme";
+import { colors, spacing, font, sideColor, onSideColor, radius } from "@/src/theme";
 import FeudMediaBlock from "@/src/components/FeudMediaBlock";
 import FeudStatsModal from "@/src/components/FeudStatsModal";
 import AiFactionSummaryModal from "@/src/components/AiFactionSummaryModal";
@@ -377,7 +377,7 @@ export default function FeudDetail() {
       <SafeAreaView style={styles.safe} edges={["top"]} testID="feud-gone-screen">
         <View style={styles.topbar}>
           <Pressable onPress={goBack} style={styles.backBtn} testID="gone-back-button">
-            <Ionicons name="chevron-back" size={22} color={colors.onSurfaceInverse} />
+            <Ionicons name="chevron-back" size={22} color={colors.brandSecondary} />
             <Text style={styles.backTxt}>INDIETRO</Text>
           </Pressable>
         </View>
@@ -403,7 +403,7 @@ export default function FeudDetail() {
     <SafeAreaView style={styles.safe} edges={["top"]} testID="feud-detail-screen">
       <View style={styles.topbar}>
         <Pressable onPress={goBack} style={styles.backBtn} testID="back-button">
-          <Ionicons name="chevron-back" size={22} color={colors.onSurfaceInverse} />
+          <Ionicons name="chevron-back" size={22} color={colors.brandSecondary} />
           <Text style={styles.backTxt}>INDIETRO</Text>
         </Pressable>
         <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
@@ -452,8 +452,8 @@ export default function FeudDetail() {
                 >
                   <Ionicons
                     name={showContext ? "information-circle" : "information-circle-outline"}
-                    size={18}
-                    color={showContext ? colors.brandPrimary : colors.muted}
+                    size={20}
+                    color={showContext ? colors.brandSecondary : colors.brandSecondary}
                   />
                 </Pressable>
               ) : null}
@@ -931,10 +931,10 @@ const cs = StyleSheet.create({
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.surface },
   centerFill: { flex: 1, alignItems: "center", justifyContent: "center" },
-  topbar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", backgroundColor: colors.surfaceInverse, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderBottomWidth: 2, borderColor: colors.border },
-  backBtn: { flexDirection: "row", alignItems: "center", gap: 4 },
-  backTxt: { color: colors.onSurfaceInverse, fontSize: font.sizes.sm, letterSpacing: 1 },
-  topCat: { color: colors.brandSecondary, fontSize: font.sizes.sm, letterSpacing: 2 },
+  topbar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", backgroundColor: colors.surfaceInverse, paddingHorizontal: spacing.md, paddingVertical: spacing.md },
+  backBtn: { flexDirection: "row", alignItems: "center", gap: 6 },
+  backTxt: { color: colors.brandSecondary, fontSize: font.sizes.sm, letterSpacing: 1.5, fontWeight: "700" },
+  topCat: { color: colors.brandSecondary, fontSize: font.sizes.sm, letterSpacing: 2, fontWeight: "700" },
   hero: { height: 220, justifyContent: "flex-end" },
   heroContent: { padding: spacing.lg },
   favBtn: {
@@ -944,9 +944,9 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: "rgba(0,0,0,0.55)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.35)",
+    backgroundColor: "rgba(0,0,0,0.35)",
+    borderWidth: 1.5,
+    borderColor: "rgba(255,255,255,0.45)",
     alignItems: "center",
     justifyContent: "center",
     zIndex: 3,
@@ -955,11 +955,11 @@ const styles = StyleSheet.create({
     backgroundColor: colors.brandPrimary,
     borderColor: colors.brandPrimary,
   },
-  title: { color: "#FFFFFF", fontSize: font.sizes.xxxl, lineHeight: 36, letterSpacing: 0.5, fontWeight: "500" },
-  article: { padding: spacing.lg, borderBottomWidth: 2, borderColor: colors.border, backgroundColor: colors.surfaceSecondary },
+  title: { color: "#FFFFFF", fontSize: font.sizes.xxxl, lineHeight: 38, letterSpacing: 0.3, fontWeight: "800" },
+  article: { padding: spacing.lg, backgroundColor: colors.surface },
   hashtagPill: { alignSelf: "flex-start", marginTop: spacing.sm, borderWidth: 1, borderColor: colors.brandPrimary, paddingHorizontal: spacing.sm, paddingVertical: 3, backgroundColor: colors.brandPrimary },
   hashtagText: { fontSize: font.sizes.xs, color: colors.onBrandPrimary, letterSpacing: 0.5, fontWeight: "500" },
-  sectionKicker: { fontSize: font.sizes.sm, letterSpacing: 2, color: colors.brandPrimary, marginBottom: spacing.xs },
+  sectionKicker: { fontSize: font.sizes.sm, letterSpacing: 2, color: colors.brandPrimary, marginBottom: spacing.xs, fontWeight: "700" },
   articleHeader: {
     flexDirection: "row",
     alignItems: "center",
@@ -995,7 +995,15 @@ const styles = StyleSheet.create({
     fontStyle: "italic",
   },
   mediaSection: { paddingHorizontal: spacing.lg, marginBottom: spacing.md },
-  summary: { fontSize: font.sizes.lg, lineHeight: 24, color: colors.onSurface, marginBottom: spacing.sm },
+  summary: {
+    fontSize: font.sizes.lg,
+    lineHeight: 26,
+    color: colors.onSurface,
+    paddingBottom: spacing.md,
+    marginBottom: spacing.md,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
   sourcesBox: { padding: spacing.lg, borderBottomWidth: 2, borderColor: colors.border, backgroundColor: colors.surface, gap: spacing.sm },
   sourcesHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: spacing.xs },
   sourcesCount: { color: colors.muted, fontSize: font.sizes.sm, letterSpacing: 1, minWidth: 20 },
@@ -1004,7 +1012,7 @@ const styles = StyleSheet.create({
   sourceName: { fontSize: font.sizes.xs, letterSpacing: 2, color: colors.brandPrimary },
   sourceTitle: { fontSize: font.sizes.base, color: colors.onSurface, marginTop: 2, lineHeight: 18 },
   sourceLink: { fontSize: font.sizes.xs, color: colors.muted, marginTop: 4 },
-  shareBtn: { width: 36, height: 36, borderWidth: 2, borderColor: colors.brandSecondary, alignItems: "center", justifyContent: "center" },
+  shareBtn: { width: 40, height: 40, borderWidth: 1.5, borderColor: colors.brandSecondary, borderRadius: radius.md, alignItems: "center", justifyContent: "center" },
   sponsorBox: { padding: spacing.md, borderBottomWidth: 2, borderColor: colors.border, backgroundColor: colors.brandSecondary, gap: spacing.xs },
   sponsorLabel: { fontSize: font.sizes.xs, letterSpacing: 2, color: colors.onBrandSecondary, opacity: 0.7 },
   sponsorHeadline: { fontSize: font.sizes.lg, color: colors.onBrandSecondary, lineHeight: 22 },
