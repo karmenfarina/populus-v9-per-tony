@@ -1,20 +1,25 @@
-/* Analytics panel for the /admin screen — populates the developer-only
- * dashboard defined by pages 7 and 14 of the growth plan.
+/* Analytics panel for the /admin screen — developer dashboard.
  *
  * Design intent:
- *   • KPI cards with the exact thresholds from page 14 (verde/giallo/rosso).
+ *   • KPI cards with growth thresholds (verde/giallo/rosso).
  *   • Additional insights (categorie, profili, funnel, DAU/WAU/MAU serie).
  *   • Zero external chart deps: everything is drawn with View/Text so the
  *     look matches the rest of the brutalist UI and the bundle stays small.
  *   • Reads exclusively from /api/admin/analytics/* which already excludes
  *     dev accounts (DEV_ACCOUNT_EMAILS).
+ *   • Refresh + reset controls live in the parent header — this component
+ *     exposes them via a ref instead of rendering its own header row.
  */
-import React, { useCallback, useEffect, useState } from "react";
-import { View, Text, StyleSheet, Pressable, ActivityIndicator, ScrollView, Alert } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useState } from "react";
+import { View, Text, StyleSheet, Pressable, ActivityIndicator, ScrollView } from "react-native";
 import { colors, spacing, font } from "@/src/theme";
 
 const BASE = process.env.EXPO_PUBLIC_BACKEND_URL || "";
+
+export type AnalyticsPanelHandle = {
+  reload: () => Promise<void>;
+  snapshot: () => any;
+};
 
 async function fetchJson(path: string, key: string): Promise<any> {
   const res = await fetch(`${BASE}/api${path}`, { headers: { "X-Admin-Key": key } });
@@ -62,7 +67,10 @@ const THRESH_WAU_MAU: Threshold = { positive: 35, critical: 25, direction: "high
 const THRESH_DEEP: Threshold = { positive: 25, critical: 15, direction: "higher_better" };
 const THRESH_TOP24H: Threshold = { positive: 20, critical: 10, direction: "higher_better" };
 
-export default function AnalyticsPanel({ adminKey }: { adminKey: string }) {
+export default forwardRef<AnalyticsPanelHandle, { adminKey: string }>(function AnalyticsPanel(
+  { adminKey },
+  ref,
+) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [overview, setOverview] = useState<any>(null);
@@ -99,30 +107,13 @@ export default function AnalyticsPanel({ adminKey }: { adminKey: string }) {
 
   useEffect(() => { load(); }, [load]);
 
-  const doReset = useCallback(async () => {
-    const go = async () => {
-      try {
-        const res = await fetch(`${BASE}/api/admin/analytics/reset`, {
-          method: "POST",
-          headers: { "X-Admin-Key": adminKey },
-        });
-        const text = await res.text();
-        if (!res.ok) throw new Error(text || `HTTP ${res.status}`);
-        await load();
-      } catch (e: any) {
-        Alert.alert("Errore", e?.message || "Reset non riuscito");
-      }
-    };
-    // Confirm before wiping.
-    Alert.alert(
-      "Azzerare tutte le statistiche?",
-      "Le KPI del dashboard torneranno a zero (voti, commenti, categorie, demografia, DAU/WAU/MAU). Utenti e voti reali NON verranno cancellati — solo il dashboard riparte da zero.",
-      [
-        { text: "Annulla", style: "cancel" },
-        { text: "Azzera", style: "destructive", onPress: go },
-      ],
-    );
-  }, [adminKey, load]);
+  useImperativeHandle(ref, () => ({
+    reload: load,
+    snapshot: () => ({
+      overview, series, retention, deep, top24h,
+      categories, profiles, funnel, devAccts,
+    }),
+  }), [load, overview, series, retention, deep, top24h, categories, profiles, funnel, devAccts]);
 
   if (loading) {
     return (
@@ -144,22 +135,11 @@ export default function AnalyticsPanel({ adminKey }: { adminKey: string }) {
 
   return (
     <ScrollView contentContainerStyle={styles.content}>
-      <View style={styles.headerRow}>
-        <Text style={styles.moduleTitle}>KPI PIANO DI CRESCITA</Text>
-        <View style={{ flexDirection: "row", gap: 6 }}>
-          <Pressable onPress={doReset} style={styles.iconBtn} testID="analytics-reset">
-            <Ionicons name="trash-outline" size={18} color="#c81f1f" />
-          </Pressable>
-          <Pressable onPress={load} style={styles.iconBtn} testID="analytics-refresh">
-            <Ionicons name="refresh" size={18} color={colors.brandSecondary} />
-          </Pressable>
-        </View>
-      </View>
-      <Text style={styles.moduleHint}>
-        Le soglie sono quelle di pag. 14 del piano di crescita. Gli account di
-        sviluppo (elencati sotto) sono esclusi da tutti i calcoli.
-        {overview?.baseline_at ? `\nBaseline azzeramento: ${new Date(overview.baseline_at).toLocaleString("it-IT")}` : ""}
-      </Text>
+      {overview?.baseline_at ? (
+        <Text style={styles.baselineHint}>
+          Baseline azzeramento: {new Date(overview.baseline_at).toLocaleString("it-IT")}
+        </Text>
+      ) : null}
 
       {/* KPI cards */}
       <View style={styles.kpiGrid}>
@@ -348,7 +328,7 @@ export default function AnalyticsPanel({ adminKey }: { adminKey: string }) {
       </Section>
     </ScrollView>
   );
-}
+});
 
 // ─── Sub-components ────────────────────────────────────────────────
 function KpiCard({ label, value, suffix, threshold, note }: {
@@ -445,6 +425,7 @@ const styles = StyleSheet.create({
   headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   moduleTitle: { fontSize: font.sizes.xl, letterSpacing: 2, fontWeight: "500", color: colors.onSurface },
   moduleHint: { fontSize: font.sizes.xs, color: colors.muted, lineHeight: 16 },
+  baselineHint: { fontSize: font.sizes.xs, color: colors.muted, fontStyle: "italic" },
   iconBtn: { width: 36, height: 36, borderWidth: 2, borderColor: colors.brandSecondary, alignItems: "center", justifyContent: "center" },
   kpiGrid: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
   kpiCard: { width: "48%", borderWidth: 2, padding: spacing.sm, backgroundColor: colors.surfaceSecondary, gap: 2, minHeight: 108 },

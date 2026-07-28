@@ -1,17 +1,21 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import {
   View, Text, StyleSheet, ScrollView, Pressable, TextInput, ActivityIndicator,
-  KeyboardAvoidingView, Platform,
+  KeyboardAvoidingView, Platform, Modal,
 } from "react-native";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import * as FileSystem from "expo-file-system/legacy";
+import * as Sharing from "expo-sharing";
 import { storage } from "@/src/utils/storage";
 import { colors, spacing, font } from "@/src/theme";
-import AnalyticsPanel from "@/src/components/AnalyticsPanel";
+import AnalyticsPanel, { AnalyticsPanelHandle } from "@/src/components/AnalyticsPanel";
+import { useAuth } from "@/src/auth/AuthContext";
 
 const KEY_STORAGE = "populus_admin_key";
 const BASE = process.env.EXPO_PUBLIC_BACKEND_URL || "";
+const ADMIN_EMAIL = "carlofarinapayme@gmail.com";
 
 type Stats = {
   total_users: number;
@@ -39,6 +43,7 @@ async function fetchStats(key: string): Promise<Stats> {
 
 export default function AdminScreen() {
   const router = useRouter();
+  const { user } = useAuth();
   const [key, setKey] = useState<string>("");
   const [keyInput, setKeyInput] = useState<string>("");
   const [stats, setStats] = useState<Stats | null>(null);
@@ -49,6 +54,19 @@ export default function AdminScreen() {
   // the growth-plan dashboard; Demografia is the legacy one (utile per
   // controllare voti per regione/sesso/età al volo).
   const [tab, setTab] = useState<"analytics" | "demographics">("analytics");
+  const analyticsRef = useRef<AnalyticsPanelHandle | null>(null);
+
+  // Reset confirmation flow — two-step: first Modal asks "azzerare?", then
+  // if user says yes a second Modal offers the JSON snapshot download.
+  const [resetStep, setResetStep] = useState<"idle" | "confirm" | "download" | "working">("idle");
+  const [resetError, setResetError] = useState<string | null>(null);
+  const snapshotRef = useRef<any>(null);
+
+  // Only the primary developer account is allowed past this screen.
+  // Anyone else — even if they somehow reach this route — sees an
+  // "accesso negato" wall.
+  const userEmail = (user?.email || "").toLowerCase();
+  const isAllowed = userEmail === ADMIN_EMAIL;
 
   useEffect(() => {
     (async () => {
@@ -84,6 +102,109 @@ export default function AdminScreen() {
     setKey(""); setKeyInput(""); setStats(null);
   };
 
+  // Refresh works on whichever tab is currently mounted.
+  const refreshCurrent = useCallback(async () => {
+    if (tab === "analytics") {
+      await analyticsRef.current?.reload();
+    } else if (key) {
+      await load(key);
+    }
+  }, [tab, key, load]);
+
+  // Fetch a full snapshot (analytics + legacy demografia) so the
+  // report file the user downloads is a complete "before-reset" record.
+  const fetchFullSnapshot = useCallback(async (k: string) => {
+    const paths = [
+      "/admin/analytics/overview",
+      "/admin/analytics/active-users?days=30",
+      "/admin/analytics/retention",
+      "/admin/analytics/deep-action-rate?days=7",
+      "/admin/analytics/top-feuds-24h",
+      "/admin/analytics/categories",
+      "/admin/analytics/profiles",
+      "/admin/analytics/funnel",
+      "/admin/analytics/dev-accounts",
+      "/admin/stats",
+    ];
+    const results = await Promise.all(paths.map(async (p) => {
+      try {
+        const r = await fetch(`${BASE}/api${p}`, { headers: { "X-Admin-Key": k } });
+        return r.ok ? await r.json() : null;
+      } catch { return null; }
+    }));
+    return {
+      exported_at: new Date().toISOString(),
+      exported_by: userEmail,
+      analytics: {
+        overview: results[0],
+        active_users_series: results[1],
+        retention: results[2],
+        deep_action_rate: results[3],
+        top_feuds_24h: results[4],
+        categories: results[5],
+        profiles: results[6],
+        funnel: results[7],
+        dev_accounts: results[8],
+      },
+      demographics: results[9],
+    };
+  }, [userEmail]);
+
+  // Persist the snapshot to a JSON file the user can save/share.
+  // Web: triggers a browser download via a hidden <a>. Native: writes
+  // to app cache and opens the OS share sheet.
+  const downloadSnapshot = useCallback(async (snapshot: any) => {
+    const ts = new Date().toISOString().replace(/[:.]/g, "-");
+    const fileName = `populus-analytics-${ts}.json`;
+    const json = JSON.stringify(snapshot, null, 2);
+    if (Platform.OS === "web") {
+      const blob = new Blob([json], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      return;
+    }
+    const path = `${FileSystem.cacheDirectory}${fileName}`;
+    await FileSystem.writeAsStringAsync(path, json, { encoding: FileSystem.EncodingType.UTF8 });
+    if (await Sharing.isAvailableAsync()) {
+      await Sharing.shareAsync(path, { mimeType: "application/json", dialogTitle: "Salva report analytics" });
+    }
+  }, []);
+
+  // Second half of the reset flow: hit the reset endpoint, reload the
+  // active tab, then surface any error to the confirmation modal.
+  const performReset = useCallback(async () => {
+    setResetStep("working"); setResetError(null);
+    try {
+      const res = await fetch(`${BASE}/api/admin/analytics/reset`, {
+        method: "POST", headers: { "X-Admin-Key": key },
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      await refreshCurrent();
+      setResetStep("idle");
+    } catch (e: any) {
+      setResetError(e?.message || "Reset non riuscito");
+      setResetStep("confirm");
+    }
+  }, [key, refreshCurrent]);
+
+  // First step of the reset flow. Takes a snapshot first so we can
+  // offer the download in the follow-up step even if the reset succeeds.
+  const openResetFlow = useCallback(async () => {
+    setResetError(null);
+    try {
+      snapshotRef.current = await fetchFullSnapshot(key);
+    } catch {
+      snapshotRef.current = null;
+    }
+    setResetStep("confirm");
+  }, [fetchFullSnapshot, key]);
+
   const totalRegion = stats?.by_region.reduce((s, r) => s + r.count, 0) || 0;
   const totalSex = stats ? Object.values(stats.by_sex).reduce((s, n) => s + n, 0) : 0;
   const totalAge = stats ? Object.values(stats.by_age).reduce((s, n) => s + n, 0) : 0;
@@ -92,6 +213,29 @@ export default function AdminScreen() {
     return (
       <SafeAreaView style={styles.safe}>
         <ActivityIndicator size="large" color={colors.brandPrimary} />
+      </SafeAreaView>
+    );
+  }
+
+  // Hard gate: only the owner account may enter this screen. If someone
+  // else lands here (deep link, stale session, curiosity) we show a
+  // friendly denial screen instead of the login form.
+  if (!isAllowed) {
+    return (
+      <SafeAreaView style={styles.safe} edges={["top", "bottom"]}>
+        <View style={styles.gateWrap}>
+          <Pressable onPress={() => router.back()} style={styles.gateBack} testID="admin-back">
+            <Ionicons name="chevron-back" size={22} color={colors.onSurface} />
+            <Text style={styles.gateBackTxt}>INDIETRO</Text>
+          </Pressable>
+          <View style={styles.gateHeader}>
+            <Ionicons name="lock-closed" size={64} color={colors.onSurface} />
+            <Text style={styles.gateTitle}>ACCESSO NEGATO</Text>
+            <Text style={styles.gateSub}>
+              Questa area è riservata al proprietario dell&apos;app.
+            </Text>
+          </View>
+        </View>
       </SafeAreaView>
     );
   }
@@ -136,14 +280,15 @@ export default function AdminScreen() {
         <View style={{ flex: 1 }}>
           <Text style={styles.brand}>ADMIN</Text>
           <Text style={styles.subtitle}>
-            {tab === "analytics" ? "Analytics · KPI di crescita" : "Statistiche demografiche"}
+            {tab === "analytics" ? "Analytics" : "Statistiche demografiche"}
           </Text>
         </View>
-        {tab === "demographics" ? (
-          <Pressable onPress={() => load(key)} style={styles.iconBtn} testID="admin-refresh">
-            <Ionicons name="refresh" size={20} color={colors.brandSecondary} />
-          </Pressable>
-        ) : null}
+        <Pressable onPress={refreshCurrent} style={styles.iconBtn} testID="admin-refresh">
+          <Ionicons name="refresh" size={20} color={colors.brandSecondary} />
+        </Pressable>
+        <Pressable onPress={openResetFlow} style={styles.iconBtn} testID="admin-reset">
+          <Ionicons name="trash-outline" size={20} color="#ff5c5c" />
+        </Pressable>
         <Pressable onPress={clearKey} style={styles.iconBtn} testID="admin-logout">
           <Ionicons name="log-out-outline" size={20} color={colors.brandSecondary} />
         </Pressable>
@@ -168,7 +313,7 @@ export default function AdminScreen() {
       </View>
 
       {tab === "analytics" ? (
-        <AnalyticsPanel adminKey={key} />
+        <AnalyticsPanel adminKey={key} ref={analyticsRef} />
       ) : loading ? (
         <View style={styles.centerFill}><ActivityIndicator size="large" color={colors.brandPrimary} /></View>
       ) : error ? (
@@ -240,6 +385,96 @@ export default function AdminScreen() {
           </SectionBlock>
         </ScrollView>
       ) : null}
+
+      {/* Reset confirmation flow — a proper Modal (not Alert.alert)
+          because Alert on react-native-web only supports a single OK
+          button, so multi-choice confirmations silently no-op there. */}
+      <Modal
+        transparent
+        visible={resetStep !== "idle"}
+        animationType="fade"
+        onRequestClose={() => setResetStep("idle")}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard} testID="admin-reset-modal">
+            {resetStep === "confirm" || resetStep === "working" ? (
+              <>
+                <Text style={styles.modalTitle}>AZZERARE LE STATISTICHE?</Text>
+                <Text style={styles.modalBody}>
+                  Tutti i KPI del dashboard (voti, commenti, categorie, demografia,
+                  DAU/WAU/MAU) torneranno a zero. Gli utenti e i voti reali NON
+                  vengono cancellati — solo il dashboard riparte da zero.
+                </Text>
+                {resetError ? (
+                  <Text style={styles.modalError}>{resetError}</Text>
+                ) : null}
+                <View style={styles.modalActions}>
+                  <Pressable
+                    onPress={() => setResetStep("idle")}
+                    style={[styles.modalBtn, styles.modalBtnGhost]}
+                    disabled={resetStep === "working"}
+                    testID="admin-reset-cancel"
+                  >
+                    <Text style={styles.modalBtnGhostTxt}>ANNULLA</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={async () => {
+                      await performReset();
+                      // If reset succeeded, offer download step.
+                      // (performReset flips to idle on success — we
+                      // re-open with 'download' only when we still have
+                      // a snapshot in hand.)
+                      if (snapshotRef.current) setResetStep("download");
+                    }}
+                    style={[styles.modalBtn, styles.modalBtnDanger]}
+                    disabled={resetStep === "working"}
+                    testID="admin-reset-confirm"
+                  >
+                    {resetStep === "working" ? (
+                      <ActivityIndicator color="#fff" />
+                    ) : (
+                      <Text style={styles.modalBtnDangerTxt}>AZZERA</Text>
+                    )}
+                  </Pressable>
+                </View>
+              </>
+            ) : resetStep === "download" ? (
+              <>
+                <Text style={styles.modalTitle}>SCARICARE IL REPORT?</Text>
+                <Text style={styles.modalBody}>
+                  Vuoi salvare un file JSON con lo snapshot completo delle
+                  statistiche appena azzerate (analytics + demografia)? Utile
+                  per archiviare i dati storici prima del reset.
+                </Text>
+                <View style={styles.modalActions}>
+                  <Pressable
+                    onPress={() => { snapshotRef.current = null; setResetStep("idle"); }}
+                    style={[styles.modalBtn, styles.modalBtnGhost]}
+                    testID="admin-download-skip"
+                  >
+                    <Text style={styles.modalBtnGhostTxt}>NO</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={async () => {
+                      try {
+                        if (snapshotRef.current) await downloadSnapshot(snapshotRef.current);
+                      } catch {
+                        // Non-fatal — user can retry from the analytics view.
+                      }
+                      snapshotRef.current = null;
+                      setResetStep("idle");
+                    }}
+                    style={[styles.modalBtn, styles.modalBtnConfirm]}
+                    testID="admin-download-confirm"
+                  >
+                    <Text style={styles.modalBtnConfirmTxt}>SÌ, SCARICA</Text>
+                  </Pressable>
+                </View>
+              </>
+            ) : null}
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -345,5 +580,84 @@ const styles = StyleSheet.create({
   },
   tabTxtActive: {
     color: colors.onBrandPrimary,
+  },
+  // Reset confirmation modal
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: spacing.lg,
+  },
+  modalCard: {
+    width: "100%",
+    maxWidth: 420,
+    backgroundColor: colors.surface,
+    borderWidth: 2,
+    borderColor: colors.border,
+    padding: spacing.lg,
+    gap: spacing.md,
+  },
+  modalTitle: {
+    fontSize: font.sizes.xl,
+    letterSpacing: 2,
+    fontWeight: "500",
+    color: colors.onSurface,
+  },
+  modalBody: {
+    fontSize: font.sizes.base,
+    color: colors.onSurface,
+    lineHeight: 20,
+  },
+  modalError: {
+    color: colors.error,
+    fontSize: font.sizes.sm,
+    borderWidth: 1,
+    borderColor: colors.error,
+    padding: spacing.xs,
+  },
+  modalActions: {
+    flexDirection: "row",
+    gap: spacing.sm,
+    justifyContent: "flex-end",
+    marginTop: spacing.xs,
+  },
+  modalBtn: {
+    borderWidth: 2,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    minWidth: 100,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  modalBtnGhost: {
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceSecondary,
+  },
+  modalBtnGhostTxt: {
+    color: colors.onSurface,
+    fontSize: font.sizes.sm,
+    letterSpacing: 2,
+    fontWeight: "500",
+  },
+  modalBtnDanger: {
+    borderColor: "#c81f1f",
+    backgroundColor: "#c81f1f",
+  },
+  modalBtnDangerTxt: {
+    color: "#fff",
+    fontSize: font.sizes.sm,
+    letterSpacing: 2,
+    fontWeight: "600",
+  },
+  modalBtnConfirm: {
+    borderColor: colors.brandPrimary,
+    backgroundColor: colors.brandPrimary,
+  },
+  modalBtnConfirmTxt: {
+    color: colors.onBrandPrimary,
+    fontSize: font.sizes.sm,
+    letterSpacing: 2,
+    fontWeight: "600",
   },
 });

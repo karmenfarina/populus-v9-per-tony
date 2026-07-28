@@ -1,0 +1,29 @@
+{
+  "summary": "Full validation of iter 80 admin panel changes (email gate + header buttons + reset Modal + snapshot/download + title removal). Backend: 15/15 pytest cases pass (owner JWT → /auth/me returns carlofarinapayme@gmail.com, X-Admin-Key gate enforced on /api/admin/analytics/*, POST /api/admin/analytics/reset advances baseline_at, all 10 snapshot endpoints reachable). Frontend (mobile viewport 390x844): (1) Positive gate — injected owner JWT into localStorage.faide_token → email gate passes, admin key form appears, populus-admin-42b8f3 → admin-screen mounts. (2) Header shows 3 icons on both tabs: admin-refresh, admin-reset, admin-logout. (3) Refresh on ANALYTICS tab fires 9 XHRs to /api/admin/analytics/* (overview, active-users, retention, deep-action-rate, top-feuds-24h, categories, profiles, funnel, dev-accounts). (4) Refresh on DEMOGRAFIA tab fires GET /api/admin/stats. (5) Trash → admin-reset-modal opens with 'AZZERARE LE STATISTICHE?' + ANNULLA/AZZERA; ANNULLA closes; AZZERA fires POST /api/admin/analytics/reset then opens second modal 'SCARICARE IL REPORT?' with NO / SÌ SCARICA. (6) SÌ SCARICA triggers browser download event with filename populus-analytics-2026-07-28T15-06-14-765Z.json. (7) KPI PIANO DI CRESCITA text removed, no 'pag. 7'/'pag. 14' references, only small 'Baseline azzeramento: …' hint present, panel starts directly with KPI cards (RITORNO A 30 GIORNI, WAU/MAU, AZIONE PROFONDA, MEDIANA VOTI 24h). (8) Negative gate — without token /admin renders ACCESSO NEGATO screen with INDIETRO button and NO admin-key-input, exactly as intended.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "react-native-web deprecation", "issue": "Console warns 'shadow* style props are deprecated. Use boxShadow' and 'props.pointerEvents is deprecated. Use style.pointerEvents' — not from the files touched in this iteration, but surfaces on the /admin screens. Non-blocking."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_admin_reset_gate.py",
+    "/app/test_reports/pytest/iter80_admin.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "admin.tsx uses expo-file-system/legacy import — works but Expo recommends moving to the new expo-file-system API when possible.",
+    "In performReset() the success path sets resetStep='idle' before the caller decides to open the 'download' modal via snapshotRef.current. The follow-up `if (snapshotRef.current) setResetStep('download')` on the confirm button relies on setState batching order. In testing it worked (download modal appeared, download fired), but a cleaner pattern would be to return a success boolean from performReset() and branch on that. Non-blocking.",
+    "downloadSnapshot on web dispatches a synthetic <a download> click; Playwright captured the download event correctly. Native path (Sharing.shareAsync) not testable in web preview but code path looks correct."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (15/15)", "frontend": "100% (all 8 review points verified)"},
+  "seed_data_creation": "None. Reset test advances the analytics baseline_at once — cosmetic-only side effect, no user or vote data destroyed.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "To repro the /admin owner path on web: (1) navigate to origin root, (2) `localStorage.setItem('faide_token', JSON.stringify('<owner_jwt>'))` — the AsyncStorage web shim JSON-stringifies values so the raw JWT alone will NOT work, quotes are mandatory, (3) navigate to /admin. AuthContext will hit /auth/me and populate user.email so isAllowed becomes true. Then enter admin key `populus-admin-42b8f3` in the ACCEDI form. TestIDs used: admin-screen, admin-refresh, admin-reset, admin-logout, admin-tab-analytics, admin-tab-demographics, admin-reset-modal, admin-reset-cancel, admin-reset-confirm, admin-download-skip, admin-download-confirm, admin-key-input, admin-key-submit, admin-back. Owner JWT expires ~1785855709 (early Aug 2026).",
+  "rca_of_issue": "N/A — feature validation only, no bugs found."
+}
