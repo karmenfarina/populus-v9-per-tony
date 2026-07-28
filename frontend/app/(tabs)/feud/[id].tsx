@@ -439,16 +439,14 @@ export default function FeudDetail() {
 
           <View style={styles.article}>
             <View style={styles.articleHeader}>
-              <Text style={styles.sectionKicker}>
-                {showContext && feud.context_text ? "CONTESTO" : "LA FAIDA"}
-              </Text>
+              <Text style={styles.sectionKicker}>LA FAIDA</Text>
               {feud.context_text ? (
                 <Pressable
                   onPress={() => setShowContext((v) => !v)}
                   hitSlop={12}
                   testID="feud-context-toggle"
                   accessibilityLabel={
-                    showContext ? "Torna al testo della faida" : "Mostra il contesto della notizia"
+                    showContext ? "Chiudi il contesto della notizia" : "Mostra il contesto della notizia"
                   }
                   style={styles.contextInfoBtn}
                 >
@@ -460,13 +458,35 @@ export default function FeudDetail() {
                 </Pressable>
               ) : null}
             </View>
-            {((showContext && feud.context_text) ? feud.context_text : (feud.summary || ""))
+            {showContext && feud.context_text ? (
+              <View style={styles.contextBox} testID="feud-context-panel">
+                <View style={styles.contextHeader}>
+                  <Text style={styles.contextKicker}>CONTESTO</Text>
+                  <Pressable
+                    onPress={() => setShowContext(false)}
+                    hitSlop={10}
+                    testID="feud-context-close"
+                    accessibilityLabel="Chiudi il contesto"
+                    style={styles.contextClose}
+                  >
+                    <Ionicons name="close" size={16} color={colors.muted} />
+                  </Pressable>
+                </View>
+                {feud.context_text
+                  .split(/\n{2,}/)
+                  .filter((p) => p.trim())
+                  .map((para, idx) => (
+                    <Text key={idx} style={styles.contextText}>{para.trim()}</Text>
+                  ))}
+              </View>
+            ) : null}
+            {(feud.summary || "")
               .split(/\n{2,}/)
               .filter((p) => p.trim())
               .map((para, idx) => (
                 <Text key={idx} style={styles.summary}>{para.trim()}</Text>
               ))}
-            {!showContext && feud.hashtag && (
+            {feud.hashtag && (
               <Pressable
                 onPress={() => router.push(`/hashtag/${feud.hashtag}`)}
                 testID="feud-hashtag"
@@ -963,6 +983,37 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xs,
     alignItems: "center",
     justifyContent: "center",
+  },
+  contextBox: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+  },
+  contextHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: spacing.xs,
+  },
+  contextKicker: {
+    fontSize: font.sizes.xs,
+    letterSpacing: 2,
+    color: colors.brandPrimary,
+    fontWeight: "600",
+  },
+  contextClose: {
+    padding: 2,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  contextText: {
+    fontSize: font.sizes.base,
+    lineHeight: 20,
+    color: colors.onSurface,
+    marginBottom: spacing.xs,
+    fontStyle: "italic",
   },
   mediaSection: { paddingHorizontal: spacing.lg, marginBottom: spacing.md },
   summary: { fontSize: font.sizes.lg, lineHeight: 24, color: colors.onSurface, marginBottom: spacing.sm },
