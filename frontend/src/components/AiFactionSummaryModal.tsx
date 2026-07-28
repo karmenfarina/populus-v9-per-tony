@@ -10,7 +10,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "@/src/api";
-import { colors, font, spacing } from "@/src/theme";
+import { colors, font, spacing, radius } from "@/src/theme";
 
 type AiSummary = {
   side_a: string[];
@@ -98,6 +98,7 @@ export default function AiFactionSummaryModal({
     >
       <View style={styles.backdrop}>
         <View style={styles.sheet}>
+          <View style={styles.handleWrap}><View style={styles.handle} /></View>
           <View style={styles.header}>
             <View style={{ flex: 1 }}>
               <Text style={styles.title}>SINTESI DEL PENSIERO</Text>
@@ -108,20 +109,20 @@ export default function AiFactionSummaryModal({
             <Pressable
               onPress={load}
               disabled={loading}
-              style={[styles.iconBtn, loading ? styles.iconBtnDisabled : null]}
+              style={[styles.headerBtn, styles.headerBtnRefresh, loading ? styles.iconBtnDisabled : null]}
               testID="ai-summary-refresh"
               hitSlop={6}
               accessibilityLabel="Rigenera sintesi"
             >
-              <Ionicons name="refresh" size={20} color={colors.brandPrimary} />
+              <Ionicons name="refresh" size={18} color={colors.brandPrimary} />
             </Pressable>
             <Pressable
               onPress={onClose}
-              style={styles.iconBtn}
+              style={[styles.headerBtn, styles.headerBtnClose]}
               testID="ai-summary-close"
               hitSlop={6}
             >
-              <Ionicons name="close" size={22} color={colors.onSurface} />
+              <Ionicons name="close" size={20} color={colors.onSurface} />
             </Pressable>
           </View>
 
@@ -153,53 +154,65 @@ export default function AiFactionSummaryModal({
             {showResult ? (
               <>
                 {/* Team A block */}
-                <View style={[styles.block, styles.blockA]} testID="ai-summary-side-a">
-                  <Text style={[styles.blockTitle, { color: colors.brandPrimary }]}>
-                    TEAM {partyA?.toUpperCase() || "A"}
-                  </Text>
-                  {data!.side_a.length === 0 ? (
-                    <Text style={styles.hint}>Nessuna argomentazione rilevata.</Text>
-                  ) : (
-                    data!.side_a.map((b, i) => (
-                      <View key={`a-${i}`} style={styles.bulletRow}>
-                        <Text style={[styles.bulletDot, { color: colors.brandPrimary }]}>●</Text>
-                        <Text style={styles.bulletTxt}>{b}</Text>
-                      </View>
-                    ))
-                  )}
+                <View style={styles.factionRow} testID="ai-summary-side-a">
+                  <View style={[styles.factionAccent, { backgroundColor: colors.brandPrimary }]} />
+                  <View style={[styles.factionIcon, { backgroundColor: `${colors.brandPrimary}22`, borderColor: `${colors.brandPrimary}55` }]}>
+                    <Ionicons name="person-outline" size={22} color={colors.brandPrimary} />
+                  </View>
+                  <View style={styles.factionBody}>
+                    <Text style={[styles.factionTitle, { color: colors.brandPrimary }]} numberOfLines={2}>
+                      {"FAZIONE ROSSA · "}
+                      <Text style={styles.factionQuote}>{`"${partyA || "A"}"`}</Text>
+                    </Text>
+                    {data!.side_a.length === 0 ? (
+                      <Text style={styles.hint}>Nessuna argomentazione rilevata.</Text>
+                    ) : (
+                      data!.side_a.map((b, i) => (
+                        <Text key={`a-${i}`} style={styles.factionText}>{b}</Text>
+                      ))
+                    )}
+                  </View>
                 </View>
 
+                <View style={styles.factionDivider} />
+
                 {/* Team B block */}
-                <View style={[styles.block, styles.blockB]} testID="ai-summary-side-b">
-                  <Text style={[styles.blockTitle, { color: colors.brandSecondary }]}>
-                    TEAM {partyB?.toUpperCase() || "B"}
-                  </Text>
-                  {data!.side_b.length === 0 ? (
-                    <Text style={styles.hint}>Nessuna argomentazione rilevata.</Text>
-                  ) : (
-                    data!.side_b.map((b, i) => (
-                      <View key={`b-${i}`} style={styles.bulletRow}>
-                        <Text style={[styles.bulletDot, { color: colors.brandSecondary }]}>●</Text>
-                        <Text style={styles.bulletTxt}>{b}</Text>
-                      </View>
-                    ))
-                  )}
+                <View style={styles.factionRow} testID="ai-summary-side-b">
+                  <View style={[styles.factionAccent, { backgroundColor: colors.brandSecondary }]} />
+                  <View style={[styles.factionIcon, { backgroundColor: `${colors.brandSecondary}22`, borderColor: `${colors.brandSecondary}55` }]}>
+                    <Ionicons name="person-outline" size={22} color={colors.brandSecondary} />
+                  </View>
+                  <View style={styles.factionBody}>
+                    <Text style={[styles.factionTitle, { color: colors.brandSecondary }]} numberOfLines={2}>
+                      {"FAZIONE GIALLA · "}
+                      <Text style={styles.factionQuote}>{`"${partyB || "B"}"`}</Text>
+                    </Text>
+                    {data!.side_b.length === 0 ? (
+                      <Text style={styles.hint}>Nessuna argomentazione rilevata.</Text>
+                    ) : (
+                      data!.side_b.map((b, i) => (
+                        <Text key={`b-${i}`} style={styles.factionText}>{b}</Text>
+                      ))
+                    )}
+                  </View>
                 </View>
 
                 {/* Common ground — only rendered when the AI found some */}
                 {data!.common.length > 0 ? (
-                  <View style={[styles.block, styles.blockCommon]} testID="ai-summary-common">
-                    <View style={styles.commonHeader}>
-                      <Ionicons name="git-merge" size={16} color={colors.onSurface} />
-                      <Text style={styles.blockTitle}>ENTRAMBE LE FAZIONI CONCORDANO</Text>
-                    </View>
-                    {data!.common.map((b, i) => (
-                      <View key={`c-${i}`} style={styles.bulletRow}>
-                        <Text style={styles.bulletDot}>●</Text>
-                        <Text style={styles.bulletTxt}>{b}</Text>
+                  <>
+                    <View style={styles.factionDivider} />
+                    <View style={styles.factionRow} testID="ai-summary-common">
+                      <View style={styles.commonIconWrap}>
+                        <Ionicons name="checkmark-circle-outline" size={26} color={colors.onSurface} />
                       </View>
-                    ))}
-                  </View>
+                      <View style={[styles.factionBody, { paddingLeft: 0 }]}>
+                        <Text style={styles.commonTitle}>PUNTO IN COMUNE</Text>
+                        {data!.common.map((b, i) => (
+                          <Text key={`c-${i}`} style={styles.commonText}>{b}</Text>
+                        ))}
+                      </View>
+                    </View>
+                  </>
                 ) : null}
 
                 <Text style={styles.footerHint}>
@@ -218,45 +231,110 @@ export default function AiFactionSummaryModal({
 const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.5)",
+    backgroundColor: "rgba(0,0,0,0.55)",
     justifyContent: "flex-end",
   },
   sheet: {
     backgroundColor: colors.surface,
     maxHeight: "88%",
-    borderTopWidth: 3,
-    borderTopColor: colors.border,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
   },
+  handleWrap: { alignItems: "center", paddingVertical: spacing.xs },
+  handle: { width: 44, height: 4, borderRadius: 2, backgroundColor: colors.muted, opacity: 0.5 },
   header: {
     flexDirection: "row",
     alignItems: "center",
     gap: spacing.sm,
     paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
-    borderBottomWidth: 2,
-    borderBottomColor: colors.border,
+    paddingBottom: spacing.md,
   },
-  title: { color: colors.onSurface, fontSize: font.sizes.base, fontWeight: "700", letterSpacing: 1 },
-  subtitle: { color: colors.muted, fontSize: font.sizes.xs, marginTop: 2 },
-  iconBtn: { padding: 6 },
+  title: { color: colors.onSurface, fontSize: font.sizes.lg, fontWeight: "800", letterSpacing: 1 },
+  subtitle: { color: colors.muted, fontSize: font.sizes.sm, marginTop: 2 },
+  headerBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1.5,
+  },
+  headerBtnRefresh: { borderColor: colors.brandPrimary, backgroundColor: "transparent" },
+  headerBtnClose: { borderColor: "transparent", backgroundColor: colors.surfaceTertiary },
   iconBtnDisabled: { opacity: 0.4 },
   center: { alignItems: "center", justifyContent: "center", padding: spacing.lg, gap: spacing.sm },
   hint: { color: colors.muted, fontSize: font.sizes.sm, textAlign: "center" },
-  emptyTitle: { color: colors.onSurface, fontSize: font.sizes.base, fontWeight: "600" },
+  emptyTitle: { color: colors.onSurface, fontSize: font.sizes.base, fontWeight: "700" },
   emptyHint: { color: colors.muted, fontSize: font.sizes.sm, textAlign: "center", lineHeight: 18 },
-  block: {
-    padding: spacing.md,
-    borderWidth: 2,
-    gap: spacing.sm,
+
+  // ---- Faction blocks: horizontal layout with left color bar + icon + text
+  factionRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: spacing.md,
+    paddingVertical: spacing.sm,
   },
-  blockA: { borderColor: colors.brandPrimary, backgroundColor: `${colors.brandPrimary}12` },
-  blockB: { borderColor: colors.brandSecondary, backgroundColor: `${colors.brandSecondary}12` },
-  blockCommon: { borderColor: colors.border, backgroundColor: colors.surfaceSecondary },
-  commonHeader: { flexDirection: "row", alignItems: "center", gap: 6 },
-  blockTitle: { color: colors.onSurface, fontSize: font.sizes.sm, fontWeight: "700", letterSpacing: 1 },
-  bulletRow: { flexDirection: "row", gap: spacing.sm, paddingLeft: spacing.xs },
-  bulletDot: { color: colors.onSurface, fontSize: font.sizes.base, lineHeight: 20 },
-  bulletTxt: { color: colors.onSurface, fontSize: font.sizes.sm, lineHeight: 20, flex: 1 },
+  factionAccent: {
+    width: 3,
+    borderRadius: 2,
+    alignSelf: "stretch",
+    minHeight: 60,
+  },
+  factionIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  factionBody: { flex: 1, paddingLeft: spacing.xs, gap: 6 },
+  factionTitle: {
+    fontSize: font.sizes.sm,
+    fontWeight: "800",
+    letterSpacing: 1,
+    lineHeight: 18,
+  },
+  factionQuote: {
+    color: colors.onSurface,
+    fontWeight: "700",
+    letterSpacing: 0.3,
+  },
+  factionText: {
+    color: colors.muted,
+    fontSize: font.sizes.sm,
+    lineHeight: 20,
+  },
+  factionDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: colors.border,
+    marginVertical: spacing.xs,
+  },
+
+  // ---- Common ground: check icon + title + italic body
+  commonIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+    alignItems: "center",
+    justifyContent: "center",
+    marginLeft: 3, // align with the accent bar of the faction rows
+  },
+  commonTitle: {
+    color: colors.onSurface,
+    fontSize: font.sizes.sm,
+    fontWeight: "800",
+    letterSpacing: 1,
+  },
+  commonText: {
+    color: colors.muted,
+    fontSize: font.sizes.sm,
+    lineHeight: 20,
+    fontStyle: "italic",
+  },
+
   errorBox: {
     flexDirection: "row",
     alignItems: "center",
@@ -265,6 +343,7 @@ const styles = StyleSheet.create({
     backgroundColor: `${colors.error}22`,
     borderWidth: 1,
     borderColor: colors.error,
+    borderRadius: radius.sm,
   },
   errorTxt: { color: colors.error, fontSize: font.sizes.sm, flex: 1 },
   footerHint: {
