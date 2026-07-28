@@ -1,0 +1,24 @@
+{
+  "summary": "Frontend-only validation of the bug fix that pre-loads MaterialCommunityIcons alongside Ionicons at app boot via useIconFonts() so the scale-balance FAIDE tab icon no longer pops in late on slow connections. Verified: (1) app boots without crash/red-screen, (2) both Ionicons.ttf AND MaterialCommunityIcons.ttf are requested in parallel at boot (t=2ms and t=4ms respectively — Delta 2ms — even under CDP-throttled slow-3G), (3) SplashScreen.hideAsync fires only after both fonts resolve (useFonts blocking + `if (!loaded && !error) return null;` gate in _layout.tsx), (4) after anonymous login + T&C acceptance, the bottom tab bar renders 5 icons L→R with the MCI scale-balance glyph (U+F05D1) at the leftmost position, same visual weight (30px vs 25px * 1.18 scale = 29.5px≈30px) and same active brand color rgb(255,59,48) as the Ionicons siblings (bookmark U+F1A8, chatbubbles U+F217, notifications U+F475, person U+F4A5). document.fonts registry confirms both `ionicons` and `material-community` reach status `loaded`. No regressions on other Ionicons; anonymous person-add tab correctly hidden. No React Native deprecated-package issues detected in the touched files.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": ["/app/test_reports/iteration_79.json"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "use-icon-fonts.ts:60-61 casts Ionicons.font/MaterialCommunityIcons.font to Record<string, any> — pragmatic TS workaround, acceptable but a proper type from @expo/vector-icons would be cleaner.",
+    "Boot fires 4 font network requests (2x Ionicons + 2x MCI) because both the injected @font-face stylesheet and useFonts() trigger fetches. Browser dedupes so it's harmless, but if wanting to be strict, using only useFonts (skip @font-face injection) or only stylesheet would halve the request count.",
+    "Pre-verified chat_a@test.it / test123 credentials in /app/memory/test_credentials.md returned 400 'Email o password sbagliata' — these accounts appear NOT to exist in the current DB. Not related to this fix, but worth flagging for future test iterations. Used anonymous signup as workaround."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (frontend-only requested)", "frontend": "100%"},
+  "seed_data_creation": "Created one throwaway anonymous account (nickname tst<epoch>) for the reachability test. No cleanup required — anonymous accounts self-purge per app policy.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "The fix modifies /app/frontend/src/hooks/use-icon-fonts.ts to add Ionicons.font + MaterialCommunityIcons.font to useFonts() so the tab-bar scale-balance icon paints atomically with the other icons at cold start. To reproduce end-to-end use: anonymous signup (chat_a@test.it seeded creds are broken — 400 on login). Login flow: home → ANONIMO tab → fill Nickname → ENTRA COME ANONIMO → T&C page (must scroll terms-scroll to bottom to enable terms-accept-btn) → tabs. On slow-3G (CDP throttling: latency=400ms, downloadThroughput=50KB/s) both font requests still fire at t≈2-4ms confirming the pre-load is unconditional.",
+  "rca_of_issue": "Original bug: bottom tab bar's FAIDE icon (MaterialCommunityIcons 'scale-balance') was painting later than the other 4 Ionicons tabs on slow web connections, causing a visible FOUC where the first tab slot appeared empty then popped in. Root cause: only Ionicons was hot on the network because it was used across the app UI, while MCI was only referenced by that one glyph — browser lazily fetched MaterialCommunityIcons.ttf on first render of the scale-balance codepoint. Fix: useIconFonts() now explicitly declares both Ionicons.font and MaterialCommunityIcons.font in the useFonts() call, so expo-font blocks the splash until BOTH are ready. Verified in preview: throttled boot shows Ionicons and MCI requests fired 2ms apart at cold start (before any UI paints), and normal-network render shows all 5 tab icons L→R simultaneously with the MCI glyph at leftmost."
+}

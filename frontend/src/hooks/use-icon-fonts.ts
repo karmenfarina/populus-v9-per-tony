@@ -5,9 +5,18 @@
 // immediately via react-native-vector-icons autolinking / web stubs.
 // ICON_VECTOR_VERSION must match @expo/vector-icons in package.json.
 // Usage: const [loaded, error] = useIconFonts();
+//
+// NOTE: We also block splash on the two icon families that appear in the
+// bottom tab bar (Ionicons + MaterialCommunityIcons). On web/slow
+// connections the browser lazy-loads webfonts the first time a character
+// is rendered — Ionicons warms up first because it's used everywhere,
+// while MaterialCommunityIcons was only used by the "scale-balance"
+// tab icon and would visibly pop in later. Pre-declaring both here
+// makes them both ready before the first render.
 
 import Constants, { ExecutionEnvironment } from "expo-constants";
 import { useFonts } from "expo-font";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 
 const ICON_VECTOR_VERSION = "15.1.1";
 
@@ -44,9 +53,16 @@ const iconFontMap = (): Record<string, string> =>
     Object.entries(ICON_FAMILIES).map(([key, file]) => [key, cdnUrl(file)]),
   );
 
-export const useIconFonts = (): readonly [boolean, Error | null] =>
-  useFonts(
+export const useIconFonts = (): readonly [boolean, Error | null] => {
+  // Always block on the two tab-bar icon families so the bottom bar
+  // paints atomically, no matter the platform or connection speed.
+  const tabBarFonts = {
+    ...(Ionicons.font as Record<string, any>),
+    ...(MaterialCommunityIcons.font as Record<string, any>),
+  };
+  const cdnFonts =
     Constants.executionEnvironment === ExecutionEnvironment.StoreClient
       ? iconFontMap()
-      : {},
-  );
+      : {};
+  return useFonts({ ...tabBarFonts, ...cdnFonts });
+};
