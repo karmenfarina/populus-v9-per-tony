@@ -1148,14 +1148,16 @@ export default function Profile() {
                     onPress={() => setFilter(f)}
                     testID={`filter-${f}`}
                     style={[styles.filterChip, filter === f && (
-                      f === "majority" ? { backgroundColor: colors.brandPrimary } :
-                      f === "minority" ? { backgroundColor: colors.brandSecondary } :
-                      { backgroundColor: colors.surfaceInverse }
+                      f === "majority" ? { borderColor: colors.brandPrimary, backgroundColor: `${colors.brandPrimary}22` } :
+                      f === "minority" ? { borderColor: colors.brandSecondary, backgroundColor: `${colors.brandSecondary}22` } :
+                      { borderColor: colors.brandSecondary }
                     )]}
                   >
                     <Text style={[styles.filterTxt,
                       filter === f && (
-                        f === "minority" ? { color: colors.onBrandSecondary } : { color: "#FFFFFF" }
+                        f === "majority" ? { color: colors.brandPrimary } :
+                        f === "minority" ? { color: colors.brandSecondary } :
+                        { color: colors.brandSecondary }
                       )
                     ]}>
                       {f === "all" ? "TUTTI" : f === "majority" ? "MAGGIORANZA" : "MINORANZA"}
@@ -1468,14 +1470,14 @@ const styles = StyleSheet.create({
   historyHeadRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: spacing.xs },
   sectionHeadRight: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   sectionCountBadge: { color: colors.muted, fontSize: font.sizes.sm, letterSpacing: 1, minWidth: 20, textAlign: "right" },
-  filterRow: { flexDirection: "row", gap: spacing.sm, paddingHorizontal: spacing.lg, paddingBottom: spacing.md },
+  filterRow: { flexDirection: "row", gap: spacing.sm, paddingBottom: spacing.md },
   historyPrivacyBox: {
-    marginHorizontal: spacing.lg,
     marginBottom: spacing.md,
-    borderWidth: 2,
+    padding: spacing.md,
+    borderWidth: 1,
     borderColor: colors.border,
-    backgroundColor: colors.surfaceSecondary,
-    padding: spacing.sm,
+    borderRadius: radius.md,
+    backgroundColor: colors.surfaceTertiary,
   },
   historyPrivacyRow: {
     flexDirection: "row",
@@ -1485,20 +1487,35 @@ const styles = StyleSheet.create({
   historyPrivacyDivider: { height: 1, backgroundColor: colors.border, marginHorizontal: -spacing.sm },
   historyPrivacyTitle: { color: colors.onSurface, fontSize: font.sizes.sm, fontWeight: "600" },
   historyPrivacyHint: { color: colors.muted, fontSize: font.sizes.xs, marginTop: 2, lineHeight: 14 },
-  filterChip: { flex: 1, borderWidth: 2, borderColor: colors.border, paddingVertical: spacing.sm, alignItems: "center", backgroundColor: colors.surfaceSecondary },
-  filterTxt: { fontSize: font.sizes.xs, letterSpacing: 1, color: colors.onSurface, fontWeight: "500" },
+  filterChip: {
+    flex: 1,
+    borderWidth: 1.5,
+    borderColor: colors.borderStrong,
+    borderRadius: radius.pill,
+    paddingVertical: spacing.sm + 2,
+    alignItems: "center",
+    backgroundColor: "transparent",
+  },
+  filterTxt: { fontSize: font.sizes.xs, letterSpacing: 1.2, color: colors.muted, fontWeight: "800" },
   center: { padding: spacing.xl, alignItems: "center" },
   emptyH: { paddingHorizontal: spacing.lg, paddingVertical: spacing.xl, color: colors.muted, fontSize: font.sizes.base },
-  historyList: { paddingHorizontal: spacing.lg, gap: spacing.sm },
-  historyItem: { flexDirection: "row", borderWidth: 2, borderColor: colors.border, backgroundColor: colors.surfaceSecondary, overflow: "hidden" },
-  sideBar: { width: 8 },
-  hCat: { fontSize: font.sizes.xs, letterSpacing: 2, color: colors.muted },
-  hTitle: { fontSize: font.sizes.base, color: colors.onSurface, marginTop: 2, lineHeight: 18 },
+  historyList: { gap: spacing.sm },
+  historyItem: {
+    flexDirection: "row",
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    backgroundColor: colors.surfaceTertiary,
+    overflow: "hidden",
+  },
+  sideBar: { width: 4 },
+  hCat: { fontSize: font.sizes.xs, letterSpacing: 1.5, color: colors.muted, fontWeight: "700" },
+  hTitle: { fontSize: font.sizes.base, color: colors.onSurface, marginTop: 4, lineHeight: 20, fontWeight: "700" },
   hMetaRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: spacing.xs, flexWrap: "wrap", gap: spacing.xs },
   hVoted: { fontSize: font.sizes.xs, fontWeight: "500" },
-  hBadge: { fontSize: font.sizes.xs, letterSpacing: 1, paddingHorizontal: 6, paddingVertical: 2, borderWidth: 1, borderColor: colors.border },
-  hBadgeMaj: { backgroundColor: colors.brandPrimary, color: colors.onBrandPrimary },
-  hBadgeMin: { backgroundColor: colors.brandSecondary, color: colors.onBrandSecondary },
+  hBadge: { fontSize: font.sizes.xs, letterSpacing: 1, paddingHorizontal: 8, paddingVertical: 3, borderWidth: 1, borderRadius: radius.sm, fontWeight: "800" },
+  hBadgeMaj: { backgroundColor: "transparent", borderColor: colors.brandPrimary, color: colors.brandPrimary },
+  hBadgeMin: { backgroundColor: "transparent", borderColor: colors.brandSecondary, color: colors.brandSecondary },
   logout: {
     marginHorizontal: spacing.lg,
     marginTop: spacing.md,
