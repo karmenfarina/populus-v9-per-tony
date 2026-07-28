@@ -164,7 +164,7 @@ export default function AuthScreen() {
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
           <View style={styles.header} testID="auth-header">
             <Image
-              source={require("../assets/images/icon.png")}
+              source={require("../assets/images/icon-dark.png")}
               style={styles.logo}
               resizeMode="contain"
               testID="auth-logo"
