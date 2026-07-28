@@ -1250,14 +1250,18 @@ export default function Profile() {
           <Text style={styles.logoutText}>ESCI</Text>
         </Pressable>
 
-        <Pressable
-          style={styles.adminLink}
-          onPress={() => router.push("/admin")}
-          testID="profile-admin-link"
-        >
-          <Ionicons name="shield-checkmark-outline" size={14} color={colors.muted} />
-          <Text style={styles.adminLinkTxt}>PANNELLO ADMIN</Text>
-        </Pressable>
+        {/* Admin link — only rendered for the app owner. Any other
+            account never even sees this entry point. */}
+        {(user?.email || "").toLowerCase() === "carlofarinapayme@gmail.com" ? (
+          <Pressable
+            style={styles.adminLink}
+            onPress={() => router.push("/admin")}
+            testID="profile-admin-link"
+          >
+            <Ionicons name="shield-checkmark-outline" size={14} color={colors.muted} />
+            <Text style={styles.adminLinkTxt}>PANNELLO ADMIN</Text>
+          </Pressable>
+        ) : null}
       </ScrollView>
 
       <PrefsModal

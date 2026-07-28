@@ -150,15 +150,174 @@ export default function AdminScreen() {
     };
   }, [userEmail]);
 
-  // Persist the snapshot to a JSON file the user can save/share.
-  // Web: triggers a browser download via a hidden <a>. Native: writes
-  // to app cache and opens the OS share sheet.
+  // Build a mobile-friendly HTML report from the raw snapshot. HTML
+  // opens in any browser (including on iPhone/Android without extra
+  // apps), stays readable, and includes tables the user can scroll
+  // through without needing a JSON viewer.
+  const buildHtmlReport = useCallback((snap: any): string => {
+    const esc = (s: any) => String(s ?? "").replace(/[&<>"']/g,
+      (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch] || ch));
+    const fmt = (v: any) => v == null || v === "" ? "—" : typeof v === "number" ? v.toLocaleString("it-IT") : esc(v);
+    const section = (title: string, body: string) =>
+      `<section><h2>${esc(title)}</h2>${body}</section>`;
+    const table = (headers: string[], rows: any[][]) => {
+      const th = headers.map((h) => `<th>${esc(h)}</th>`).join("");
+      const tr = rows.map((r) => `<tr>${r.map((c) => `<td>${fmt(c)}</td>`).join("")}</tr>`).join("");
+      return `<table><thead><tr>${th}</tr></thead><tbody>${tr}</tbody></table>`;
+    };
+    const kv = (obj: Record<string, any>) => table(["Chiave", "Valore"], Object.entries(obj || {}));
+
+    const a = snap?.analytics || {};
+    const d = snap?.demographics || {};
+    const ov = a.overview || {};
+
+    const sections: string[] = [];
+    sections.push(section("Riepilogo", kv({
+      "Utenti totali": ov.users?.total,
+      "Registrati": ov.users?.registered,
+      "Anonimi": ov.users?.anonymous,
+      "Nuovi (24h)": ov.users?.new_24h,
+      "Nuovi (7g)": ov.users?.new_7d,
+      "Nuovi (30g)": ov.users?.new_30d,
+      "Voti totali": ov.votes?.total,
+      "Voti (24h)": ov.votes?.last_24h,
+      "Voti (7g)": ov.votes?.last_7d,
+      "Voti (30g)": ov.votes?.last_30d,
+      "Commenti totali": ov.comments?.total,
+      "Commenti (24h)": ov.comments?.last_24h,
+      "Commenti (7g)": ov.comments?.last_7d,
+      "DAU": ov.active_users?.dau,
+      "WAU": ov.active_users?.wau,
+      "MAU": ov.active_users?.mau,
+      "WAU/MAU (%)": ov.active_users?.wau_over_mau,
+      "Baseline reset": ov.baseline_at,
+    })));
+
+    if (a.retention?.cohorts?.length) {
+      sections.push(section("Retention per coorte settimanale", table(
+        ["Coorte", "Utenti", "W1", "W2", "W4"],
+        a.retention.cohorts.map((c: any) => [c.cohort, c.size, c.w1_pct, c.w2_pct, c.w4_pct]),
+      )));
+    }
+    if (a.deep_action_rate) {
+      sections.push(section("Azione profonda (7g)", kv({
+        "Utenti attivi": a.deep_action_rate.active_users,
+        "Con almeno un voto": a.deep_action_rate.with_vote_pct,
+        "Con almeno un commento": a.deep_action_rate.with_comment_pct,
+      })));
+    }
+    if (a.top_feuds_24h?.top?.length) {
+      sections.push(section("Top faide (voti prime 24h)", table(
+        ["Categoria", "Titolo", "Voti 24h"],
+        a.top_feuds_24h.top.map((f: any) => [f.category_label, f.title, f.votes_first_24h]),
+      )));
+    }
+    if (Array.isArray(a.categories) && a.categories.length) {
+      sections.push(section("Categorie", table(
+        ["Categoria", "Voti", "Commenti", "Views", "Utenti attivi"],
+        a.categories.map((c: any) => [c.category, c.votes, c.comments, c.views, c.active_users]),
+      )));
+    }
+    if (a.profiles) {
+      const p = a.profiles;
+      sections.push(section("Profili (utenti registrati)", kv({
+        "Totale": p.total,
+        "Con foto (%)": p.with_photo_pct,
+        "Con bio (%)": p.with_bio_pct,
+        "Con display name (%)": p.with_display_name_pct,
+        "Con cerchia (%)": p.with_circle_pct,
+        "Onboarded (%)": p.onboarded_pct,
+        "Push abilitato (%)": p.push_enabled_pct,
+        "Cerchia media": p.avg_circle_size,
+      })));
+      if (p.regions?.length) {
+        sections.push(section("Distribuzione regionale", table(
+          ["Regione", "N", "%"],
+          p.regions.map((r: any) => [r.region, r.count, r.pct]),
+        )));
+      }
+      if (p.ages && Object.keys(p.ages).length) {
+        sections.push(section("Fasce d'età", table(["Fascia", "N"], Object.entries(p.ages))));
+      }
+      if (p.sex && Object.keys(p.sex).length) {
+        sections.push(section("Sesso", table(["Sesso", "N"], Object.entries(p.sex))));
+      }
+      if (p.auth_providers && Object.keys(p.auth_providers).length) {
+        sections.push(section("Provider di autenticazione", table(["Provider", "N"], Object.entries(p.auth_providers))));
+      }
+    }
+    if (a.funnel) {
+      sections.push(section("Funnel (30g)", kv({
+        "Nuovi utenti": a.funnel.new_users,
+        "Con almeno un voto (%)": a.funnel.with_vote_pct,
+        "Con almeno un commento (%)": a.funnel.with_comment_pct,
+      })));
+    }
+    if (d) {
+      sections.push(section("Demografia (legacy)", kv({
+        "Utenti totali": d.total_users,
+        "Onboarded": d.onboarded_users,
+        "Voti totali": d.total_votes,
+      })));
+      if (d.by_region?.length) {
+        sections.push(section("Voti per regione", table(
+          ["Regione", "Voti", "% side A", "% side B"],
+          d.by_region.map((r: any) => [r.region, r.total, r.a_pct, r.b_pct]),
+        )));
+      }
+      if (d.by_sex) {
+        sections.push(section("Voti per sesso", kv(d.by_sex)));
+      }
+      if (d.by_age) {
+        sections.push(section("Voti per età", kv(d.by_age)));
+      }
+    }
+    if (Array.isArray(a.dev_accounts?.emails) && a.dev_accounts.emails.length) {
+      sections.push(section("Account di sviluppo esclusi", table(
+        ["Email"], a.dev_accounts.emails.map((e: string) => [e]),
+      )));
+    }
+
+    const generated = new Date().toLocaleString("it-IT");
+    return `<!doctype html>
+<html lang="it"><head><meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Populus · Report analytics ${esc(generated)}</title>
+<style>
+  :root{color-scheme:light dark}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;margin:0;padding:24px 16px;max-width:900px;margin:0 auto;background:#faf9f6;color:#111}
+  h1{font-size:22px;letter-spacing:2px;margin:0 0 4px}
+  h2{font-size:15px;letter-spacing:2px;margin:24px 0 8px;padding-bottom:6px;border-bottom:2px solid #111;text-transform:uppercase}
+  .meta{color:#666;font-size:13px;margin-bottom:16px}
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  th,td{padding:6px 8px;border-bottom:1px solid #ddd;text-align:left;vertical-align:top}
+  th{background:#111;color:#faf9f6;font-weight:600;font-size:12px;letter-spacing:1px}
+  section{background:#fff;border:1px solid #ddd;padding:12px 16px;margin-bottom:12px}
+  @media (prefers-color-scheme: dark){
+    body{background:#111;color:#faf9f6}
+    section{background:#1a1a1a;border-color:#333}
+    th{background:#faf9f6;color:#111}
+    td{border-color:#333}
+  }
+</style></head>
+<body>
+  <h1>POPULUS · REPORT ANALYTICS</h1>
+  <div class="meta">Generato il ${esc(generated)} · Da: ${esc(snap?.exported_by || "")}${
+      ov.baseline_at ? ` · Baseline: ${esc(new Date(ov.baseline_at).toLocaleString("it-IT"))}` : ""
+    }</div>
+  ${sections.join("\n")}
+</body></html>`;
+  }, []);
+
+  // Persist the snapshot as a mobile-friendly HTML report. Web triggers
+  // a browser download; native writes to cache + opens the share sheet
+  // so the user can save to Files/Photos or send via Airdrop/Drive.
   const downloadSnapshot = useCallback(async (snapshot: any) => {
     const ts = new Date().toISOString().replace(/[:.]/g, "-");
-    const fileName = `populus-analytics-${ts}.json`;
-    const json = JSON.stringify(snapshot, null, 2);
+    const fileName = `populus-analytics-${ts}.html`;
+    const html = buildHtmlReport(snapshot);
     if (Platform.OS === "web") {
-      const blob = new Blob([json], { type: "application/json" });
+      const blob = new Blob([html], { type: "text/html;charset=utf-8" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -170,11 +329,11 @@ export default function AdminScreen() {
       return;
     }
     const path = `${FileSystem.cacheDirectory}${fileName}`;
-    await FileSystem.writeAsStringAsync(path, json, { encoding: FileSystem.EncodingType.UTF8 });
+    await FileSystem.writeAsStringAsync(path, html, { encoding: FileSystem.EncodingType.UTF8 });
     if (await Sharing.isAvailableAsync()) {
-      await Sharing.shareAsync(path, { mimeType: "application/json", dialogTitle: "Salva report analytics" });
+      await Sharing.shareAsync(path, { mimeType: "text/html", dialogTitle: "Salva report analytics" });
     }
-  }, []);
+  }, [buildHtmlReport]);
 
   // Second half of the reset flow: hit the reset endpoint, reload the
   // active tab, then surface any error to the confirmation modal.

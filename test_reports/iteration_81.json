@@ -1,0 +1,29 @@
+{
+  "summary": "Iter 81 fixes fully validated (3/3 features). Backend (6/6 pytest): (1) DB hygiene — 0 anonymous users left with region/sex/age populated (confirmed via direct pymongo query against users collection with auth_provider='anonymous' and region/sex/age $exists+$nin[null,'']). (2) /api/admin/stats aggregate filter — created a fresh anonymous user, force-injected region='Liguria', sex='F', age=42 into their user doc, cast a real vote for a feud, then re-queried /api/admin/stats: by_region['Liguria'], by_sex.F, and by_age['35-44'] counts were IDENTICAL to the before-snapshot (Δ=0). total_users returned by the endpoint remains ≤ registered-only count from DB. Cleanup deleted the test anon user + vote. Frontend (mobile 390x844): (A) Non-owner login as chat_a@test.it → /profile → no [data-testid='profile-admin-link'] element (HIDDEN, correct). (B) Injected owner JWT into localStorage.faide_token (JSON.stringify'd per AsyncStorage web shim) → /profile shows 'PANNELLO ADMIN' link, tap navigates to /admin (confirmed page.url == /admin). Screenshot captured. (C) HTML report download: /admin → key populus-admin-42b8f3 → admin-screen mounts → tap admin-reset → AZZERA → SÌ SCARICA fires a browser download with filename 'populus-analytics-2026-07-28T15-47-06-894Z.html' (NOT .json). File contents (5704 bytes) contain: <!doctype html>, <h2>Riepilogo</h2>, <table>, <th> + <td>, prefers-color-scheme media query for dark mode, viewport width=device-width meta, POPULUS title. All 3 review-request features work as designed.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "react-native-web deprecation", "issue": "Console still emits 'shadow* style props are deprecated. Use boxShadow'. Non-blocking, unchanged from iter 80."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter81_admin_demographics.py",
+    "/app/test_reports/pytest/iter81_admin.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py line 3706-3728: user_match and the aggregation $match both filter auth_provider!='anonymous' AND is_anonymous!=true. Double defense is intentional and correct — an anonymous user that somehow lacks the is_anonymous flag is still excluded by auth_provider, and vice-versa. Good defensive style.",
+    "admin.tsx buildHtmlReport uses server field names 'new_24h', 'last_24h', 'wau_over_mau' which don't match /api/admin/analytics/overview response keys (server returns 'signups_24h', 'votes_24h', 'wau_mau_ratio_pct' — see test_iter78 line 131-140). Report will render '—' for those cells but does not crash. Non-blocking for the iter81 fix scope (download works), but the Riepilogo table shows dashes for most numeric fields, which reduces the mobile-friendly report's usefulness. Consider aligning field names in a follow-up.",
+    "profile.tsx line 1255: `(user?.email || '').toLowerCase() === 'carlofarinapayme@gmail.com'` — the target literal is already lowercase, and toLowerCase() protects against mixed-case entry. Correct."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter81_admin_demographics.py"],
+  "success_rate": {"backend": "100% (6/6)", "frontend": "100% (3/3 features)"},
+  "seed_data_creation": "Test transiently created 1 anonymous user (nickname test_anon81_<ts>) with region/sex/age injected + 1 vote. Both were deleted in the cleanup test. DB is left in the same state as before the run.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "The three iter81 fixes work end-to-end. Owner-only /profile admin link uses lowercased email match against 'carlofarinapayme@gmail.com'. Non-owner path validated with the pre-verified account chat_a@test.it (test_credentials.md). Owner path uses the JWT from test_credentials.md, injected as JSON-stringified value into localStorage.faide_token BEFORE navigation. Download flow now yields populus-analytics-<ts>.html (mobile-friendly, dark-mode aware). NOTE for future work: buildHtmlReport in admin.tsx reads a few overview field names (new_24h, last_24h, wau_over_mau) that don't exist in the /api/admin/analytics/overview payload — the report renders '—' in those cells; consider aligning naming in a follow-up iteration.",
+  "rca_of_issue": "N/A — feature-validation run; no bugs found."
+}

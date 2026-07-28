@@ -3699,7 +3699,11 @@ async def admin_stats(_: bool = Depends(require_admin)):
     # the last reset is invisible so the DEMOGRAFIA tab starts from zero
     # after the developer taps "Azzera".
     baseline = await _analytics._get_baseline(db)
-    user_match: dict = {}
+    # Only registered accounts contribute to demographic stats. Anonymous
+    # users have no email, no location consent, and no reason to appear
+    # in region/sex/age charts — even if some legacy row happens to have
+    # those fields set, we hide them here defensively.
+    user_match: dict = {'auth_provider': {'$ne': 'anonymous'}, 'is_anonymous': {'$ne': True}}
     vote_match: dict = {}
     if baseline is not None:
         user_match["created_at"] = {"$gte": baseline}
@@ -3715,6 +3719,13 @@ async def admin_stats(_: bool = Depends(require_admin)):
     pipeline.extend([
         {'$lookup': {'from': 'users', 'localField': 'user_id', 'foreignField': 'user_id', 'as': 'u'}},
         {'$unwind': {'path': '$u', 'preserveNullAndEmptyArrays': True}},
+        # Drop anonymous voters — they never opt into demographics.
+        {'$match': {
+            '$and': [
+                {'u.auth_provider': {'$ne': 'anonymous'}},
+                {'u.is_anonymous': {'$ne': True}},
+            ]
+        }},
         {'$project': {
             '_id': 0,
             'side': 1, 'feud_id': 1,
