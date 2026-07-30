@@ -18,6 +18,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
+import * as Clipboard from "expo-clipboard";
 import * as FileSystem from "expo-file-system/legacy";
 import { api, ChatMessage, MiniUser } from "@/src/api";
 import { useAuth } from "@/src/auth/AuthContext";
@@ -423,6 +424,28 @@ export default function ChatScreen() {
     }
   }, []);
 
+  // Copy a message body to the OS clipboard. Called from the long-press
+  // action sheet — the "COPIA MESSAGGIO" button is offered on both my own
+  // and the other user's messages, but only when the message actually
+  // contains text (image-only bubbles hide the option).
+  const copyMessage = useCallback(async (m: ChatMessage) => {
+    setReactTarget(null);
+    const body = (m.text || "").trim();
+    if (!body) return;
+    try {
+      await Clipboard.setStringAsync(body);
+      // Light non-blocking feedback. On web, Alert.alert falls back to
+      // window.alert which is disruptive — the ephemeral toast on RN is
+      // enough on native, we simply no-op on web to avoid a popup for
+      // such a trivial success.
+      if (Platform.OS !== "web") {
+        Alert.alert("Copiato", "Testo copiato negli appunti.");
+      }
+    } catch {
+      Alert.alert("Errore", "Impossibile copiare il testo");
+    }
+  }, []);
+
   const deleteMessage = useCallback((m: ChatMessage) => {
     setReactTarget(null);
     // Alert.alert with a destructive button is unreliable on RN-Web (some
@@ -520,14 +543,11 @@ export default function ChatScreen() {
       };
       const handleLongPress = () => {
         if (bubbleDeleted) return;
-        // Long-press ANYWHERE on the bubble triggers the appropriate action:
-        //   • my own messages      → open the delete-confirmation modal
-        //   • messages from others → open the emoji-reactions sheet
-        if (mine) {
-          deleteMessage(bubbleItem);
-        } else {
-          setReactTarget(item);
-        }
+        // Long-press ANYWHERE on the bubble opens the action sheet.
+        // The sheet content is contextual to who sent the message:
+        //   • my own messages      → "Copia messaggio" + "Elimina messaggio"
+        //   • messages from others → emoji reactions + "Copia messaggio"
+        setReactTarget(item);
       };
       return (
         <View>
@@ -551,7 +571,10 @@ export default function ChatScreen() {
               ]}
             >
               {item.deleted ? (
-                <Text style={[styles.txt, mine ? styles.txtMine : styles.txtTheirs, styles.txtItalic]}>
+                <Text
+                  selectable={false}
+                  style={[styles.txt, mine ? styles.txtMine : styles.txtTheirs, styles.txtItalic]}
+                >
                   Messaggio eliminato
                 </Text>
               ) : (
@@ -660,7 +683,12 @@ export default function ChatScreen() {
                     />
                   ) : null}
                   {item.text ? (
-                    <Text style={[styles.txt, mine ? styles.txtMine : styles.txtTheirs]}>{item.text}</Text>
+                    <Text
+                      selectable={false}
+                      style={[styles.txt, mine ? styles.txtMine : styles.txtTheirs]}
+                    >
+                      {item.text}
+                    </Text>
                   ) : null}
                 </>
               )}
@@ -855,29 +883,44 @@ export default function ChatScreen() {
         </View>
       </KeyboardAvoidingView>
 
-      {/* Reaction sheet */}
+      {/* Long-press action sheet — content depends on who sent the message:
+          • Mine   → "Copia messaggio" (if text) + "Elimina messaggio" (danger)
+          • Theirs → Emoji reactions + "Copia messaggio" (if text) */}
       <Modal visible={!!reactTarget} transparent animationType="fade" onRequestClose={() => setReactTarget(null)}>
         <Pressable style={styles.modalBg} onPress={() => setReactTarget(null)}>
-          <View style={styles.reactSheet}>
-            <View style={styles.reactRow}>
-              {REACTIONS.map((e) => (
-                <Pressable
-                  key={e}
-                  onPress={() => reactTarget && react(reactTarget.message_id, e)}
-                  style={styles.reactBtn}
-                >
-                  <Text style={{ fontSize: 26 }}>{e}</Text>
-                </Pressable>
-              ))}
-            </View>
+          <Pressable style={styles.reactSheet} onPress={() => { /* swallow */ }}>
+            {reactTarget && reactTarget.sender_id !== user.user_id && (
+              <View style={styles.reactRow}>
+                {REACTIONS.map((e) => (
+                  <Pressable
+                    key={e}
+                    onPress={() => reactTarget && react(reactTarget.message_id, e)}
+                    style={styles.reactBtn}
+                  >
+                    <Text style={{ fontSize: 26 }}>{e}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            )}
+            {reactTarget && !!(reactTarget.text && reactTarget.text.trim()) && (
+              <Pressable
+                onPress={() => {
+                  const target = reactTarget;
+                  if (target) copyMessage(target);
+                }}
+                style={styles.reactAction}
+                testID="react-sheet-copy"
+              >
+                <Ionicons name="copy-outline" size={18} color={colors.onSurface} />
+                <Text style={{ color: colors.onSurface, letterSpacing: 1 }}>COPIA MESSAGGIO</Text>
+              </Pressable>
+            )}
             {reactTarget?.sender_id === user.user_id && (
               <Pressable
                 onPress={() => {
                   // Close the reactions sheet BEFORE opening the confirm
                   // modal — otherwise the confirm dialog is stacked
-                  // underneath the reactions sheet and the user never
-                  // sees the "conferma / annulla" prompt (the bug the
-                  // user reported: delete option seemed to do nothing).
+                  // underneath the reactions sheet.
                   const target = reactTarget;
                   setReactTarget(null);
                   setTimeout(() => target && deleteMessage(target), 40);
@@ -889,7 +932,7 @@ export default function ChatScreen() {
                 <Text style={{ color: colors.error, letterSpacing: 1 }}>ELIMINA MESSAGGIO</Text>
               </Pressable>
             )}
-          </View>
+          </Pressable>
         </Pressable>
       </Modal>
 
@@ -1080,7 +1123,15 @@ const styles = StyleSheet.create({
   bubbleMine: { backgroundColor: colors.brandPrimary, borderBottomRightRadius: 4 },
   bubbleTheirs: { backgroundColor: colors.surfaceSecondary, borderBottomLeftRadius: 4, borderWidth: 1, borderColor: colors.surfaceTertiary },
   bubbleDeleted: { opacity: 0.6 },
-  txt: { fontSize: font.sizes.base, lineHeight: 20 },
+  txt: {
+    fontSize: font.sizes.base,
+    lineHeight: 20,
+    // Disable native text selection so long-press on the bubble is always
+    // captured by the parent Pressable (long-press = delete/react) instead
+    // of triggering the platform text-selection UI. Users can still copy
+    // the message via the explicit "COPIA MESSAGGIO" action in the sheet.
+    ...(Platform.OS === "web" ? ({ userSelect: "none", WebkitUserSelect: "none", cursor: "default" } as any) : {}),
+  },
   txtMine: { color: colors.onBrandPrimary },
   txtTheirs: { color: colors.onSurface },
   txtItalic: { fontStyle: "italic" },

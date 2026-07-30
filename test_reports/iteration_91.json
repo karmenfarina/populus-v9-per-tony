@@ -1,0 +1,41 @@
+{
+  "summary": "Frontend-only test approfondito della nuova UX action-sheet chat con 'Copia messaggio' in /(tabs)/messages/[userId].tsx. Tutti i 24 sotto-controlli PASS (100%). Login via workaround JWT (POST /api/auth/login → localStorage['faide_token']=JSON.stringify(token)). Seed via POST /api/messages/send: 1 testo lungo mio, 1 testo altrui, 1 immagine mia, 1 immagine altrui. Verificato: (A) long-press SUL TESTO del bubble apre SEMPRE il react sheet — window.getSelection().toString() rimane VUOTO (nessuna selezione blu/handle su web); (B) sheet proprio-testo mostra SOLO 'react-sheet-copy' + 'react-sheet-delete' (nessuna riga emoji) — tap COPIA copia esattamente il testo lungo in navigator.clipboard (verificato via readText) e chiude la sheet, tap ELIMINA apre confirm modal 'Elimina messaggio' → CONFERMA marca il bubble come 'Messaggio eliminato'; (C) sheet propria-immagine (senza testo) mostra SOLO 'ELIMINA MESSAGGIO' — niente COPIA, niente emoji; (D) sheet altrui-testo mostra tutte le 8 emoji (❤️😂😮😢😡👍👎🔥) + 'COPIA MESSAGGIO', NESSUN 'ELIMINA' — tap su ❤️ chiude la sheet e applica la reazione (verificato via GET /api/messages/with → reactions={user_A: '❤️'}); tap COPIA copia il testo dell'altro in clipboard; (E) sheet altrui-immagine mostra SOLO le 8 emoji, niente COPIA né ELIMINA; (F) tap semplice testo = no-op (né viewer né sheet), tap semplice immagine = apre viewer full-screen; (G) invio nuovo messaggio → messaggio appare in basso, lista non balza in cima (y=638 su viewport 844, atBottom=true). expo-clipboard funziona correttamente su web via Clipboard.setStringAsync. Nessuna regressione, nessun popup 'Copiato' fastidioso su web (comportamento silent voluto). Il Pressable interno alla reactSheet ferma correttamente la propagazione al backdrop (verificato durante i test: la sheet non si chiudeva accidentalmente su tap all'interno).",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/tmp/A_own_text.png",
+    "/tmp/C_own_img.png",
+    "/tmp/D_other_text.png",
+    "/tmp/E_other_img.png",
+    "/tmp/emoji_test.png",
+    "/tmp/final.png"
+  ],
+  "action_items": [
+    "Nessuna correzione richiesta. La nuova UX action-sheet chat con 'Copia messaggio' (expo-clipboard) e la disabilitazione della selezione testo su web funzionano esattamente come da specifica.",
+    "OSSERVAZIONE (non-blocking): il file [userId].tsx ora è ~1419 righe. Considerare split in Bubble/ReactSheet/ConfirmModal/ImageViewer per manutenibilità (nota già segnalata in iter88 e iter90)."
+  ],
+  "critical_code_review_comments": [
+    "L21: import corretto `import * as Clipboard from 'expo-clipboard'` — pacchetto attivo, non deprecato.",
+    "L30 REACTIONS: array esatto ['❤️','😂','😮','😢','😡','👍','👎','🔥'] — matcha specifica.",
+    "L431-447 copyMessage: `Clipboard.setStringAsync(body)` + Alert solo su nativo (`Platform.OS !== 'web'`) → esattamente il comportamento richiesto (silent su web). Try/catch corretto con fallback Alert 'Errore'.",
+    "L575, 687 Text `selectable={false}` esplicito + stile txt L1133 aggiunge `userSelect:'none', WebkitUserSelect:'none', cursor:'default'` su web via Platform check — la selezione browser è completamente disabilitata, come verificato in runtime (window.getSelection().toString() vuoto).",
+    "L544-551 handleLongPress: NON esegue più deleteMessage direttamente — apre solo la sheet via setReactTarget(item). La logica contestuale mine/theirs è ora nella sheet stessa (L892-934).",
+    "L889-937 Modal reactSheet: outer Pressable (backdrop) → close, inner Pressable con onPress noop swallow — pattern corretto per evitare chiusura accidentale su tap sheet interno.",
+    "L892-904 riga emoji visibile SOLO se `reactTarget.sender_id !== user.user_id` ✓",
+    "L905-917 'react-sheet-copy' visibile SOLO se `reactTarget.text && reactTarget.text.trim()` ✓ (nasconde per immagini pure)",
+    "L918-934 'react-sheet-delete' visibile SOLO se `reactTarget.sender_id === user.user_id` ✓",
+    "L926 usa setTimeout 40ms per aprire il confirm modal DOPO la chiusura della react sheet — pattern robusto per evitare stacking di modali."
+  ],
+  "updated_files": [],
+  "success_rate": { "backend": "n/a (solo test frontend richiesto)", "frontend": "100% (24/24 controlli)" },
+  "seed_data_creation": "Login via POST /api/auth/login (User A: chat_a@test.it, User B: chat_b@test.it — token JWT restituito). 4 messaggi seedati via POST /api/messages/send: (1) mio testo lungo 'LT_<ts> Questo è un test molto lungo…' A→B; (2) testo altrui 'OTHER_MSG_<ts>' B→A; (3) mia immagine JPEG 1x1 base64; (4) immagine altrui JPEG 1x1 base64. Autenticazione UI: localStorage.setItem('faide_token', JSON.stringify(token)) prima di navigare a /messages/<user_b_id>. context.grant_permissions(['clipboard-read','clipboard-write']) su origine per abilitare navigator.clipboard.readText nel test.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "testID rilevanti per action sheet chat: react-sheet-copy, react-sheet-delete, confirm-ok, confirm-cancel, msg-bubble-<id>, msg-image-<id>, chat-screen, chat-input, chat-send, viewer-close. Per long-press affidabile su web usa page.mouse.move+down+wait(600ms)+up (delayLongPress=350 nel codice). Per cliccare un emoji della sheet: enumera document.querySelectorAll('*'), filtra per el.children.length===0 && el.textContent==='❤️', prendi il primo con bounding rect visibile (0<=top<innerHeight), poi page.mouse.click al centro. La sheet ha padding esteso quindi anche cliccare direttamente sul carattere emoji funziona (evento bubbling al Pressable parent). Copia clipboard verificabile su web via context.grant_permissions(['clipboard-read','clipboard-write']) + await navigator.clipboard.readText().",
+  "rca_of_issue": "N/A — verifica di nuova UX con clipboard e sheet contestuale; nessun bug da RCA."
+}
