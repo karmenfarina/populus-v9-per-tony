@@ -938,11 +938,21 @@ export default function Profile() {
             badgeUnlocked && badgeType === "bastian_contrario" && { backgroundColor: colors.brandPrimary },
             badgeUnlocked && badgeType === "buon_senso" && { backgroundColor: colors.brandSecondary },
           ]}>
-            <Ionicons
-              name={badgeUnlocked ? (badgeType === "bastian_contrario" ? "flash" : "shield-checkmark") : "lock-closed"}
-              size={64}
-              color={badgeUnlocked && badgeType === "buon_senso" ? colors.onBrandSecondary : colors.onBrandPrimary}
-            />
+            {badgeUnlocked ? (
+              // Emoji-based badge art — matches the visual language used
+              // in the full category badge shelf (`CategoryBadgesModal`).
+              // ⚖️ = "Buon Senso" (harmony with majority),
+              // 🎭 = "Bastian Contrario" (drama, opposition).
+              <Text style={styles.badgeEmoji}>
+                {badgeType === "bastian_contrario" ? "🎭" : "⚖️"}
+              </Text>
+            ) : (
+              <Ionicons
+                name="lock-closed"
+                size={64}
+                color={colors.muted}
+              />
+            )}
           </View>
           <Text style={styles.badgeTitle}>
             {badgeUnlocked
@@ -1474,6 +1484,17 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surfaceTertiary,
     alignItems: "center",
     justifyContent: "center",
+  },
+  badgeEmoji: {
+    // Large emoji rendered as the primary badge art, matching the tier
+    // cards in `CategoryBadgesModal.tierEmoji` in scale and presence.
+    fontSize: 82,
+    lineHeight: 96,
+    textAlign: "center",
+    // slight text shadow so a coloured background makes the glyph pop
+    textShadowColor: "rgba(0,0,0,0.35)",
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 4,
   },
   badgeTitle: { fontSize: font.sizes.xxl, letterSpacing: 1.5, fontWeight: "800", color: colors.onSurface, marginTop: spacing.md },
   badgeSubtitle: { fontSize: font.sizes.base, color: colors.muted, marginTop: spacing.xs },

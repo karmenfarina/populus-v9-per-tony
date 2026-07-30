@@ -1,0 +1,59 @@
+{
+  "summary": "Verificate le 5 rifiniture visive richieste su Populus (frontend-only, viewport mobile 390x844). Login effettuato via injection JWT su localStorage (chiave 'faide_token' con valore JSON-stringified, coerente con storage.secureSet su web). Tutte le rifiniture superano il test.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "verifications": {
+    "A_logo_dark_bg": {
+      "status": "PASS",
+      "evidence": "PIL conferma sfondo icon-dark.png a RGB (6,6,6) = #060606 (914634 pixel). Screenshot login (A_login_screen.png): il logo bilancia grande NON mostra alcun riquadro grigio evidente contro lo sfondo app #0A0A0A. Sull'header home l'icona piccola accanto a POPULUS appare pulita (C1_stories_expanded_home.png)."
+    },
+    "B_comments_tabs_no_strip": {
+      "status": "PASS",
+      "evidence": "Aperto feud_bb3b9e28d8f5. Tab 'PRO CARLO NORDIO' attivo (D2_comments_tab_a_active.png): fondo rosso brand, tab B dimmato scuro-giallo, NESSUNA striscia bianca alla base. Idem per tab 'PRO OPPOSIZIONE' attivo (D3_comments_tab_b_active.png). I due <View style={commentsTabIndicator}> risultano rimossi in feud/[id].tsx (lo style residuo alla riga 1147 è unused, cosmetic-only)."
+    },
+    "C_stories_bar_compact": {
+      "status": "PASS",
+      "evidence": "Vista ESPANSA (C1_stories_expanded_home.png): sopra i cerchi delle storie NON compare alcuna scritta 'Storie'/'Nuove storie'; è visibile solo un piccolo chevron-up allineato a destra (testID stories-bar-collapse-btn). Vista COLLASSATA (C2_stories_collapsed.png): pillola compatta con icona albums + testo 'Storie' + chevron-down — comportamento invariato come richiesto. Riespansione via tap sulla pillola OK."
+    },
+    "D_badges_emoji": {
+      "status": "PASS",
+      "evidence": "In /user/user_13f93cbd1ea9 (@carlofarina, badge buon_senso sbloccato) la card mostra ⚖️ nel cerchio giallo 52x52 con fontSize 30px (D2_zoom_badge.png, DOM check confermato). In /profile (admin JWT iniettato) la spilla grande 140x140 mostra ⚖️ a fontSize 82px (D4_admin_profile_badge_large.png, DOM check confermato). Con chat_a (badge locked) resta il lucchetto (D1_profile.png) — invariato."
+    },
+    "E_headers_white": {
+      "status": "PASS",
+      "evidence": "Screenshot E1_notifications.png 'NOTIFICHE', E2_messages.png 'MESSAGGI', E3_support.png 'ASSISTENZA', E4_top.png 'TOP' — tutti in bianco (colors.onSurface). Nessuno giallo. Le rispettive style keys (brand/headerTitle/title) confermate a colors.onSurface via grep."
+    }
+  },
+  "test_report_links": [
+    "/app/test_reports/screenshots_iter96/A_login_screen.png",
+    "/app/test_reports/screenshots_iter96/C1_stories_expanded_home.png",
+    "/app/test_reports/screenshots_iter96/C2_stories_collapsed.png",
+    "/app/test_reports/screenshots_iter96/D2_comments_tab_a_active.png",
+    "/app/test_reports/screenshots_iter96/D3_comments_tab_b_active.png",
+    "/app/test_reports/screenshots_iter96/D2_zoom_badge.png",
+    "/app/test_reports/screenshots_iter96/D4_admin_profile_badge_large.png",
+    "/app/test_reports/screenshots_iter96/E1_notifications.png",
+    "/app/test_reports/screenshots_iter96/E2_messages.png",
+    "/app/test_reports/screenshots_iter96/E3_support.png",
+    "/app/test_reports/screenshots_iter96/E4_top.png"
+  ],
+  "action_items": [
+    "Nessun action item bloccante. Opzionale: rimuovere lo style orfano 'commentsTabIndicator' a feud/[id].tsx:1147 (non più referenziato dopo la modifica)."
+  ],
+  "critical_code_review_comments": [
+    "feud/[id].tsx conta 1162 righe — supera la soglia di 700; potrebbe essere frazionato in sotto-componenti (comments panel, vote bar, sources) per manutenibilità.",
+    "profile.tsx e user/[id].tsx duplicano la logica di render badge (⚖️/🎭 + colori brandSecondary/brandPrimary). Estrarre un componente <ProfileBadge type={} size={} /> ridurrebbe drift futuro."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (not tested)", "frontend": "100% (5/5 rifiniture)"},
+  "seed_data_creation": "Nessun seed creato. Login tramite JWT del backend iniettato in localStorage (chiave faide_token) — bypass della UI di login (che usa Firebase Auth su cui gli account chat_a/chat_b non sono registrati).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Il frontend Populus usa Firebase Auth per login email+password: gli account seed chat_a@test.it/chat_b@test.it (verificati email a livello backend Mongo) NON possono loggarsi via UI perché non esistono in Firebase e la UI mostra 'Email o password sbagliata' (mapped da auth/invalid-credential). Per test autenticati usare: (1) requests.post /api/auth/login → ottenere JWT → page.evaluate(localStorage.setItem('faide_token', JSON.stringify(token))) → navigate. (2) In alternativa il JWT pre-baked admin in /app/memory/test_credentials.md funziona finché non scade.",
+  "rca_of_issue": "N/A - solo verifica rifiniture visive; nessun bug riscontrato."
+}

@@ -288,7 +288,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.lg,
   },
-  headerTitle: { color: colors.brandSecondary, fontSize: font.sizes.xxxl, letterSpacing: 1.5, fontWeight: "800" },
+  headerTitle: { color: colors.onSurface, fontSize: font.sizes.xxxl, letterSpacing: 1.5, fontWeight: "800" },
   headerStatus: { flexDirection: "row", alignItems: "center", gap: 6 },
   headerStatusTxt: { color: colors.muted, fontSize: font.sizes.xs, letterSpacing: 0.5, fontWeight: "600" },
   dot: { width: 8, height: 8, borderRadius: 4 },

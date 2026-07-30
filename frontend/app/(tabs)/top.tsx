@@ -155,7 +155,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.lg,
     backgroundColor: colors.surfaceInverse,
   },
-  title: { color: colors.brandSecondary, fontSize: font.sizes.xxxl, letterSpacing: 1.5, fontWeight: "800" },
+  title: { color: colors.onSurface, fontSize: font.sizes.xxxl, letterSpacing: 1.5, fontWeight: "800" },
   subtitle: { color: colors.muted, fontSize: font.sizes.sm, letterSpacing: 0.5, marginTop: 4, fontWeight: "600" },
   centerBox: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.xl, gap: spacing.md },
   lockCircle: {

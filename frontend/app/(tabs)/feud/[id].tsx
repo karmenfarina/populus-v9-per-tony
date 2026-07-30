@@ -683,7 +683,6 @@ export default function FeudDetail() {
               <Text style={styles.commentsTabLabel} numberOfLines={1}>
                 PRO {feud.party_a.toUpperCase()}
               </Text>
-              {activeSide === "A" && <View style={styles.commentsTabIndicator} />}
             </Pressable>
             <Pressable
               onPress={() => setActiveSide((s) => (s === "B" ? null : "B"))}
@@ -698,7 +697,6 @@ export default function FeudDetail() {
               <Text style={[styles.commentsTabLabel, { color: colors.onBrandSecondary }]} numberOfLines={1}>
                 PRO {feud.party_b.toUpperCase()}
               </Text>
-              {activeSide === "B" && <View style={[styles.commentsTabIndicator, { backgroundColor: colors.onBrandSecondary }]} />}
             </Pressable>
           </View>
 

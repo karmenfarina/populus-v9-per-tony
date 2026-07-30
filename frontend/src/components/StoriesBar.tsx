@@ -263,21 +263,18 @@ export default function StoriesBar() {
   // ------------------------------------------------------------------
   return (
     <View style={styles.container} testID="stories-bar">
+      {/* Compact collapse button — no more "Storie" text label so the bar
+          takes less vertical space when expanded. The chevron alone
+          (aligned right) still gives the user a clear tap-target to
+          collapse the strip. */}
       <Pressable
         onPress={toggleCollapsed}
         style={styles.expandedHeader}
         testID="stories-bar-collapse-btn"
         accessibilityRole="button"
         accessibilityLabel="Nascondi storie"
+        hitSlop={8}
       >
-        <Text
-          style={[
-            styles.expandedHeaderLabel,
-            hasUnseen && styles.expandedHeaderLabelHighlight,
-          ]}
-        >
-          {hasUnseen ? "Nuove storie" : "Storie"}
-        </Text>
         <Ionicons name="chevron-up" size={16} color={colors.muted} />
       </Pressable>
       <ScrollView
@@ -448,9 +445,10 @@ const styles = StyleSheet.create({
   expandedHeader: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
+    justifyContent: "flex-end",
     paddingHorizontal: spacing.md,
-    paddingBottom: 6,
+    paddingBottom: 2,
+    paddingTop: 2,
   },
   expandedHeaderLabel: {
     color: colors.muted,

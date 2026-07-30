@@ -169,7 +169,7 @@ export default function NotificationsScreen() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.surface },
   header: { paddingHorizontal: spacing.lg, paddingVertical: spacing.lg, backgroundColor: colors.surfaceInverse },
-  brand: { color: colors.brandSecondary, fontSize: font.sizes.xxxl, letterSpacing: 1.5, fontWeight: "800" },
+  brand: { color: colors.onSurface, fontSize: font.sizes.xxxl, letterSpacing: 1.5, fontWeight: "800" },
   subtitle: { color: colors.muted, fontSize: font.sizes.sm, letterSpacing: 0.5, marginTop: 4, fontWeight: "600" },
   list: { padding: spacing.md, paddingBottom: spacing.xxxl, gap: spacing.sm },
   sep: { height: spacing.sm },

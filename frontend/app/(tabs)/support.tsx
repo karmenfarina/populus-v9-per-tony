@@ -328,7 +328,7 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.surface },
   headerBar: { flexDirection: "row", alignItems: "center", gap: spacing.md, paddingHorizontal: spacing.lg, paddingVertical: spacing.md, backgroundColor: colors.surfaceInverse },
   backBtn: { width: 44, height: 44, borderWidth: 1.5, borderColor: colors.brandSecondary, borderRadius: radius.md, alignItems: "center", justifyContent: "center" },
-  title: { color: colors.brandSecondary, fontSize: font.sizes.xxxl, letterSpacing: 1.5, fontWeight: "800" },
+  title: { color: colors.onSurface, fontSize: font.sizes.xxxl, letterSpacing: 1.5, fontWeight: "800" },
   subtitle: { color: colors.muted, fontSize: font.sizes.sm, letterSpacing: 0.3, marginTop: 4, fontWeight: "600" },
   content: { padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxxl },
   label: { color: colors.onSurface, fontSize: font.sizes.lg, letterSpacing: 0.3, fontWeight: "700", marginTop: spacing.sm },

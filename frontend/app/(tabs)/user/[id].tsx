@@ -511,11 +511,9 @@ export default function UserPublicScreen() {
                   badgeType === "bastian_contrario" ? styles.badgeIconRed : styles.badgeIconYellow,
                 ]}
               >
-                <Ionicons
-                  name={badgeType === "bastian_contrario" ? "flash" : "shield-checkmark"}
-                  size={26}
-                  color={badgeType === "bastian_contrario" ? colors.onBrandPrimary : colors.onBrandSecondary}
-                />
+                <Text style={styles.badgeEmoji}>
+                  {badgeType === "bastian_contrario" ? "🎭" : "⚖️"}
+                </Text>
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.badgeKicker}>SPILLA · TOCCA PER LE ALTRE</Text>
@@ -903,9 +901,17 @@ const styles = StyleSheet.create({
   badgeCard: { flexDirection: "row", alignItems: "center", gap: spacing.sm, padding: spacing.md, borderWidth: 2, borderColor: colors.border, marginTop: spacing.sm },
   badgeCardRed: { backgroundColor: colors.brandPrimary },
   badgeCardYellow: { backgroundColor: colors.brandSecondary },
-  badgeIconWrap: { width: 52, height: 52, borderWidth: 2, borderColor: colors.border, alignItems: "center", justifyContent: "center" },
+  badgeIconWrap: { width: 52, height: 52, borderWidth: 2, borderColor: colors.border, alignItems: "center", justifyContent: "center", borderRadius: radius.md },
   badgeIconRed: { backgroundColor: "#B31700" },
   badgeIconYellow: { backgroundColor: "#D6A800" },
+  badgeEmoji: {
+    fontSize: 30,
+    lineHeight: 36,
+    textAlign: "center",
+    textShadowColor: "rgba(0,0,0,0.35)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+  },
   badgeKicker: { fontSize: font.sizes.xs, letterSpacing: 2, opacity: 0.7, color: colors.onBrandPrimary },
   badgeTitle: { fontSize: font.sizes.lg, fontWeight: "500", letterSpacing: 1.5, marginTop: 2 },
   badgeSubtitle: { fontSize: font.sizes.xs, letterSpacing: 1, opacity: 0.8, marginTop: 2 },
