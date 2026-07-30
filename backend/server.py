@@ -607,15 +607,7 @@ async def _evaluate_and_notify_category_badge_change(user_id: str, feud_id: Opti
             if not f or f.get('category') not in CATEGORY_BADGES:
                 return
             cat = f['category']
-            # Count only the target category — much cheaper than the full aggregate.
-            cnt = await db.comments.count_documents({'user_id': user_id, 'feud_id': feud_id})
-            if cnt == 0:
-                # Fallback: rely on the full aggregate. Shouldn't happen in
-                # the post-comment path but keeps the function safe when
-                # invoked defensively.
-                counts = await _compute_category_comment_counts(user_id)
-            else:
-                counts = await _compute_category_comment_counts(user_id)
+            counts = await _compute_category_comment_counts(user_id)
             target_cats = [cat]
         else:
             counts = await _compute_category_comment_counts(user_id)
