@@ -44,6 +44,15 @@
         "com.google.android.gms.permission.AD_ID"
       ]
     },
+    "androidStatusBar": {
+      "barStyle": "light-content",
+      "translucent": true
+    },
+    "androidNavigationBar": {
+      "barStyle": "light-content",
+      "backgroundColor": "#00000000",
+      "enforceContrast": false
+    },
     "web": {
       "bundler": "metro",
       "output": "single",
@@ -51,14 +60,6 @@
     },
     "plugins": [
       "expo-router",
-      [
-        "expo-navigation-bar",
-        {
-          "position": "absolute",
-          "backgroundColor": "#000000",
-          "buttonStyle": "light"
-        }
-      ],
       [
         "expo-splash-screen",
         {
