@@ -1,0 +1,34 @@
+{
+  "summary": "Frontend-only review of scroll-restore fight-back bug fix in /app/frontend/app/(tabs)/user/[id].tsx and /app/frontend/app/(tabs)/profile.tsx. Code review confirms the fix pattern is correctly applied in both files (attempts=[0,80], userInteractedRef gate, onScrollBeginDrag nulls pendingScrollYRef, safety clear at 350ms). Passive restore regression PASSES on /profile (scroll landed at 1359 vs saved 1400). Passive restore on /user/[id] fell back to 0 in the automated test — root cause is a PRE-EXISTING quirk (historyExpanded state resets to false on remount, collapsing history so max-scroll is tiny) — NOT caused by this fix. The core bug-fix assertion (manual scroll during restore window aborts the restore) could NOT be validated end-to-end via Playwright because RN Web's onScrollBeginDrag is a touch-responder event that mouse/synthetic-event dispatch does not reliably trigger on desktop chromium. Recommend main agent to self-test on a real touch device / mobile emulator. One minor defensive inconsistency found: profile.tsx onContentSizeChange (line 826-836) omits the `if (userInteractedRef.current) return;` guard that user/[id].tsx has at line 392 — functionally still safe because onScrollBeginDrag already nulls pendingScrollYRef, but worth aligning for consistency.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "Scroll restore on /user/[id] after returning from feud detail",
+        "issue": "Passive restore ends at scrollTop=0 in automated test (saved was 351). Root cause: `const [historyExpanded, setHistoryExpanded] = useState(false)` at user/[id].tsx:68 resets on remount, so on back-nav the history body is collapsed and the ScrollView content is too short for the saved offset — scrollTo gets clipped to 0. Not caused by the current fix, but user-visible regression risk if the user expanded history, scrolled deep, tapped a feud and expected to land in the same spot.",
+        "affected_testIDs": ["public-history-section", "public-history-toggle", "public-history-feud_*"]
+      }
+    ],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [
+    "MANUAL / TOUCH-DEVICE TEST REQUIRED: Playwright on desktop chromium cannot reliably fire RN Web's onScrollBeginDrag (touch-only responder). Please self-test the core scenario on a real mobile device or with Chrome DevTools 'Emulate touch' mode: (1) /profile → expand history → scroll to bottom → tap a feud → INDIETRO → within ~50ms drag with finger. (2) Repeat on /user/[id]. Expected: manual drag holds, page does not snap back.",
+    "MINOR CODE CLEANUP: Align profile.tsx onContentSizeChange handler (lines 826-836) with the user/[id].tsx counterpart (line 392) by adding `if (userInteractedRef.current) return;` before the scrollTo(target) call. Defense-in-depth for the (currently impossible) case where onContentSizeChange fires after onScrollBeginDrag but pendingScrollYRef somehow wasn't nulled.",
+    "PRE-EXISTING QUIRK (separate issue, not this fix): On /user/[id], `historyExpanded` local state resets to false on component remount, so scroll restore lands at 0 whenever the saved offset was inside the (now-collapsed) history body. Consider persisting historyExpanded via scrollMemory or a similar module-scoped store, or expanding the history section unconditionally when a restore is armed."
+  ],
+  "critical_code_review_comments": [
+    "Fix implementation in user/[id].tsx (lines 267-303, 378-397) matches the spec exactly: attempts=[0,80], userInteractedRef checked in every deferred scrollTo AND in onContentSizeChange, onScrollBeginDrag sets userInteractedRef=true AND nulls pendingScrollYRef, safety clear at 350ms.",
+    "Fix implementation in profile.tsx (lines 251-286, 808-836) matches the spec BUT is missing the `if (userInteractedRef.current) return;` guard inside onContentSizeChange (line 826). Not a functional bug because onScrollBeginDrag nulls pendingScrollYRef, but the divergence from user/[id].tsx is worth fixing for symmetry and defence-in-depth.",
+    "scrollMemory module (src/utils/scrollMemory.ts) is per-key so multiple user profiles don't cross-contaminate — correct."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (frontend-only review)", "frontend": "Code review: 100% match to spec. Automated regression test on /profile: PASS. Automated regression test on /user/[id]: inconclusive (pre-existing state-reset quirk, not caused by this fix). Core bug-fix behaviour: cannot be automated (touch-only event)."},
+  "seed_data_creation": "None — used existing chat_a@test.it / test123 credentials from /app/memory/test_credentials.md.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "The core assertion of this bug fix — 'manual scroll during the 350ms restore window aborts the restore instead of yanking the user back' — depends on RN Web ScrollView's onScrollBeginDrag firing, which is a touch-responder event. Chromium's synthetic mouse events (page.mouse.down, MouseEvent dispatch) DO NOT trigger it, and dispatching a synthetic TouchEvent via document.createEvent also failed to fire it in my run. To validate end-to-end you need either (a) Chrome DevTools 'Emulate touch' mode with page.touchscreen.tap()/drag(), (b) a real mobile device, or (c) a unit test that mocks the scroll ref and simulates the userInteractedRef flip directly. Code review confirmed the fix logic is correct, and the passive-restore regression on /profile still works. The /user/[id] restore-to-0 artifact I observed is unrelated to this fix (see action items).",
+  "rca_of_issue": "RCA of original bug (already fixed by main agent): the useFocusEffect on /user/[id] scheduled 6 scrollTo calls at 0/60/180/400/800/1200ms after focus. If the user began scrolling manually within that 1.2s window, each subsequent timer overrode their finger and snapped the list back to the memorised offset — appearing as 'page frozen for 1s, cannot scroll'. Mitigation applied: reduced attempts to two ([0, 80ms]), added userInteractedRef guard, made onScrollBeginDrag null pendingScrollYRef, shortened safety-clear from 1400ms to 350ms. Code matches the described mitigation in both files."
+}

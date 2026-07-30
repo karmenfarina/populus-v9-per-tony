@@ -81,6 +81,11 @@ export default function Profile() {
   // during a restoration. Cleared once we've stopped chasing the
   // offset so normal user scrolling isn't fought.
   const pendingScrollYRef = useRef<number | null>(null);
+  // Detects whether the user has manually started dragging the ScrollView
+  // after focus. Any pending scroll-restore timer bails out when this is
+  // true so we don't yank the list back and fight the user (the reported
+  // "can't scroll for 1s after returning to profile" bug).
+  const userInteractedRef = useRef(false);
   const [photos, setPhotos] = useState<UserPhoto[]>([]);
   const [loadingPhotos, setLoadingPhotos] = useState(false);
   const [bio, setBio] = useState<string>("");
@@ -247,19 +252,26 @@ export default function Profile() {
     useCallback(() => {
       const y = scrollMemory.getY(SCROLL_KEY);
       const shouldRestore = scrollMemory.consumeRestore(SCROLL_KEY);
+      // Reset "user has touched the ScrollView" flag on every focus so a
+      // legitimate restore attempt is possible.
+      userInteractedRef.current = false;
       if (shouldRestore && y > 0) {
         pendingScrollYRef2.current = y;
-        const attempts = [0, 60, 180, 400, 800, 1200];
+        // Two lightweight attempts — the old 6-timer scheme (0…1200ms)
+        // kept fighting the user for over a second if they tried to
+        // scroll manually just after returning to the profile.
+        const attempts = [0, 80];
         const timers: any[] = [];
         attempts.forEach((ms) => {
           timers.push(setTimeout(() => {
+            if (userInteractedRef.current) return; // user is dragging, abort
             const target = pendingScrollYRef2.current;
             if (target != null) {
               scrollRef.current?.scrollTo({ y: target, animated: false });
             }
           }, ms));
         });
-        timers.push(setTimeout(() => { pendingScrollYRef2.current = null; }, 1400));
+        timers.push(setTimeout(() => { pendingScrollYRef2.current = null; }, 350));
         return () => { timers.forEach((t) => clearTimeout(t)); };
       }
       // Not restoring → snap to top and reset stored offset so the
@@ -793,6 +805,12 @@ export default function Profile() {
       <ScrollView
         ref={scrollRef}
         contentContainerStyle={styles.content}
+        onScrollBeginDrag={() => {
+          // Manual scroll started — abort any pending restore so we
+          // don't yank the list back and lock scrolling for ~1s.
+          userInteractedRef.current = true;
+          pendingScrollYRef.current = null;
+        }}
         onScroll={(e) => {
           const y = e.nativeEvent.contentOffset.y;
           // Persist to module scope so a component remount during

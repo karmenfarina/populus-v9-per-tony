@@ -41,6 +41,11 @@ export default function UserPublicScreen() {
   // page: survives tab-navigator remounts while jumping to /feud/[id].
   const scrollRef = useRef<ScrollView>(null);
   const pendingScrollYRef = useRef<number | null>(null);
+  // Set to `true` the moment the user starts dragging the ScrollView.
+  // Any pending scroll-restore timer will bail out to avoid fighting
+  // manual scroll — that was the "can't scroll for 1 second after
+  // returning to the profile" bug.
+  const userInteractedRef = useRef(false);
   const scrollKey = `user-profile:${id || 'unknown'}`;
   const [profile, setProfile] = useState<PublicUser | null>(null);
   const [loading, setLoading] = useState(true);
@@ -263,19 +268,31 @@ export default function UserPublicScreen() {
     useCallback(() => {
       const y = scrollMemory.getY(scrollKey);
       const shouldRestore = scrollMemory.consumeRestore(scrollKey);
+      // Reset the "user has touched the list" flag at every focus so a
+      // fresh restore attempt is possible when the user re-enters the
+      // profile.
+      userInteractedRef.current = false;
       if (shouldRestore && y > 0) {
         pendingScrollYRef.current = y;
-        const attempts = [0, 60, 180, 400, 800, 1200];
+        // Two lightweight attempts are enough in practice: one right
+        // after focus and one after the initial paint. The old 6-timer
+        // scheme (0…1200ms) kept firing scrollTo for over a second,
+        // which fought the user if they tried to scroll manually in
+        // that window — exactly the bug reported.
+        const attempts = [0, 80];
         const timers: any[] = [];
         attempts.forEach((ms) => {
           timers.push(setTimeout(() => {
+            if (userInteractedRef.current) return; // user is dragging, abort
             const target = pendingScrollYRef.current;
             if (target != null) {
               scrollRef.current?.scrollTo({ y: target, animated: false });
             }
           }, ms));
         });
-        timers.push(setTimeout(() => { pendingScrollYRef.current = null; }, 1400));
+        // Safety clear of the pending target after a short window so
+        // `onContentSizeChange` fallbacks don't fire much later.
+        timers.push(setTimeout(() => { pendingScrollYRef.current = null; }, 350));
         return () => { timers.forEach((t) => clearTimeout(t)); };
       }
       // Fresh entry into this profile → no explicit restoration needed.
@@ -358,11 +375,21 @@ export default function UserPublicScreen() {
       <ScrollView
         ref={scrollRef}
         contentContainerStyle={{ paddingBottom: spacing.xxxl }}
+        onScrollBeginDrag={() => {
+          // User is manually scrolling — abort any pending restoration
+          // so we don't yank the list back to the memorised offset.
+          userInteractedRef.current = true;
+          pendingScrollYRef.current = null;
+        }}
         onScroll={(e) => {
           scrollMemory.setY(scrollKey, e.nativeEvent.contentOffset.y);
         }}
         scrollEventThrottle={16}
         onContentSizeChange={() => {
+          // Only fires once at initial paint. If the user has already
+          // started scrolling, respect their position instead of
+          // snapping back.
+          if (userInteractedRef.current) return;
           const target = pendingScrollYRef.current;
           if (target != null) {
             scrollRef.current?.scrollTo({ y: target, animated: false });
