@@ -1,0 +1,41 @@
+{
+  "summary": "Test frontend approfondito della nuova UX chat 'solo long-press triggera azioni' in /(tabs)/messages/[userId].tsx. Tutti i 14 casi richiesti sono stati verificati: 12 PASS via runtime Playwright su viewport 375x812, 2 verificati staticamente (caso 4a/immagine e caso 14/shared cards — vedi note). Login effettuato via workaround JWT documentato in iteration_88/89 (POST /api/auth/login → localStorage['faide_token'] = JSON.stringify(token)). Seed: 4 messaggi testo (2 per lato) + 2 immagini (1 per lato) via POST /api/messages/send. Risultati sintetici: (1) tap propria testo → NO-OP ✓  (2) long-press propria testo → confirm modal (icona trash, ANNULLA/CONFERMA) ✓  (3) CONFERMA → 'Messaggio eliminato' ✓  (4a) tap propria immagine → viewer full-screen ✓  (4b) long-press propria immagine → confirm modal ✓  (5) react sheet MAI su propri messaggi (long-press MY_TEXT_2 apre confirm, non emoji) ✓  (7) tap altrui testo → NO-OP ✓  (8) long-press altrui testo → react sheet con TUTTE le 8 emoji ❤️😂😮😢😡👍👎🔥 ✓  (9) long-press altrui immagine → react sheet (non viewer) ✓  (10) tap altrui immagine → viewer full-screen ✓  (11) bubble eliminato: né tap né long-press hanno effetto ✓  (12) scroll dopo invio TEST_SCROLL_… : messaggio appare in basso, lista non balza in cima ✓  (13) layout: own bubbles RGB(255,69,58)=brandPrimary tutti a DESTRA (center 240-292/vw=375), altrui RGB(23,23,23)=surfaceSecondary tutti a SINISTRA (center 84-135), timestamp visibile, divider 'OGGI' presente ✓  (14) msg-story-ref-* / msg-shared-feud-* : ZERO card presenti nella cronologia dei test users → verifica solo statica del codice (handleLongPress + delayLongPress=350 applicati correttamente ai due sotto-Pressable alle righe 580-586 e 615-627). Nessuna regressione rilevata. Il codice hanno `handleTap`/`handleLongPress` snapshottati sul bubbleItem (righe 510-531) — sicuro rispetto al recycling di FlatList.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      { "screen": "messages/[userId] (chat)", "issues": [
+        "Osservazione: il colore 'giallo' descritto nella spec per bubbleMine risulta in realtà rgb(255,69,58) — un rosso/arancio brand (colors.brandPrimary). È coerente con le iterazioni precedenti, non una regressione; segnalato solo per allineare la doc alla realtà del tema attuale."
+      ] }
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/tmp/case2_confirm_modal.png",
+    "/tmp/case4a_viewer.png",
+    "/tmp/case8_react_sheet.png",
+    "/tmp/final_state.png",
+    "/tmp/chat_loaded.png"
+  ],
+  "action_items": [
+    "Nessuna correzione richiesta. La nuova UX (solo long-press ≥350ms triggera azioni, tap su immagine apre viewer) funziona come specificato su tutti i 12 casi runtime testati.",
+    "OPZIONALE: per validare i casi 14 (long-press su msg-story-ref-* e msg-shared-feud-*) in runtime servirebbero seed di messaggi speciali (reply a storia / condivisione di feud). Il codice li supporta correttamente (righe 582 e 624 hanno onLongPress={handleLongPress} delayLongPress={350})."
+  ],
+  "critical_code_review_comments": [
+    "handleTap (L514-520): breve, corretto — early-return su bubbleDeleted, poi solo openViewerForMessage se bubbleImage. Nessuna delete logic.",
+    "handleLongPress (L521-531): gate su bubbleDeleted, poi mine → deleteMessage(bubbleItem) altrimenti setReactTarget(item). Logica chiara.",
+    "Snapshot delle prop del bubble (bubbleItem/bubbleImage/bubbleId/bubbleDeleted, L510-513): protegge dal recycling di FlatList.",
+    "Il file [userId].tsx è cresciuto a 1368 righe — considerare split (Bubble, ReactSheet, ConfirmModal, ImageViewer) per manutenibilità (segnalato già in iter88, non urgente)."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "n/a (solo test frontend richiesto)",
+    "frontend": "100% (12/12 casi runtime + 2/2 casi verificati staticamente per assenza seed)"
+  },
+  "seed_data_creation": "Inviati 4 messaggi testo (2 A→B: MSG_A_TESTO_1/2, 2 B→A: MSG_B_TESTO_1/2) + 2 immagini (1 per lato, jpeg 1x1) tramite POST /api/messages/send. Token utenti recuperati via POST /api/auth/login con credenziali da /app/memory/test_credentials.md. Per il login UI: iniettare token in localStorage['faide_token'] come JSON.stringify(token) prima di navigare alla chat.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Chat testID rilevanti: chat-screen, chat-input, chat-send, msg-bubble-<id>, msg-image-<id>, msg-story-ref-<id>, msg-shared-feud-<id>, confirm-ok, confirm-cancel, react-sheet-delete, viewer-close. Simulare long-press via mouse.down() → wait(500) → mouse.up() (delayLongPress=350 nel codice). Il testo del react sheet contiene tutte le 8 emoji ❤️😂😮😢😡👍👎🔥. Il confirm modal contiene i testi 'Elimina messaggio' + 'CONFERMA'.",
+  "rca_of_issue": "N/A — verifica di UX refactor; nessun bug root-cause richiesto."
+}

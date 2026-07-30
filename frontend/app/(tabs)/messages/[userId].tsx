@@ -513,24 +513,21 @@ export default function ChatScreen() {
       const bubbleDeleted = !!item.deleted;
       const handleTap = () => {
         if (bubbleDeleted) return;
-        // My own messages: any tap on the bubble opens the delete flow
-        // directly. No emoji reactions for own messages — you can't react
-        // to yourself. Image bubbles still open in the viewer via long-press.
-        if (mine) {
-          deleteMessage(bubbleItem);
-          return;
-        }
+        // Simple tap only opens the full-screen image viewer for image
+        // bubbles. All other actions (delete, react) are triggered by
+        // long-press so the user cannot accidentally destroy a message.
         if (bubbleImage) openViewerForMessage(bubbleItem);
       };
       const handleLongPress = () => {
         if (bubbleDeleted) return;
+        // Long-press ANYWHERE on the bubble triggers the appropriate action:
+        //   • my own messages      → open the delete-confirmation modal
+        //   • messages from others → open the emoji-reactions sheet
         if (mine) {
-          // On my own messages, long-press on an image bubble opens the
-          // full-screen viewer (since a normal tap now triggers delete).
-          if (bubbleImage) openViewerForMessage(bubbleItem);
-          return;
+          deleteMessage(bubbleItem);
+        } else {
+          setReactTarget(item);
         }
-        setReactTarget(item);
       };
       return (
         <View>
@@ -582,6 +579,8 @@ export default function ChatScreen() {
                       return (
                         <Pressable
                           onPress={openFeud}
+                          onLongPress={handleLongPress}
+                          delayLongPress={350}
                           disabled={!s.feud_id}
                           style={styles.sharedFeudCard}
                           testID={`msg-story-ref-${bubbleId}`}
@@ -622,6 +621,8 @@ export default function ChatScreen() {
                           messagesUserId: String(userId || ""),
                         },
                       })}
+                      onLongPress={handleLongPress}
+                      delayLongPress={350}
                       style={styles.sharedFeudCard}
                       testID={`msg-shared-feud-${bubbleId}`}
                     >
