@@ -940,25 +940,19 @@ export default function Profile() {
               : styles.badgeIconUnlockedYellow),
           ]}>
             {badgeUnlocked ? (
-              <>
-                {/* Emoji is the primary art. Sits inside a rounded inner
-                    disc so it reads as a proper "coin" no matter the
-                    accent colour of the outer ring. Coherent with the
-                    tier-card look in the full badge shelf. */}
-                <View style={[
-                  styles.badgeInnerDisc,
-                  badgeType === "bastian_contrario" && styles.badgeInnerDiscRed,
-                  badgeType === "buon_senso" && styles.badgeInnerDiscYellow,
-                ]}>
-                  <Text style={styles.badgeEmoji}>
-                    {badgeType === "bastian_contrario" ? "🎭" : "⚖️"}
-                  </Text>
-                </View>
-                {/* Sparkle accents in the corners to give the coin some
-                    life without going full skeuomorphic. */}
-                <Ionicons name="sparkles" size={14} color={colors.onSurface} style={styles.badgeSparkleTL} />
-                <Ionicons name="sparkles" size={12} color={colors.onSurface} style={styles.badgeSparkleBR} />
-              </>
+              // Emoji-based badge art. Sits inside a rounded inner disc
+              // so it reads as a proper "coin" no matter the accent
+              // colour of the outer ring. Coherent with the tier-card
+              // look in the full badge shelf.
+              <View style={[
+                styles.badgeInnerDisc,
+                badgeType === "bastian_contrario" && styles.badgeInnerDiscRed,
+                badgeType === "buon_senso" && styles.badgeInnerDiscYellow,
+              ]}>
+                <Text style={styles.badgeEmoji}>
+                  {badgeType === "bastian_contrario" ? "🎭" : "⚖️"}
+                </Text>
+              </View>
             ) : (
               <Ionicons
                 name="lock-closed"
@@ -1413,6 +1407,8 @@ export default function Profile() {
         visible={badgesOpen}
         userId={user.user_id}
         displayName={user.display_name || user.nickname || undefined}
+        extraTotal={1}
+        extraUnlocked={badgeUnlocked ? 1 : 0}
         onClose={() => setBadgesOpen(false)}
       />
     </SafeAreaView>

@@ -263,20 +263,6 @@ export default function StoriesBar() {
   // ------------------------------------------------------------------
   return (
     <View style={styles.container} testID="stories-bar">
-      {/* Compact collapse button — no more "Storie" text label so the bar
-          takes less vertical space when expanded. The chevron alone
-          (aligned right) still gives the user a clear tap-target to
-          collapse the strip. */}
-      <Pressable
-        onPress={toggleCollapsed}
-        style={styles.expandedHeader}
-        testID="stories-bar-collapse-btn"
-        accessibilityRole="button"
-        accessibilityLabel="Nascondi storie"
-        hitSlop={8}
-      >
-        <Ionicons name="chevron-up" size={16} color={colors.muted} />
-      </Pressable>
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
@@ -402,6 +388,20 @@ export default function StoriesBar() {
           </Pressable>
         ))}
       </ScrollView>
+      {/* Chevron overlay — floats over the top-right corner so the
+          collapse tap-target adds ZERO vertical height to the strip.
+          The container already has enough top padding to avoid clipping
+          against the story circles. */}
+      <Pressable
+        onPress={toggleCollapsed}
+        style={styles.collapseChip}
+        testID="stories-bar-collapse-btn"
+        accessibilityRole="button"
+        accessibilityLabel="Nascondi storie"
+        hitSlop={10}
+      >
+        <Ionicons name="chevron-up" size={14} color={colors.muted} />
+      </Pressable>
 
       {/* Explainer sheet for the "no stories yet" case. Uses a normal
           Modal instead of Alert.alert to avoid the RN-Web edge case
@@ -434,21 +434,30 @@ export default function StoriesBar() {
 
 const styles = StyleSheet.create({
   container: {
-    // Expanded strip. Height derived from padding + circle + label.
-    // Slimmed down after removing the "Storie" label above the circles.
+    // Expanded strip. Height derived purely from the circle + label +
+    // small paddings. The chevron collapse button is absolute-positioned
+    // so it does NOT add any vertical space.
     backgroundColor: colors.surface,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
-    paddingTop: 2,
+    paddingTop: 4,
+    position: "relative",
   },
+  // Legacy header — kept only to preserve stable class ordering if any
+  // downstream style depends on it. Not used in the current layout.
   expandedHeader: {
-    flexDirection: "row",
+    display: "none",
+  },
+  collapseChip: {
+    position: "absolute",
+    top: 2,
+    right: 6,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
     alignItems: "center",
-    justifyContent: "flex-end",
-    paddingHorizontal: spacing.md,
-    paddingBottom: 0,
-    paddingTop: 0,
-    marginBottom: -2,
+    justifyContent: "center",
+    backgroundColor: "transparent",
   },
   expandedHeaderLabel: {
     color: colors.muted,

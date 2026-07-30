@@ -48,6 +48,13 @@ type Props = {
   visible: boolean;
   userId: string;
   displayName?: string;
+  /** Extra badges to add to the modal's total-count display beyond the
+   *  9×3 category grid. Used by the profile screen to include the
+   *  mutually-exclusive alignment badge (Buon Senso ⚖️ / Bastian
+   *  Contrario 🎭) so the "sbloccate" ratio reads correctly (e.g. 1/28
+   *  instead of the raw 27 grid count). */
+  extraTotal?: number;
+  extraUnlocked?: number;
   onClose: () => void;
 };
 
@@ -65,7 +72,7 @@ const CATEGORY_LABEL: Record<string, string> = {
   tech: "Tech",
 };
 
-export default function CategoryBadgesModal({ visible, userId, displayName, onClose }: Props) {
+export default function CategoryBadgesModal({ visible, userId, displayName, extraTotal = 0, extraUnlocked = 0, onClose }: Props) {
   const { user } = useAuth();
   const isOwnShelf = !!user && user.user_id === userId;
   const [loading, setLoading] = useState(false);
@@ -161,8 +168,11 @@ export default function CategoryBadgesModal({ visible, userId, displayName, onCl
 
   // Precompute totals for the header stat strip so users get an
   // at-a-glance sense of their progress before scrolling the grid.
-  const unlockedCount = badges.reduce((acc, cat) => acc + cat.tiers.filter((t) => t.unlocked).length, 0);
-  const totalCount = badges.reduce((acc, cat) => acc + cat.tiers.length, 0);
+  // `extra*` account for the profile-level alignment badge (Buon Senso /
+  // Bastian Contrario) which lives outside this grid but should still
+  // be counted in the "sbloccate" ratio the user reads at the top.
+  const unlockedCount = badges.reduce((acc, cat) => acc + cat.tiers.filter((t) => t.unlocked).length, 0) + Math.max(0, extraUnlocked);
+  const totalCount = badges.reduce((acc, cat) => acc + cat.tiers.length, 0) + Math.max(0, extraTotal);
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>

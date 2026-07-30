@@ -104,7 +104,7 @@ export default function EditProfileModal(props: EditProfileModalProps) {
           <View style={styles.modalHead}>
             <Text style={styles.modalTitle}>MODIFICA PROFILO</Text>
             <Pressable onPress={onClose} testID="profile-edit-close" hitSlop={10}>
-              <Ionicons name="close" size={26} color={colors.onSurfaceInverse} />
+              <Ionicons name="close" size={26} color={colors.onSurface} />
             </Pressable>
           </View>
           <KeyboardAvoidingView
@@ -332,12 +332,29 @@ const styles = StyleSheet.create({
   modalBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
   modalSheet: { backgroundColor: colors.surface, borderTopWidth: 2, borderColor: colors.border, maxHeight: "85%" },
   modalSheetTall: { height: "92%", maxHeight: "92%" },
-  modalHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: spacing.lg, borderBottomWidth: 2, borderColor: colors.border, backgroundColor: colors.surfaceInverse },
-  modalTitle: { color: colors.onSurfaceInverse, fontSize: font.sizes.xl, letterSpacing: 2, fontWeight: "500" },
+  modalHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: spacing.lg, borderBottomWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceSecondary },
+  modalTitle: { color: colors.onSurface, fontSize: font.sizes.xl, letterSpacing: 2, fontWeight: "800" },
   modalBody: { padding: spacing.lg, gap: spacing.md },
-  editSectionTitle: { fontSize: font.sizes.sm, letterSpacing: 2, fontWeight: "500", color: colors.brandPrimary },
-  identInput: {},
-  identHint: {},
+  editSectionTitle: { fontSize: font.sizes.sm, letterSpacing: 2, fontWeight: "700", color: colors.brandSecondary },
+  // Ident inputs (nickname, display name). Previously these two styles
+  // were empty objects — the TextInput inherited the transparent bg
+  // with black text, which is unreadable on the dark surface. Now they
+  // match the bio/social inputs below.
+  identInput: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 8,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
+    fontSize: font.sizes.base,
+    color: colors.onSurface,
+    backgroundColor: colors.surfaceSecondary,
+  },
+  identHint: {
+    fontSize: font.sizes.xs,
+    color: colors.muted,
+    lineHeight: 18,
+  },
   photosGrid: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, marginTop: spacing.xs },
   photoBox: { width: 90, height: 90, borderWidth: 2, borderColor: colors.border, position: "relative", overflow: "hidden", backgroundColor: colors.surfaceSecondary },
   photoImg: { width: "100%", height: "100%" },

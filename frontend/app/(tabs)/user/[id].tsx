@@ -786,6 +786,8 @@ export default function UserPublicScreen() {
         visible={badgesOpen}
         userId={String(id)}
         displayName={profile.display_name || profile.nickname || undefined}
+        extraTotal={1}
+        extraUnlocked={badgeUnlocked ? 1 : 0}
         onClose={() => setBadgesOpen(false)}
       />
     </SafeAreaView>
