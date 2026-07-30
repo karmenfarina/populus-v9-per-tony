@@ -435,18 +435,13 @@ export default function StoriesBar() {
 const styles = StyleSheet.create({
   container: {
     // Expanded strip. Height derived purely from the circle + label +
-    // small paddings. The chevron collapse button is absolute-positioned
+    // minimal paddings. The chevron collapse button is absolute-positioned
     // so it does NOT add any vertical space.
     backgroundColor: colors.surface,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
-    paddingTop: 4,
+    paddingTop: 0,
     position: "relative",
-  },
-  // Legacy header — kept only to preserve stable class ordering if any
-  // downstream style depends on it. Not used in the current layout.
-  expandedHeader: {
-    display: "none",
   },
   collapseChip: {
     position: "absolute",
@@ -458,15 +453,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "transparent",
-  },
-  expandedHeaderLabel: {
-    color: colors.muted,
-    fontSize: 12,
-    fontWeight: "700",
-    letterSpacing: 0.5,
-  },
-  expandedHeaderLabelHighlight: {
-    color: colors.brandSecondary,
   },
   // -------- Collapsed card --------
   // Prominent full-width tap target — reads as a "collapsible section
@@ -525,7 +511,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     alignItems: "center",
     gap: spacing.md,
-    paddingBottom: 4,
+    paddingBottom: 2,
+    paddingTop: 4,
   },
   item: {
     width: CIRCLE_SIZE + 12,

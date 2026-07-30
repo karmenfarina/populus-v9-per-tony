@@ -579,6 +579,106 @@ async def _evaluate_and_notify_badge_change(user_id: str) -> None:
         logger.warning(f"badge notification emit failed for {user_id}: {e}")
 
 
+async def _evaluate_and_notify_category_badge_change(user_id: str, feud_id: Optional[str] = None) -> None:
+    """Detect whether the user just unlocked a new CATEGORY badge tier
+    (Politica t1/2/3, Sport t1/2/3, ...) and fire the corresponding
+    notification exactly once per tier.
+
+    Called from `add_comment` / `add_reply` on the same fire-and-forget
+    pattern used for alignment badges. Idempotency lives on the user
+    doc under `category_badges_notified` — a list of `"{category}:{tier}"`
+    strings we've already fired notifications for. This ensures:
+
+      • First time you cross 100 comments in "sport" → notification fires.
+      • Every subsequent sport comment afterwards → NO duplicate ping.
+      • A future admin-grant of an already-notified tier stays silent.
+
+    Notification style mirrors the "NUOVA SPILLA" push used for the
+    alignment badges so the UX is coherent.
+    """
+    try:
+        # Cheap early-out: if we know the current feud's category, only
+        # check that one bucket. Otherwise re-scan all categories (used
+        # by the safety net in the admin-grant path).
+        counts: dict = {}
+        target_cats: list[str]
+        if feud_id:
+            f = await db.feuds.find_one({'feud_id': feud_id}, {'_id': 0, 'category': 1})
+            if not f or f.get('category') not in CATEGORY_BADGES:
+                return
+            cat = f['category']
+            # Count only the target category — much cheaper than the full aggregate.
+            cnt = await db.comments.count_documents({'user_id': user_id, 'feud_id': feud_id})
+            if cnt == 0:
+                # Fallback: rely on the full aggregate. Shouldn't happen in
+                # the post-comment path but keeps the function safe when
+                # invoked defensively.
+                counts = await _compute_category_comment_counts(user_id)
+            else:
+                counts = await _compute_category_comment_counts(user_id)
+            target_cats = [cat]
+        else:
+            counts = await _compute_category_comment_counts(user_id)
+            target_cats = list(CATEGORY_BADGES.keys())
+
+        u = await db.users.find_one({'user_id': user_id}, {'_id': 0, 'category_badges_notified': 1})
+        if u is None:
+            return
+        raw = u.get('category_badges_notified')
+        bootstrap = raw is None  # first-ever evaluation for this user
+        notified: set[str] = set(raw or [])
+        newly_earned: list[tuple[str, int]] = []
+
+        for cat in target_cats:
+            count = int(counts.get(cat, 0))
+            for i, threshold in enumerate(CATEGORY_BADGE_THRESHOLDS):
+                tier = i + 1
+                key = f"{cat}:{tier}"
+                if count >= threshold and key not in notified:
+                    # On first-ever evaluation, silently mark existing
+                    # tiers as already-notified so pre-upgrade users
+                    # don't get a burst of retroactive alerts. From the
+                    # SECOND call onwards (bootstrap done) we emit for
+                    # every fresh crossing.
+                    if bootstrap:
+                        notified.add(key)
+                    else:
+                        newly_earned.append((cat, tier))
+                        notified.add(key)
+
+        # Always persist so subsequent calls have a stable baseline.
+        await db.users.update_one(
+            {'user_id': user_id},
+            {'$set': {'category_badges_notified': sorted(notified)}},
+        )
+        if not newly_earned:
+            return
+
+        for cat, tier in newly_earned:
+            meta = CATEGORY_BADGES.get(cat) or {}
+            tier_meta = (meta.get('tiers') or [None, None, None])[tier - 1] or {}
+            name = tier_meta.get('name') or cat
+            emoji = tier_meta.get('emoji') or '🏅'
+            cat_label = _CATEGORY_LABELS_IT.get(cat, cat)
+            title = f"{emoji} NUOVA SPILLA"
+            body = (
+                f"Hai sbloccato la spilla {emoji} {name} — "
+                f"livello {tier} di {cat_label}!"
+            )
+            try:
+                await _emit_notification(
+                    user_id=user_id,
+                    ntype='badge',
+                    title=title,
+                    body=body,
+                    send_push_too=True,
+                )
+            except Exception as e:
+                logger.warning(f"category badge notification emit failed for {user_id} ({cat} t{tier}): {e}")
+    except Exception as e:
+        logger.warning(f"category badge evaluate failed for {user_id}: {e}")
+
+
 async def _hydrate_primary_photo(payload: dict) -> dict:
     """Attach the primary profile photo blob to a `_public_user` payload.
     Kept as a small async helper so we can call it from ALL auth-adjacent
@@ -2985,6 +3085,10 @@ async def add_comment(feud_id: str, body: CommentBody, user: dict = Depends(get_
         db, user['user_id'], EVT_COMMENT_CREATED,
         feud_id=feud_id, side=vote['side'],
     ))
+    # Fire-and-forget: check if this comment crossed a category-badge
+    # tier threshold and, if so, push a "NUOVA SPILLA" notification.
+    # Idempotent — see `_evaluate_and_notify_category_badge_change`.
+    asyncio.create_task(_evaluate_and_notify_category_badge_change(user['user_id'], feud_id))
     return {'comment': doc}
 
 

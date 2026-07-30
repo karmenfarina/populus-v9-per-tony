@@ -1552,18 +1552,6 @@ const styles = StyleSheet.create({
     textShadowOffset: { width: 0, height: 2 },
     textShadowRadius: 4,
   },
-  badgeSparkleTL: {
-    position: "absolute",
-    top: 8,
-    left: 10,
-    opacity: 0.75,
-  },
-  badgeSparkleBR: {
-    position: "absolute",
-    bottom: 10,
-    right: 12,
-    opacity: 0.6,
-  },
   badgeTitle: { fontSize: font.sizes.xxl, letterSpacing: 1.5, fontWeight: "800", color: colors.onSurface, marginTop: spacing.md },
   badgeSubtitle: { fontSize: font.sizes.base, color: colors.muted, marginTop: spacing.xs },
   badgeMoreHint: {
