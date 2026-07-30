@@ -828,7 +828,9 @@ export default function Profile() {
           // content resized (avatar image loaded, history data swapped
           // in, etc.), immediately re-apply the target offset. Without
           // this the ScrollView silently snaps back to top when its
-          // content grows/shrinks under us.
+          // content grows/shrinks under us. Also respect the user's
+          // manual scroll — if they're already dragging, abort.
+          if (userInteractedRef.current) return;
           const target = pendingScrollYRef.current;
           if (target != null) {
             scrollRef.current?.scrollTo({ y: target, animated: false });
