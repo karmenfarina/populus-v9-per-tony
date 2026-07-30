@@ -1719,13 +1719,6 @@ const styles = StyleSheet.create({
   modalHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: spacing.lg, borderBottomWidth: 2, borderColor: colors.border, backgroundColor: colors.surfaceInverse },
   modalTitle: { color: colors.onSurfaceInverse, fontSize: font.sizes.xl, letterSpacing: 2, fontWeight: "500" },
   modalBody: { padding: spacing.lg, gap: spacing.md },
-  prefsSelectAllRow: { alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 6, borderWidth: 2, borderColor: colors.border, paddingHorizontal: spacing.sm, paddingVertical: 6, backgroundColor: colors.surfaceSecondary },
-  prefsSelectAllTxt: { fontSize: font.sizes.xs, letterSpacing: 1, fontWeight: "500", color: colors.onSurface },
-  prefsCatsGrid: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
-  prefsCatChip: { flexDirection: "row", alignItems: "center", gap: 8, borderWidth: 2, borderColor: colors.border, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, backgroundColor: colors.surfaceSecondary },
-  prefsCatChipOn: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
-  prefsCatTxt: { fontSize: font.sizes.base, color: colors.onSurface, fontWeight: "500" },
-  prefsCatTxtOn: { color: colors.onBrandPrimary },
   prefsErr: { color: colors.error, borderWidth: 2, borderColor: colors.error, padding: spacing.sm, fontSize: font.sizes.base },
   saveErrorBar: {
     flexDirection: "row",
