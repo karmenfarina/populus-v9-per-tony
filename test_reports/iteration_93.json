@@ -1,0 +1,24 @@
+{
+  "summary": "Verificato UX change: eliminazione messaggio proprio in chat 1-a-1 senza modal di conferma. Login via API + token injection in localStorage. Aperto chat con user_16f709708760, inviato 'test delete diretto', long-press bubble apre il react sheet con 'COPIA MESSAGGIO' + 'ELIMINA MESSAGGIO'. Tap su ELIMINA MESSAGGIO chiude immediatamente il react sheet e il messaggio diventa 'Messaggio eliminato' senza mostrare alcun modal di conferma ('confirm-ok' non visibile, testo 'Vuoi eliminare' non presente). Verificata anche la persistenza del modal di conferma su /messages: long-press sull'item di chat mostra correttamente il modal 'Elimina chat' con testID delete-chat-cancel e delete-chat-confirm (ANNULLA/ELIMINA).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "deleteMessage (messages/[userId].tsx:449-470) ora chiama api.deleteMessage direttamente; setViewerUri con confronto viewerKey chiude il viewer solo se stava mostrando l'immagine eliminata — corretto.",
+    "confirmDialog resta usato per toggleBlock (blocco utente) — coerente con la richiesta di rimuovere la conferma SOLO per l'eliminazione del singolo messaggio.",
+    "Modal di conferma Elimina chat in messages/index.tsx invariato (testID delete-chat-cancel/delete-chat-confirm ancora presenti e funzionanti)."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "seed_data_creation": "Nessuno; usato messaggio effimero 'test delete diretto' poi eliminato durante il test.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Login UI via placeholder-fill è instabile sulla home Expo (a volte submit prima del binding). Approccio affidabile: POST /api/auth/login via page.evaluate + localStorage.setItem('faide_token', JSON.stringify(token)) + reload. AsyncStorage web usa localStorage; TOKEN_KEY='faide_token'. Deep-link diretto /messages/<userId>?from=messages funziona. Long-press su web: page.mouse.down() → wait 900ms → up() (delayLongPress=350ms). testID chiave chat: chat-screen, chat-input, chat-send, msg-bubble-<id>, react-sheet-copy, react-sheet-delete, confirm-ok/confirm-cancel (modal generico non più usato per delete-msg), delete-chat-cancel/delete-chat-confirm (lista chat).",
+  "rca_of_issue": "N/A — nessun bug. Verifica di un piccolo change UX. Il flusso è correttamente immediato: nessun modal di conferma per l'eliminazione del singolo messaggio, mentre il modal di conferma per l'eliminazione dell'intera chat (in messages/index.tsx) continua ad esistere e funzionare come prima."
+}

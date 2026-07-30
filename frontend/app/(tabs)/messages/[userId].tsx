@@ -446,34 +446,28 @@ export default function ChatScreen() {
     }
   }, []);
 
-  const deleteMessage = useCallback((m: ChatMessage) => {
+  const deleteMessage = useCallback(async (m: ChatMessage) => {
+    // Direct deletion — no confirmation modal, as requested by the user.
+    // The action is already gated by an explicit long-press + tap on the
+    // red "ELIMINA MESSAGGIO" button, so double-confirmation is overkill.
     setReactTarget(null);
-    // Alert.alert with a destructive button is unreliable on RN-Web (some
-    // versions collapse it into window.confirm which loses the button
-    // labels). Use our own themed modal for a deterministic flow.
-    confirmDialog(
-      "Elimina messaggio",
-      "Vuoi eliminare questo messaggio per tutti?",
-      async () => {
-        try {
-          await api.deleteMessage(m.message_id);
-          setMessages((prev) =>
-            prev.map((x) =>
-              x.message_id === m.message_id
-                ? { ...x, deleted: true, text: null, image_data: null, reactions: {} }
-                : x,
-            ),
-          );
-          // If the currently open viewer was showing this image, close it.
-          setViewerUri((cur) => (cur && viewerKey === `msg-${m.message_id}` ? null : cur));
-          // Invalidate any cached file so it can't be reopened stale.
-          imageFileCache.delete(m.message_id);
-        } catch (e: any) {
-          Alert.alert("Errore", e?.detail || "Impossibile eliminare");
-        }
-      },
-    );
-  }, [confirmDialog, viewerKey]);
+    try {
+      await api.deleteMessage(m.message_id);
+      setMessages((prev) =>
+        prev.map((x) =>
+          x.message_id === m.message_id
+            ? { ...x, deleted: true, text: null, image_data: null, reactions: {} }
+            : x,
+        ),
+      );
+      // If the currently open viewer was showing this image, close it.
+      setViewerUri((cur) => (cur && viewerKey === `msg-${m.message_id}` ? null : cur));
+      // Invalidate any cached file so it can't be reopened stale.
+      imageFileCache.delete(m.message_id);
+    } catch (e: any) {
+      Alert.alert("Errore", e?.detail || "Impossibile eliminare");
+    }
+  }, [viewerKey]);
 
   const toggleBlock = useCallback(async () => {
     setMenuOpen(false);
