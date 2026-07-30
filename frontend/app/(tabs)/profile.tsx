@@ -1168,19 +1168,13 @@ export default function Profile() {
                     key={f}
                     onPress={() => setFilter(f)}
                     testID={`filter-${f}`}
-                    style={[styles.filterChip, filter === f && (
-                      f === "majority" ? { borderColor: colors.brandPrimary, backgroundColor: `${colors.brandPrimary}22` } :
-                      f === "minority" ? { borderColor: colors.brandSecondary, backgroundColor: `${colors.brandSecondary}22` } :
-                      { borderColor: colors.brandSecondary }
-                    )]}
+                    // All three filters use the same "yellow-bordered pill"
+                    // active state — the semantic team colors (red/yellow)
+                    // were causing the filter chips to compete visually
+                    // with the vote-badge colours further down the list.
+                    style={[styles.filterChip, filter === f && { borderColor: colors.brandSecondary }]}
                   >
-                    <Text style={[styles.filterTxt,
-                      filter === f && (
-                        f === "majority" ? { color: colors.brandPrimary } :
-                        f === "minority" ? { color: colors.brandSecondary } :
-                        { color: colors.brandSecondary }
-                      )
-                    ]}>
+                    <Text style={[styles.filterTxt, filter === f && { color: colors.brandSecondary }]}>
                       {f === "all" ? "TUTTI" : f === "majority" ? "MAGGIORANZA" : "MINORANZA"}
                     </Text>
                   </Pressable>
@@ -1541,8 +1535,12 @@ const styles = StyleSheet.create({
   hMetaRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: spacing.xs, flexWrap: "wrap", gap: spacing.xs },
   hVoted: { fontSize: font.sizes.xs, fontWeight: "500" },
   hBadge: { fontSize: font.sizes.xs, letterSpacing: 1, paddingHorizontal: 8, paddingVertical: 3, borderWidth: 1, borderRadius: radius.sm, fontWeight: "800" },
-  hBadgeMaj: { backgroundColor: "transparent", borderColor: colors.brandPrimary, color: colors.brandPrimary },
-  hBadgeMin: { backgroundColor: "transparent", borderColor: colors.brandSecondary, color: colors.brandSecondary },
+  // Neutral outline for MAGGIORANZA/MINORANZA badges: keeping them
+  // team-coloured (red/yellow) collided with the vote colours used on
+  // poll splits and filter chips. A muted grey outline reads clearly
+  // without competing for meaning.
+  hBadgeMaj: { backgroundColor: "transparent", borderColor: colors.borderStrong, color: colors.muted },
+  hBadgeMin: { backgroundColor: "transparent", borderColor: colors.borderStrong, color: colors.muted },
   logout: {
     marginHorizontal: spacing.lg,
     marginTop: spacing.md,
