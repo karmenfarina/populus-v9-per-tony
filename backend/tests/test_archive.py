@@ -17,7 +17,7 @@ import pytest
 import requests
 from pymongo import MongoClient
 
-BASE_URL = os.environ['EXPO_PUBLIC_BACKEND_URL'].rstrip('/') if 'EXPO_PUBLIC_BACKEND_URL' in os.environ else 'https://feud-dashboard.preview.emergentagent.com'
+BASE_URL = os.environ['EXPO_PUBLIC_BACKEND_URL'].rstrip('/') if 'EXPO_PUBLIC_BACKEND_URL' in os.environ else 'https://google-logout-stable.preview.emergentagent.com'
 API = f"{BASE_URL}/api"
 
 MONGO_URL = os.environ.get('MONGO_URL', 'mongodb://localhost:27017')

@@ -6,6 +6,9 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import * as Notifications from "expo-notifications";
 import * as Linking from "expo-linking";
+import { StatusBar } from "expo-status-bar";
+import * as NavigationBar from "expo-navigation-bar";
+import * as SystemUI from "expo-system-ui";
 
 import { useIconFonts } from "@/src/hooks/use-icon-fonts";
 import { AuthProvider } from "@/src/auth/AuthContext";
@@ -44,6 +47,23 @@ if (Platform.OS === "android") {
 export default function RootLayout() {
   const [loaded, error] = useIconFonts();
   const router = useRouter();
+
+  // Force dark system UI (status bar + Android navigation bar) regardless of
+  // the device's light/dark theme setting. Populus is a dark-only app.
+  useEffect(() => {
+    // Root window background — prevents white flashes during transitions
+    // and keeps the area behind the status/navigation bars black.
+    if (Platform.OS !== "web") {
+      SystemUI.setBackgroundColorAsync("#000000").catch(() => {});
+    }
+    if (Platform.OS === "android") {
+      // Light icons/buttons on the Android navigation bar.
+      NavigationBar.setButtonStyleAsync("light").catch(() => {});
+      // In edge-to-edge mode (see app.json) the OS ignores background color
+      // calls; we still set it for older devices where edge-to-edge is off.
+      NavigationBar.setBackgroundColorAsync("#000000").catch(() => {});
+    }
+  }, []);
 
   useEffect(() => {
     if (loaded || error) {
@@ -100,14 +120,18 @@ export default function RootLayout() {
   if (!loaded && !error) return null;
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
+    <GestureHandlerRootView style={{ flex: 1, backgroundColor: "#000000" }}>
       <SafeAreaProvider>
         <AuthProvider>
           <UIPrefsProvider>
             <NotificationsProvider>
               <MessagingProvider>
                 <StoryUploadProvider>
-                  <Stack screenOptions={{ headerShown: false, animation: "fade" }} />
+                  {/* Force light status-bar icons on a transparent bg (the
+                      underlying screen is always dark). translucent=true on
+                      Android lets the screen draw behind the status bar. */}
+                  <StatusBar style="light" translucent backgroundColor="transparent" />
+                  <Stack screenOptions={{ headerShown: false, animation: "fade", contentStyle: { backgroundColor: "#000000" } }} />
                 </StoryUploadProvider>
               </MessagingProvider>
             </NotificationsProvider>

@@ -10,7 +10,7 @@ import pytest
 import requests
 from pymongo import MongoClient
 
-BASE_URL = os.environ.get("EXPO_PUBLIC_BACKEND_URL", "https://feud-dashboard.preview.emergentagent.com").rstrip("/")
+BASE_URL = os.environ.get("EXPO_PUBLIC_BACKEND_URL", "https://google-logout-stable.preview.emergentagent.com").rstrip("/")
 API = f"{BASE_URL}/api"
 
 # Direct DB access is only used to bypass the email-verification wall so we

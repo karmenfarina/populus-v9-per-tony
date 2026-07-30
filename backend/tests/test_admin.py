@@ -4,7 +4,7 @@ import uuid
 import pytest
 import requests
 
-BASE_URL = "https://feud-dashboard.preview.emergentagent.com"
+BASE_URL = "https://google-logout-stable.preview.emergentagent.com"
 ADMIN_KEY = "populus-admin-42b8f3"
 
 
