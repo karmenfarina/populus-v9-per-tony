@@ -522,6 +522,7 @@ export default function ChatScreen() {
           <Pressable
             onPress={handleTap}
             onLongPress={handleLongPress}
+            delayLongPress={350}
             style={[styles.bubbleRow, mine ? styles.rowMine : styles.rowTheirs]}
             testID={`msg-bubble-${bubbleId}`}
           >
@@ -849,7 +850,19 @@ export default function ChatScreen() {
               ))}
             </View>
             {reactTarget?.sender_id === user.user_id && (
-              <Pressable onPress={() => reactTarget && deleteMessage(reactTarget)} style={styles.reactAction}>
+              <Pressable
+                onPress={() => {
+                  // Close the reactions sheet BEFORE opening the confirm
+                  // modal — otherwise the confirm dialog is stacked
+                  // underneath the reactions sheet and the user never
+                  // sees the "conferma / annulla" prompt (the bug the
+                  // user reported: delete option seemed to do nothing).
+                  const target = reactTarget;
+                  setReactTarget(null);
+                  setTimeout(() => target && deleteMessage(target), 40);
+                }}
+                style={styles.reactAction}
+              >
                 <Ionicons name="trash-outline" size={18} color={colors.error} />
                 <Text style={{ color: colors.error, letterSpacing: 1 }}>ELIMINA MESSAGGIO</Text>
               </Pressable>

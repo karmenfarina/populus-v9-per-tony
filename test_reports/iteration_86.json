@@ -1,0 +1,23 @@
+{
+  "summary": "Test frontend-only sui due bug segnalati in Populus: (1) eliminazione singolo messaggio via long-press dalla chat privata, (2) eliminazione intera chat via long-press dalla lista messaggi. Entrambi i flussi funzionano end-to-end: il modal di conferma appare sopra il bottom sheet delle reazioni (fix con setTimeout(40ms) + setReactTarget(null) verificato), il messaggio viene marcato come 'Messaggio eliminato' e la conversazione sparisce dalla lista dopo la conferma. Nessuna regressione osservata sul rendering dei modal, testID e navigazione.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": ["/tmp/12_react_sheet.png", "/tmp/13_confirm_modal.png", "/tmp/14_after_delete.png", "/tmp/16_delete_chat_modal.png", "/tmp/17_after_delete_chat.png"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "messages/[userId].tsx è ~1265 righe: valutare split in file separati (bubble renderer, modals, image viewer) per rispettare la soglia di 700 righe.",
+    "In deleteMessage viene chiamato setReactTarget(null) all'inizio, e nel Pressable del bottone ELIMINA MESSAGGIO viene richiamato di nuovo con setTimeout: la doppia chiusura non fa danno ma può essere semplificata."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (non richiesto)", "frontend": "100% (2/2 flussi passati)"},
+  "seed_data_creation": "Nessun seed creato. Usati account pre-verificati chat_a@test.it / chat_b@test.it. Inviato 3 messaggi di test da User A: TESTMSG_1785424538, TESTMSG_1785424583, TESTMSG_1785424641; l'ultimo è stato eliminato via UI (marcato 'Messaggio eliminato'). La conversazione lato User A è stata poi eliminata via 'ELIMINA CHAT' — la lista mostra 'NESSUNA CONVERSAZIONE'. Nota: lato User B la chat resta visibile con i messaggi ancora inviati, come da UX documentata.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Autenticazione via UI a volte fallisce con page.fill sulle TextInput Expo web (ottiene 400/'Email o password sbagliata'). Workaround affidabile: chiamare POST /api/auth/login via fetch() dentro page.evaluate e scrivere il token in localStorage con doppia JSON.stringify (perché il web shim di AsyncStorage salva JSON.stringify(value)): window.localStorage.setItem('faide_token', JSON.stringify(token)) + faide_user con JSON.stringify(user). Long-press su RN Web tramite Playwright: page.mouse.down/up NON attiva sempre l'handler onLongPress; usare invece page.evaluate che disptacha MouseEvent('mousedown') → attende 900ms → dispatchEvent('mouseup') sul nodo con data-testid='msg-bubble-*' o convo-<uid>. testID utili confermati: chat-input, chat-send, msg-bubble-<id>, confirm-ok, confirm-cancel, convo-<uid>, delete-chat-cancel, delete-chat-confirm.",
+  "rca_of_issue": "Bug 1 originale: il modal <Modal visible={!!confirmState}> era dichiarato DOPO il modal delle reazioni <Modal visible={!!reactTarget}>, ma su RN Web due Modal aperti simultaneamente causano che il secondo aperto risulti stacked sotto (o sopra ma bloccato da overlay del primo) — il tap su CONFERMA/ANNULLA non arrivava. Fix applicato (verificato): il bottone 'ELIMINA MESSAGGIO' chiama prima setReactTarget(null) e poi setTimeout(() => deleteMessage(target), 40) che apre confirmDialog dopo che il modal reazioni è già chiuso. Il ritardo di 40ms lascia a React il tempo di smontare il Modal. Verifica: screenshot /tmp/13_confirm_modal.png mostra il modal 'ELIMINA MESSAGGIO' correttamente centrato in primo piano, il tap su testID='confirm-ok' esegue api.deleteMessage e il bubble si aggiorna a 'Messaggio eliminato' (screenshot /tmp/14_after_delete.png)."
+}
