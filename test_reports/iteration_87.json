@@ -1,0 +1,33 @@
+{
+  "summary": "Test frontend-only sui 3 fix in chat privata Populus (scroll bug + restyle modali conferma elimina messaggio/elimina chat). Tutti e 3 i flussi passano end-to-end su viewport mobile 390x844. (A) Scroll-after-send: il nuovo messaggio compare in basso (y=646 su viewport 844) sia inviando dalla posizione di riposo sia dopo aver scrollato verso l'alto (auto snap-to-newest funziona). (B) Long-press su bubble proprio -> react sheet appare con 'ELIMINA MESSAGGIO' -> tap apre il NUOVO modal di conferma centrato (maxWidth 340px, borderRadius 16px, bg surfaceSecondary rgb(23,23,23), icona trash cerchiata rosso in alto, titolo 'Elimina messaggio', body muted 'Vuoi eliminare questo messaggio per tutti?', bottone ANNULLA ghost outline con borderRadius 999px, bottone CONFERMA rosso pieno con borderRadius 999px). Dopo CONFERMA la bubble diventa 'Messaggio eliminato'. (C) Long-press su riga conversazione -> modal 'Elimina chat' identico stile (card 340/16, icona trash, @chatUserB in giallo brand, ANNULLA ghost pill / ELIMINA rosso pill). Dopo ELIMINA la riga sparisce e la lista mostra 'NESSUNA CONVERSAZIONE'. Nessuna regressione osservata.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/test_reports/screenshots_iter87/02_after_send.png",
+    "/app/test_reports/screenshots_iter87/03_scrolled_up.png",
+    "/app/test_reports/screenshots_iter87/04_after_send_from_scroll.png",
+    "/app/test_reports/screenshots_iter87/05_react_sheet.png",
+    "/app/test_reports/screenshots_iter87/06_confirm_delete_msg_new_style.png",
+    "/app/test_reports/screenshots_iter87/07_after_msg_delete.png",
+    "/app/test_reports/screenshots_iter87/09_delete_chat_modal.png",
+    "/app/test_reports/screenshots_iter87/10_after_delete_chat.png"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "messages/[userId].tsx è a ~1353 righe (soglia 700): valutare split in file separati (bubble renderer, viewer modal, confirm modal, react sheet) per manutenibilità.",
+    "Il bottone 'ELIMINA MESSAGGIO' dentro la react sheet non ha testID (riga 860). Aggiungere testID='msg-delete-action' per test più robusti (attualmente ci si affida al text match).",
+    "In send() sia useEffect([messages.length]) sia requestAnimationFrame(scrollToBottom) chiamano scroll: entrambi funzionano ma è ridondante — funzionalmente ok."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (non richiesto)", "frontend": "100% (3/3 flussi passati)"},
+  "seed_data_creation": "Nessun seed backend. Durante il test A/B User A ha inviato 2 messaggi di prova ('test scroll ...' + 'test scroll snap ...') e ne ha eliminato uno (bubble ora 'Messaggio eliminato'). Al termine del test C la conversazione lato User A è stata cancellata via ELIMINA, quindi la lista dei messaggi lato A ora è vuota (NESSUNA CONVERSAZIONE). Lato User B la chat resta come da UX documentata.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Auth: firebase login via UI è flaky su web preview. Usare POST /api/auth/login (legacy), poi window.localStorage.setItem('faide_token', JSON.stringify(token)) + faide_user. Long-press RN Web: page.mouse.down() + wait 900ms + page.mouse.up() sul centro del data-testid funziona (senza dispatchEvent fallback). testID utili verificati: chat-screen, chat-input, chat-send, chat-back, chat-menu, msg-bubble-<id>, confirm-ok, confirm-cancel, convo-<uid>, delete-chat-cancel, delete-chat-confirm. Verifica stile modal: getComputedStyle su [data-testid='confirm-ok']/[data-testid='delete-chat-confirm'] -> borderRadius='999px' + backgroundColor='rgb(255, 69, 58)'. Il card wrapper si trova walkando up dai bottoni: cs.maxWidth==='340px' e borderRadius==='16px' (=radius.lg).",
+  "rca_of_issue": "Bug scroll originale: FlatList era `inverted` ma `scrollToEnd()` in un inverted FlatList porta all'ULTIMO item nell'array (messaggio più VECCHIO) che visivamente è in TOP. Fix (verificato): scrollToBottom ora usa scrollToOffset({offset: 0}) — offset 0 in inverted list è il fondo visuale (=newest). Retry su 6 requestAnimationFrame per sopravvivere al layout del nuovo bubble. In send() si chiama requestAnimationFrame(() => scrollToBottom(true)) per forzare snap indipendentemente dalla posizione utente. Verifica: dopo scroll manuale verso i vecchi messaggi + send, il nuovo bubble compare a y=646 su viewport 844 (vicino al fondo). Il bug 'chat balza in cima' non riproduce più."
+}

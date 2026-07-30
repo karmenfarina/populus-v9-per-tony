@@ -16,7 +16,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { api, Conversation } from "@/src/api";
 import { useAuth } from "@/src/auth/AuthContext";
 import { useMessaging } from "@/src/messaging/MessagingContext";
-import { colors, spacing, font } from "@/src/theme";
+import { colors, spacing, font, radius } from "@/src/theme";
 
 function relative(ts: string | null): string {
   if (!ts) return "";
@@ -232,41 +232,42 @@ export default function MessagesListScreen() {
         />
       )}
 
-      {/* Long-press delete confirmation. Cross-platform Modal instead of
-          Alert.alert so the same UX works on React Native Web without
-          the well-known button-callback quirks. */}
+      {/* Long-press delete confirmation. Uses the same styling as other
+          destructive confirmations in the app (see /circle/[userId].tsx). */}
       <Modal
         visible={confirmDelete !== null}
         transparent
         animationType="fade"
         onRequestClose={() => setConfirmDelete(null)}
       >
-        <Pressable style={styles.modalBackdrop} onPress={() => !deleting && setConfirmDelete(null)}>
-          <Pressable style={styles.modalSheet} onPress={(e) => e.stopPropagation()}>
-            <Text style={styles.modalTitle}>ELIMINA CHAT</Text>
-            <Text style={styles.modalBody}>
-              Tutti i messaggi con @{confirmDelete?.other_user.nickname || "questo utente"} spariranno dalla tua lista.
-              La chat resterà visibile all&apos;altro utente. Se ricevi un nuovo messaggio, la chat ricomparirà.
+        <Pressable style={styles.confirmBackdrop} onPress={() => !deleting && setConfirmDelete(null)}>
+          <Pressable style={styles.confirmCard} onPress={(e) => e.stopPropagation()}>
+            <View style={styles.confirmIconWrap}>
+              <Ionicons name="trash-outline" size={26} color={colors.error} />
+            </View>
+            <Text style={styles.confirmTitle}>Elimina chat</Text>
+            <Text style={styles.confirmBody}>
+              Tutti i messaggi con <Text style={styles.confirmNick}>@{confirmDelete?.other_user.nickname || "questo utente"}</Text> spariranno dalla tua lista. La chat resterà visibile all&apos;altro utente. Se ricevi un nuovo messaggio, la chat ricomparirà.
             </Text>
-            <View style={styles.modalActions}>
+            <View style={styles.confirmBtnRow}>
               <Pressable
                 onPress={() => setConfirmDelete(null)}
                 disabled={deleting}
-                style={[styles.modalBtn, styles.modalBtnCancel]}
+                style={[styles.confirmBtn, styles.confirmBtnGhost]}
                 testID="delete-chat-cancel"
               >
-                <Text style={styles.modalBtnCancelTxt}>ANNULLA</Text>
+                <Text style={styles.confirmBtnGhostTxt}>ANNULLA</Text>
               </Pressable>
               <Pressable
                 onPress={deleteChat}
                 disabled={deleting}
-                style={[styles.modalBtn, styles.modalBtnDanger]}
+                style={[styles.confirmBtn, styles.confirmBtnDanger]}
                 testID="delete-chat-confirm"
               >
                 {deleting ? (
                   <ActivityIndicator color="#fff" size="small" />
                 ) : (
-                  <Text style={styles.modalBtnDangerTxt}>ELIMINA</Text>
+                  <Text style={styles.confirmBtnDangerTxt}>ELIMINA</Text>
                 )}
               </Pressable>
             </View>
@@ -329,64 +330,84 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
   },
   badgeTxt: { color: colors.onBrandPrimary, fontSize: 11, fontWeight: "700" },
-  // Confirm-delete modal.
-  modalBackdrop: {
+
+  // ==================================================================
+  // Confirm delete modal — matches /circle/[userId].tsx so all
+  // destructive confirmations across the app look identical.
+  // ==================================================================
+  confirmBackdrop: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.55)",
-    justifyContent: "center",
+    backgroundColor: "rgba(0,0,0,0.65)",
     alignItems: "center",
-    padding: spacing.lg,
+    justifyContent: "center",
+    paddingHorizontal: spacing.xl,
   },
-  modalSheet: {
+  confirmCard: {
     width: "100%",
-    maxWidth: 360,
-    backgroundColor: colors.surface,
-    borderWidth: 2,
+    maxWidth: 340,
+    backgroundColor: colors.surfaceSecondary,
+    borderWidth: 1,
     borderColor: colors.border,
-    padding: spacing.lg,
+    borderRadius: radius.lg,
+    padding: spacing.xl,
     gap: spacing.md,
+    alignItems: "center",
   },
-  modalTitle: {
-    fontSize: font.sizes.lg,
-    fontWeight: "700",
-    letterSpacing: 2,
+  confirmIconWrap: {
+    width: 56, height: 56,
+    borderRadius: 28,
+    borderWidth: 1.5, borderColor: colors.error,
+    alignItems: "center", justifyContent: "center",
+    marginBottom: spacing.xs,
+  },
+  confirmTitle: {
     color: colors.onSurface,
+    fontSize: font.sizes.xl,
+    fontWeight: "800",
+    letterSpacing: 0.5,
+    textAlign: "center",
   },
-  modalBody: {
-    fontSize: font.sizes.base,
+  confirmBody: {
     color: colors.muted,
-    lineHeight: 20,
+    fontSize: font.sizes.base,
+    lineHeight: 22,
+    textAlign: "center",
   },
-  modalActions: {
+  confirmNick: {
+    fontWeight: "800",
+    color: colors.brandPrimary,
+  },
+  confirmBtnRow: {
     flexDirection: "row",
     gap: spacing.sm,
     marginTop: spacing.sm,
+    width: "100%",
   },
-  modalBtn: {
+  confirmBtn: {
     flex: 1,
+    paddingHorizontal: spacing.md,
     paddingVertical: spacing.md,
-    borderWidth: 2,
-    borderColor: colors.border,
     alignItems: "center",
-    justifyContent: "center",
+    borderRadius: radius.pill,
   },
-  modalBtnCancel: {
-    backgroundColor: colors.surfaceSecondary,
+  confirmBtnGhost: {
+    borderWidth: 1.5,
+    borderColor: colors.borderStrong,
+    backgroundColor: "transparent",
   },
-  modalBtnCancelTxt: {
-    fontSize: font.sizes.sm,
-    letterSpacing: 1,
-    fontWeight: "600",
+  confirmBtnGhostTxt: {
     color: colors.onSurface,
-  },
-  modalBtnDanger: {
-    backgroundColor: colors.error,
-    borderColor: colors.error,
-  },
-  modalBtnDangerTxt: {
+    fontWeight: "800",
     fontSize: font.sizes.sm,
     letterSpacing: 1,
-    fontWeight: "700",
+  },
+  confirmBtnDanger: {
+    backgroundColor: colors.error,
+  },
+  confirmBtnDangerTxt: {
     color: "#FFFFFF",
+    fontWeight: "800",
+    fontSize: font.sizes.sm,
+    letterSpacing: 1,
   },
 });

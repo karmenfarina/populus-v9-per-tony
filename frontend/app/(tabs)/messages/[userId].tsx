@@ -294,35 +294,38 @@ export default function ChatScreen() {
     return () => unsub();
   }, [subscribe, user, userId, refreshBadge]);
 
-  // Reliable scroll-to-bottom. FlatList's `scrollToEnd` sometimes fires
-  // BEFORE the list finishes rendering the newly-committed rows —
-  // especially on the very first paint of a chat with many messages,
-  // where the user briefly sees the TOP of the list before it jumps.
-  // We retry a few times over animation frames until the offset actually
-  // reaches the end (or we give up). Also called from `onContentSizeChange`
-  // so real-time incoming messages stay pinned to the bottom.
+  // Reliable scroll-to-bottom for the INVERTED FlatList.
+  //
+  // CRITICAL: in an inverted FlatList, `scrollToEnd()` goes to the LAST item
+  // in the data array — which is the OLDEST message and visually the TOP of
+  // the screen. That was the bug the user reported: "when I send a message
+  // the chat jumps to the top". We must use `scrollToOffset({ offset: 0 })`
+  // which is the visual bottom (= newest) in an inverted list.
+  //
+  // We retry a few times over animation frames because the offset must be
+  // applied AFTER the new row is committed to the render tree.
   const scrollToBottom = useCallback((animated: boolean = false) => {
     if (!listRef.current) return;
     let attempts = 0;
     const tick = () => {
       attempts += 1;
       try {
-        listRef.current?.scrollToEnd({ animated });
+        listRef.current?.scrollToOffset({ offset: 0, animated });
       } catch { /* ignore */ }
       if (attempts < 6) {
-        // Use requestAnimationFrame so we align with the render pipeline.
-        // Six frames (~100ms) is plenty for the largest realistic chats.
         requestAnimationFrame(tick);
       }
     };
     tick();
   }, []);
 
-  // Auto-scroll to end on new messages.
+  // Auto-scroll to newest on first paint / when the message count changes.
+  // Using messages.length as the dep so this fires exactly once per new
+  // message. On subsequent renders (e.g. reaction updates that mutate an
+  // existing message but not the length) we don't disturb the user's
+  // scroll position.
   useEffect(() => {
     if (messages.length === 0) return;
-    // First render of a chat: no animation so the user sees the last
-    // message immediately, not a scroll-in transition from the top.
     scrollToBottom(false);
   }, [messages.length, scrollToBottom]);
 
@@ -358,6 +361,10 @@ export default function ChatScreen() {
     setMessages((prev) => [...prev, tmp]);
     setText("");
     setPendingImage(null);
+    // Force snap-to-newest regardless of where the user was scrolled. In an
+    // inverted list, offset 0 is the visual bottom. We schedule after the
+    // next frame so the new bubble is actually laid out first.
+    requestAnimationFrame(() => scrollToBottom(true));
     try {
       const r = await api.sendMessage(userId!, t || undefined, img || undefined);
       const real: ChatMessage = r.message;
@@ -376,7 +383,7 @@ export default function ChatScreen() {
     } finally {
       setSending(false);
     }
-  }, [sending, text, pendingImage, iBlocked, theyBlocked, user, userId]);
+  }, [sending, text, pendingImage, iBlocked, theyBlocked, user, userId, scrollToBottom]);
 
   const attachImage = useCallback(async () => {
     if (iBlocked || theyBlocked) return;
@@ -982,26 +989,30 @@ export default function ChatScreen() {
         </Pressable>
       </Modal>
 
-      {/* Custom confirm modal (replaces Alert.alert for destructive actions). */}
+      {/* Custom confirm modal (replaces Alert.alert for destructive actions).
+          Styled to match the confirmation modals used elsewhere in the app
+          (see /circle/[userId].tsx) — icon on top, muted body, ghost/danger
+          buttons with rounded corners. */}
       <Modal
         visible={!!confirmState}
         transparent
         animationType="fade"
         onRequestClose={() => setConfirmState(null)}
       >
-        <Pressable style={styles.modalBg} onPress={() => setConfirmState(null)}>
-          <Pressable style={styles.reportSheet} onPress={() => {}}>
-            <Text style={styles.sheetTitle}>{confirmState?.title?.toUpperCase()}</Text>
-            <Text style={{ color: colors.onSurface, fontSize: font.sizes.base, textAlign: "center" }}>
-              {confirmState?.body}
-            </Text>
-            <View style={{ flexDirection: "row", gap: spacing.sm }}>
+        <Pressable style={styles.confirmBackdrop} onPress={() => setConfirmState(null)}>
+          <Pressable style={styles.confirmCard} onPress={() => { /* swallow */ }}>
+            <View style={styles.confirmIconWrap}>
+              <Ionicons name="trash-outline" size={26} color={colors.error} />
+            </View>
+            <Text style={styles.confirmTitle}>{confirmState?.title}</Text>
+            <Text style={styles.confirmBody}>{confirmState?.body}</Text>
+            <View style={styles.confirmBtnRow}>
               <Pressable
                 onPress={() => setConfirmState(null)}
-                style={[styles.reportBtn, { backgroundColor: colors.surfaceTertiary }]}
+                style={[styles.confirmBtn, styles.confirmBtnGhost]}
                 testID="confirm-cancel"
               >
-                <Text style={{ color: colors.onSurface, letterSpacing: 1 }}>ANNULLA</Text>
+                <Text style={styles.confirmBtnGhostTxt}>ANNULLA</Text>
               </Pressable>
               <Pressable
                 onPress={() => {
@@ -1009,10 +1020,10 @@ export default function ChatScreen() {
                   setConfirmState(null);
                   if (cb) cb();
                 }}
-                style={[styles.reportBtn, { backgroundColor: colors.error }]}
+                style={[styles.confirmBtn, styles.confirmBtnDanger]}
                 testID="confirm-ok"
               >
-                <Text style={{ color: "#fff", letterSpacing: 1, fontWeight: "500" }}>CONFERMA</Text>
+                <Text style={styles.confirmBtnDangerTxt}>CONFERMA</Text>
               </Pressable>
             </View>
           </Pressable>
@@ -1262,4 +1273,80 @@ const styles = StyleSheet.create({
     zIndex: 10,
   },
   viewerImg: { width: "100%", height: "100%" },
+
+  // ==================================================================
+  // Confirm modal — matches the styling in /circle/[userId].tsx so all
+  // destructive confirmations across the app look and feel consistent.
+  // ==================================================================
+  confirmBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.65)",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: spacing.xl,
+  },
+  confirmCard: {
+    width: "100%",
+    maxWidth: 340,
+    backgroundColor: colors.surfaceSecondary,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.lg,
+    padding: spacing.xl,
+    gap: spacing.md,
+    alignItems: "center",
+  },
+  confirmIconWrap: {
+    width: 56, height: 56,
+    borderRadius: 28,
+    borderWidth: 1.5, borderColor: colors.error,
+    alignItems: "center", justifyContent: "center",
+    marginBottom: spacing.xs,
+  },
+  confirmTitle: {
+    color: colors.onSurface,
+    fontSize: font.sizes.xl,
+    fontWeight: "800",
+    letterSpacing: 0.5,
+    textAlign: "center",
+  },
+  confirmBody: {
+    color: colors.muted,
+    fontSize: font.sizes.base,
+    lineHeight: 22,
+    textAlign: "center",
+  },
+  confirmBtnRow: {
+    flexDirection: "row",
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+    width: "100%",
+  },
+  confirmBtn: {
+    flex: 1,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    alignItems: "center",
+    borderRadius: radius.pill,
+  },
+  confirmBtnGhost: {
+    borderWidth: 1.5,
+    borderColor: colors.borderStrong,
+    backgroundColor: "transparent",
+  },
+  confirmBtnGhostTxt: {
+    color: colors.onSurface,
+    fontWeight: "800",
+    fontSize: font.sizes.sm,
+    letterSpacing: 1,
+  },
+  confirmBtnDanger: {
+    backgroundColor: colors.error,
+  },
+  confirmBtnDangerTxt: {
+    color: "#FFFFFF",
+    fontWeight: "800",
+    fontSize: font.sizes.sm,
+    letterSpacing: 1,
+  },
 });
