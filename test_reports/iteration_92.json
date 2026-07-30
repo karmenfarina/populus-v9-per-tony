@@ -1,0 +1,33 @@
+{
+  "summary": "Frontend-only verifica ULTIMA fase di rifinitura chat: long-press su TIMESTAMP (metaTxt) e su TESTO INTERNO alla card shared_feud (sharedFeudCat/sharedFeudTitle/sharedFeudCtaTxt). 6/6 test PASS (100%). Il fix in /app/frontend/app/(tabs)/messages/[userId].tsx — userSelect:'none' + WebkitUserSelect:'none' + WebkitTouchCallout:'none' su styles.bubble (righe 1117-1129) + selectable={false} esplicito su sharedFeudCat/Title/CtaTxt/metaTxt — funziona perfettamente. Verificato: (A) long-press sul timestamp '16:33' di un bubble → apre react sheet (react-sheet-delete visibile), window.getSelection() vuoto; (B) long-press su TECH (category) → sheet mostra 'ELIMINA MESSAGGIO' (mine, no text=no copy), no selezione; (B) long-press sul TITOLO 'Robotaxi a San Francisco...' → sheet aperto, no selezione; (B) long-press su 'APRI IL POST' (CTA) → sheet aperto, no selezione; (C) TAP semplice sulla card shared_feud → navigato correttamente a /feud/feud_bd126370aefa?from=messages&messagesUserId=user_16f709708760 (invariato); (D) getComputedStyle su tutti i Text testati (timestamp, TECH, title, CTA, messageText) → userSelect:'none' su web, cursor:'pointer' sui Text interni al Pressable feud e cursor:'default' sul testo messaggio (come da styles.txt). NESSUNA area del bubble rimasta 'insensibile' al long-press. Nessuna regressione: tap semplice shared_feud continua a navigare al feud.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/tmp/A_ts_sheet.png",
+    "/tmp/B_title_sheet.png",
+    "/tmp/C_feud_nav.png"
+  ],
+  "action_items": [
+    "Nessuna correzione richiesta. Il fix long-press su timestamp e su testo interno alla card shared_feud è verificato end-to-end e funziona su web.",
+    "OSSERVAZIONE (non-blocking, già segnalata iter88/90/91): il file [userId].tsx è ~1426 righe. Considerare split in Bubble/ReactSheet/ConfirmModal/ImageViewer/SharedFeudCard per manutenibilità."
+  ],
+  "critical_code_review_comments": [
+    "L1117-1129 styles.bubble: userSelect:'none' + WebkitUserSelect:'none' + WebkitTouchCallout:'none' applicati SOLO su web via Platform.OS==='web' check. La regola CSS user-select:'none' viene ereditata da tutti i figli (cascade), quindi copre timestamp, sharedFeud text, e qualunque futuro Text aggiunto senza dover modificarli uno per uno.",
+    "L622/664 (sharedFeudCat), 625/668 (sharedFeudTitle), 630/673 (sharedFeudCtaTxt), 696 (metaTxt): selectable={false} esplicito — doppia protezione per iOS/Android (dove selectable è la prop React Native corretta) e per web (dove il CSS cascade dal bubble già disabilita).",
+    "L603-610, L638-651 shared_feud Pressable: onPress=openFeud/router.push + onLongPress=handleLongPress + delayLongPress=350 — pattern corretto per distinguere tap (naviga) da long-press (sheet). Verificato in runtime: tap semplice naviga a /feud/[id], long-press apre sheet senza navigare.",
+    "L559-565 outer Pressable bubble-row: onPress={handleTap} + onLongPress={handleLongPress} → il long-press sul padding vuoto del bubble apre comunque la sheet (verificato in iter91).",
+    "Selectore CSS su web: `getComputedStyle(el).cursor` per il testo del messaggio è 'default' (styles.txt L1140), per Text dentro Pressable è 'pointer' (default del Pressable web) — coerente con lo UX atteso: il testo del messaggio NON deve sembrare selezionabile, mentre le call-to-action dentro shared_feud sono cliccabili (tap=naviga)."
+  ],
+  "updated_files": [],
+  "success_rate": { "backend": "n/a (solo test frontend richiesto)", "frontend": "100% (6/6 controlli)" },
+  "seed_data_creation": "Login API POST /api/auth/login (User A: chat_a@test.it). Token salvato in localStorage['faide_token']. 2 nuovi messaggi seedati via POST /api/messages/send: (1) text 'Test lungo che continua e occupa spazio per assicurarsi che il long-press funzioni ovunque anche sul timestamp' (A→B); (2) shared_feud con feud_id=feud_bd126370aefa (Robotaxi San Francisco, category Tech) — payload corretto è {recipient_id, shared_feud_id: <id>} NON {shared_feud: {...}} (backend restituisce 'Messaggio vuoto' se si passa shared_feud object; il server enrichisce automaticamente shared_feud dal DB via feud_id).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Per testare long-press su web in modo affidabile: page.mouse.move(x,y) + page.mouse.down() + wait_for_timeout(700) + page.mouse.up(). delayLongPress nel codice è 350ms — 700ms è margine sicuro. Per API messaging: POST /api/messages/send con shared_feud richiede il campo `shared_feud_id` (string), il backend enrichisce automaticamente title/image_url/category_label dal DB. NON passare `shared_feud` come oggetto altrimenti si ottiene 400 'Messaggio vuoto'. Per rilevare selezione testo: `await page.evaluate(\"window.getSelection().toString()\")`. Per rilevare stato sheet: check di data-testid react-sheet-copy / react-sheet-delete / react-sheet-emoji-* nel DOM. URL chat pattern: siamo su /messages/[userId] renderizzato dentro /user/[userId] (Expo Router modal presentation) — window.location può riflettere /user/... ma la screen è comunque chat-screen.",
+  "rca_of_issue": "N/A — verifica di rifinitura UX; il fix precedentemente applicato dal main agent (userSelect:'none' su styles.bubble + selectable={false} sui 4 Text specifici) risolve completamente il problema segnalato dall'utente. Nessuna area del bubble rimasta 'insensibile' al long-press: timestamp OK, shared_feud category/title/CTA OK, message text OK, image bubble OK (verificato iter91), padding vuoto OK (verificato iter91)."
+}

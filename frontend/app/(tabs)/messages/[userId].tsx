@@ -619,15 +619,15 @@ export default function ChatScreen() {
                             </View>
                           )}
                           <View style={styles.sharedFeudBody}>
-                            <Text style={styles.sharedFeudCat} numberOfLines={1}>
+                            <Text selectable={false} style={styles.sharedFeudCat} numberOfLines={1}>
                               RISPOSTA ALLA STORIA
                             </Text>
-                            <Text style={styles.sharedFeudTitle} numberOfLines={3}>
+                            <Text selectable={false} style={styles.sharedFeudTitle} numberOfLines={3}>
                               {s.feud_title || "Apri il post"}
                             </Text>
                             <View style={styles.sharedFeudCta}>
                               <Ionicons name="open-outline" size={14} color={colors.brandPrimary} />
-                              <Text style={styles.sharedFeudCtaTxt}>APRI IL POST</Text>
+                              <Text selectable={false} style={styles.sharedFeudCtaTxt}>APRI IL POST</Text>
                             </View>
                           </View>
                         </Pressable>
@@ -661,16 +661,16 @@ export default function ChatScreen() {
                       )}
                       <View style={styles.sharedFeudBody}>
                         {item.shared_feud.category_label ? (
-                          <Text style={styles.sharedFeudCat} numberOfLines={1}>
+                          <Text selectable={false} style={styles.sharedFeudCat} numberOfLines={1}>
                             {item.shared_feud.category_label.toUpperCase()}
                           </Text>
                         ) : null}
-                        <Text style={styles.sharedFeudTitle} numberOfLines={3}>
+                        <Text selectable={false} style={styles.sharedFeudTitle} numberOfLines={3}>
                           {item.shared_feud.title || "Apri il post"}
                         </Text>
                         <View style={styles.sharedFeudCta}>
                           <Ionicons name="open-outline" size={14} color={colors.brandPrimary} />
-                          <Text style={styles.sharedFeudCtaTxt}>APRI IL POST</Text>
+                          <Text selectable={false} style={styles.sharedFeudCtaTxt}>APRI IL POST</Text>
                         </View>
                       </View>
                     </Pressable>
@@ -693,7 +693,7 @@ export default function ChatScreen() {
                 </>
               )}
               <View style={styles.metaRow}>
-                <Text style={[styles.metaTxt, mine ? styles.metaMine : styles.metaTheirs]}>
+                <Text selectable={false} style={[styles.metaTxt, mine ? styles.metaMine : styles.metaTheirs]}>
                   {formatTime(item.created_at)}
                 </Text>
                 {mine && !item.deleted && (
@@ -1119,6 +1119,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
     borderRadius: 16,
+    // Disable native text selection across the ENTIRE bubble content
+    // (text, timestamp, shared-feud card, etc.) so the parent Pressable
+    // always receives the long-press event — no matter where the user
+    // touches inside the bubble.
+    ...(Platform.OS === "web"
+      ? ({ userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none" } as any)
+      : {}),
   },
   bubbleMine: { backgroundColor: colors.brandPrimary, borderBottomRightRadius: 4 },
   bubbleTheirs: { backgroundColor: colors.surfaceSecondary, borderBottomLeftRadius: 4, borderWidth: 1, borderColor: colors.surfaceTertiary },
