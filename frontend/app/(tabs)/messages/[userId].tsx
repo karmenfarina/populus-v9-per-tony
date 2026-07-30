@@ -869,6 +869,7 @@ export default function ChatScreen() {
                   setTimeout(() => target && deleteMessage(target), 40);
                 }}
                 style={styles.reactAction}
+                testID="react-sheet-delete"
               >
                 <Ionicons name="trash-outline" size={18} color={colors.error} />
                 <Text style={{ color: colors.error, letterSpacing: 1 }}>ELIMINA MESSAGGIO</Text>
