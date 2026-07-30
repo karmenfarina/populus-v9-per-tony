@@ -8,11 +8,16 @@
 // on the pure-black canvas without shouting.
 // -----------------------------------------------------------------------------
 export const colors = {
-  // Backgrounds
-  surface: '#000000',           // main app canvas — pure black
-  surfaceSecondary: '#0F0F0F',  // elevated cards / sheet body
-  surfaceTertiary: '#1A1A1A',   // inputs, subtle chips background
-  surfaceInverse: '#000000',    // headers / tab bar (kept dark to match)
+  // Backgrounds — the base surface is intentionally NOT pure #000. A tiny
+  // amount of luminance (#0A0A0A) blends seamlessly with the logo asset
+  // background (icon-dark.png) so the balance icon doesn't sit inside a
+  // visible dark square. Elevated surfaces (cards, sheets, tab bar) step
+  // up by ~13 units of luminance so they stay clearly distinguishable
+  // from the canvas without becoming grey.
+  surface: '#0A0A0A',           // main app canvas — very dark, matches logo bg
+  surfaceSecondary: '#171717',  // elevated cards / sheet body
+  surfaceTertiary: '#212121',   // inputs, subtle chips background
+  surfaceInverse: '#0A0A0A',    // headers / tab bar (kept in sync with surface)
   onSurface: '#FFFFFF',
   onSurfaceInverse: '#FFFFFF',
 
@@ -22,15 +27,16 @@ export const colors = {
   onBrandPrimary: '#FFFFFF',
   brandSecondary: '#FFC700',    // Team B / yellow accent
   onBrandSecondary: '#000000',
-  brandTertiary: '#2A2A2A',     // dark neutral (was gray on light bg)
+  brandTertiary: '#363636',     // dark neutral (used where a subtle disabled/neutral tint is needed)
 
   // Feedback
   success: '#30D158',
   error: '#FF453A',
 
-  // Structure
-  border: '#1F1F1F',            // hairline separator on dark bg
-  borderStrong: '#2A2A2A',      // stronger outline where needed
+  // Structure — borders are calibrated to sit ~15-20 luminance units above
+  // the elevated surfaces so they stay visible on cards without shouting.
+  border: '#2A2A2A',            // hairline separator on cards
+  borderStrong: '#363636',      // stronger outline where needed
   muted: '#8A8A8E',             // secondary text / disabled
 } as const;
 
