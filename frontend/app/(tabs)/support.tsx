@@ -288,6 +288,17 @@ export default function SupportScreen() {
             testID="support-email"
             style={styles.input}
           />
+          {/* Reminder shown REGARDLESS of the bug category whenever the
+              user provides a contact email. Our reply may land in the spam
+              folder on some providers — the user reported they didn't
+              always see this tip because it was previously gated to the
+              "Login o verifica email" category. */}
+          <View style={styles.tipBox} testID="support-tip-spam">
+            <Ionicons name="information-circle" size={16} color={colors.brandPrimary} />
+            <Text style={styles.tipTxt}>
+              Se lasci l&apos;email, controlla anche la cartella spam/promozioni: la nostra risposta potrebbe finire lì.
+            </Text>
+          </View>
 
           {err && <Text style={styles.err} testID="support-error">{err}</Text>}
 
