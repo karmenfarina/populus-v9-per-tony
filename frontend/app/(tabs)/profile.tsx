@@ -1168,13 +1168,17 @@ export default function Profile() {
                     key={f}
                     onPress={() => setFilter(f)}
                     testID={`filter-${f}`}
-                    // All three filters use the same "yellow-bordered pill"
-                    // active state — the semantic team colors (red/yellow)
-                    // were causing the filter chips to compete visually
-                    // with the vote-badge colours further down the list.
-                    style={[styles.filterChip, filter === f && { borderColor: colors.brandSecondary }]}
+                    // Selected chip: dark filled ("recessed") background so
+                    // it clearly stands apart from the card wrapper, with
+                    // yellow border + yellow bold label. Team colours are
+                    // intentionally NOT used here — they'd clash with the
+                    // vote-side red/yellow further down the list.
+                    style={[
+                      styles.filterChip,
+                      filter === f && styles.filterChipActive,
+                    ]}
                   >
-                    <Text style={[styles.filterTxt, filter === f && { color: colors.brandSecondary }]}>
+                    <Text style={[styles.filterTxt, filter === f && styles.filterTxtActive]}>
                       {f === "all" ? "TUTTI" : f === "majority" ? "MAGGIORANZA" : "MINORANZA"}
                     </Text>
                   </Pressable>
@@ -1514,10 +1518,18 @@ const styles = StyleSheet.create({
     borderColor: colors.borderStrong,
     borderRadius: radius.pill,
     paddingVertical: spacing.sm + 2,
+    paddingHorizontal: spacing.xs,
     alignItems: "center",
     backgroundColor: "transparent",
   },
-  filterTxt: { fontSize: font.sizes.xs, letterSpacing: 1.2, color: colors.muted, fontWeight: "800" },
+  filterChipActive: {
+    // Same "pressed" look on all three (TUTTI/MAGGIORANZA/MINORANZA):
+    // dark bg + yellow border + yellow bold text. No team colours here.
+    backgroundColor: colors.surface,
+    borderColor: colors.brandSecondary,
+  },
+  filterTxt: { fontSize: font.sizes.xs, letterSpacing: 1, color: colors.muted, fontWeight: "800" },
+  filterTxtActive: { color: colors.brandSecondary },
   center: { padding: spacing.xl, alignItems: "center" },
   emptyH: { paddingHorizontal: spacing.lg, paddingVertical: spacing.xl, color: colors.muted, fontSize: font.sizes.base },
   historyList: { gap: spacing.sm },

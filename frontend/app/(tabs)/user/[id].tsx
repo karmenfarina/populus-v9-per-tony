@@ -7,7 +7,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { api, PublicUser, HistoryItem } from "@/src/api";
 import { useAuth } from "@/src/auth/AuthContext";
-import { colors, spacing, font, sideColor } from "@/src/theme";
+import { colors, spacing, font, sideColor, radius } from "@/src/theme";
 import { useSmartBack } from "@/src/utils/useSmartBack";
 import { scrollMemory } from "@/src/utils/scrollMemory";
 import { PhotoGalleryViewer } from "@/src/components/PhotoGalleryViewer";
@@ -604,18 +604,12 @@ export default function UserPublicScreen() {
                       testID={`public-filter-${f}`}
                       style={[
                         styles.filterChip,
-                        filter === f && (
-                          f === "majority" ? { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary } :
-                          f === "minority" ? { backgroundColor: colors.brandSecondary, borderColor: colors.brandSecondary } :
-                          { backgroundColor: colors.surfaceInverse, borderColor: colors.surfaceInverse }
-                        ),
+                        filter === f && styles.filterChipActive,
                       ]}
                     >
                       <Text style={[
                         styles.filterTxt,
-                        filter === f && (
-                          f === "minority" ? { color: colors.onBrandSecondary } : { color: "#FFFFFF" }
-                        ),
+                        filter === f && styles.filterTxtActive,
                       ]}>
                         {f === "all" ? "TUTTI" : f === "majority" ? "MAGGIORANZA" : "MINORANZA"}
                       </Text>
@@ -922,8 +916,22 @@ const styles = StyleSheet.create({
   socialLabel: { fontSize: font.sizes.sm, letterSpacing: 1, color: colors.onSurface, fontWeight: "500" },
   socialUrl: { fontSize: font.sizes.xs, color: colors.muted, marginTop: 2 },
   filterRow: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.xs },
-  filterChip: { flex: 1, borderWidth: 2, borderColor: colors.border, paddingVertical: spacing.sm, alignItems: "center", backgroundColor: colors.surfaceSecondary },
-  filterTxt: { fontSize: font.sizes.xs, letterSpacing: 1, color: colors.onSurface, fontWeight: "500" },
+  filterChip: {
+    flex: 1,
+    borderWidth: 1.5,
+    borderColor: colors.borderStrong,
+    borderRadius: radius.pill,
+    paddingVertical: spacing.sm + 2,
+    paddingHorizontal: spacing.xs,
+    alignItems: "center",
+    backgroundColor: "transparent",
+  },
+  filterChipActive: {
+    backgroundColor: colors.surface,
+    borderColor: colors.brandSecondary,
+  },
+  filterTxt: { fontSize: font.sizes.xs, letterSpacing: 1, color: colors.muted, fontWeight: "800" },
+  filterTxtActive: { color: colors.brandSecondary },
   emptyH: { paddingVertical: spacing.lg, color: colors.muted, fontSize: font.sizes.base, textAlign: "center" },
   historyHiddenBox: {
     alignItems: "center",
@@ -943,7 +951,9 @@ const styles = StyleSheet.create({
   hTitle: { fontSize: font.sizes.base, color: colors.onSurface, marginTop: 2, lineHeight: 18 },
   hMetaRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: spacing.xs, flexWrap: "wrap", gap: spacing.xs },
   hVoted: { fontSize: font.sizes.xs, fontWeight: "500", flexShrink: 1 },
-  hBadge: { fontSize: font.sizes.xs, letterSpacing: 1, paddingHorizontal: 6, paddingVertical: 2, borderWidth: 1, borderColor: colors.border },
-  hBadgeMaj: { backgroundColor: colors.brandPrimary, color: colors.onBrandPrimary },
-  hBadgeMin: { backgroundColor: colors.brandSecondary, color: colors.onBrandSecondary },
+  hBadge: { fontSize: font.sizes.xs, letterSpacing: 1, paddingHorizontal: 8, paddingVertical: 3, borderWidth: 1, borderRadius: radius.sm, fontWeight: "800" },
+  // Neutral outline for MAGGIORANZA/MINORANZA badges on the public
+  // profile — keeps them visually distinct from the vote-side colours.
+  hBadgeMaj: { backgroundColor: "transparent", borderColor: colors.borderStrong, color: colors.muted },
+  hBadgeMin: { backgroundColor: "transparent", borderColor: colors.borderStrong, color: colors.muted },
 });
