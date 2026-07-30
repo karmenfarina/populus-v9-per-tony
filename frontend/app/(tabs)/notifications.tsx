@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   View, Text, StyleSheet, FlatList, ActivityIndicator, Pressable, RefreshControl,
 } from "react-native";
@@ -7,6 +7,7 @@ import { useRouter, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "@/src/api";
 import { colors, spacing, font, radius } from "@/src/theme";
+import { ScrollToTopButton } from "@/src/components/ScrollToTopButton";
 import { useNotifications } from "@/src/notifications/NotificationsContext";
 import { useAuth } from "@/src/auth/AuthContext";
 
@@ -49,6 +50,9 @@ export default function NotificationsScreen() {
   const [items, setItems] = useState<Notif[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  // Floating "back to top" pill on the notifications list.
+  const notifListRef = useRef<FlatList<Notif>>(null);
+  const [showTopBtn, setShowTopBtn] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -108,10 +112,13 @@ export default function NotificationsScreen() {
         </View>
       ) : (
         <FlatList
+          ref={notifListRef}
           data={items}
           keyExtractor={(i) => i.notif_id}
           contentContainerStyle={styles.list}
           ItemSeparatorComponent={() => <View style={styles.sep} />}
+          onScroll={(e) => setShowTopBtn(e.nativeEvent.contentOffset.y > 500)}
+          scrollEventThrottle={120}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.brandSecondary} />}
           renderItem={({ item }) => {
             const iconName = ICONS[item.type] || "notifications";
@@ -150,6 +157,11 @@ export default function NotificationsScreen() {
           }}
         />
       )}
+      <ScrollToTopButton
+        visible={showTopBtn}
+        onPress={() => notifListRef.current?.scrollToOffset({ offset: 0, animated: true })}
+        testID="notif-scroll-top"
+      />
     </SafeAreaView>
   );
 }

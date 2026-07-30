@@ -12,6 +12,7 @@ import { useAuth } from "@/src/auth/AuthContext";
 import { colors, spacing, font, radius } from "@/src/theme";
 import FeudCard from "@/src/components/FeudCard";
 import StoriesBar from "@/src/components/StoriesBar";
+import { ScrollToTopButton } from "@/src/components/ScrollToTopButton";
 
 const ALL_CAT = { id: "all", label: "Tutte" };
 const HYPE_CAT = { id: "hype", label: "🔥 Hype" };
@@ -40,6 +41,9 @@ export default function HomeFeed() {
   // Auto-center the selected chip in the horizontal strip.
   const chipScrollRef = useRef<ScrollView>(null);
   const chipLayouts = useRef<Record<string, { x: number; w: number }>>({});
+  // Ref + visibility flag driving the floating "back to top" pill on the feed.
+  const feedListRef = useRef<FlatList<Feud>>(null);
+  const [showTopBtn, setShowTopBtn] = useState(false);
   const { width: winW } = useWindowDimensions();
   const centerChip = useCallback((id: string, animated = true) => {
     const l = chipLayouts.current[id];
@@ -307,13 +311,19 @@ export default function HomeFeed() {
       ) : (
         <View style={{ flex: 1 }} {...(isWeb ? webPan.panHandlers : {})}>
         <FlatList
+          ref={feedListRef}
           data={feuds}
           keyExtractor={(f) => f.feud_id}
           contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xxxl }}
           ItemSeparatorComponent={() => <View style={{ height: spacing.lg }} />}
           refreshControl={<RefreshControl refreshing={pullRefreshing} onRefresh={onRefresh} tintColor={colors.brandSecondary} colors={[colors.brandSecondary]} />}
           onScroll={(e) => {
-            scrollAtTopRef.current = e.nativeEvent.contentOffset.y <= 4;
+            const y = e.nativeEvent.contentOffset.y;
+            scrollAtTopRef.current = y <= 4;
+            // Show the floating scroll-to-top pill once the user has moved
+            // past ~1.2 viewport heights so the button doesn't distract at
+            // the top of the feed.
+            setShowTopBtn(y > 600);
           }}
           scrollEventThrottle={100}
           // Preserve scroll offset when the list refreshes on focus (e.g.
@@ -329,6 +339,13 @@ export default function HomeFeed() {
           renderItem={({ item }) => (
             <FeudCard feud={item} onPress={() => router.push(`/feud/${item.feud_id}`)} />
           )}
+        />
+        <ScrollToTopButton
+          visible={showTopBtn}
+          onPress={() => {
+            feedListRef.current?.scrollToOffset({ offset: 0, animated: true });
+          }}
+          testID="home-scroll-top"
         />
         </View>
       )}

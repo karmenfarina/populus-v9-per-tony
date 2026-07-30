@@ -10,6 +10,7 @@ import { api, Feud } from "@/src/api";
 import { useAuth } from "@/src/auth/AuthContext";
 import { colors, spacing, font, radius } from "@/src/theme";
 import FeudCard from "@/src/components/FeudCard";
+import { ScrollToTopButton } from "@/src/components/ScrollToTopButton";
 
 const ALL_CAT = { id: "all", label: "Tutte" };
 
@@ -66,6 +67,9 @@ export default function ArchiveScreen() {
   // Auto-center the selected category chip in the horizontal strip.
   const chipScrollRef = useRef<ScrollView>(null);
   const chipLayouts = useRef<Record<string, { x: number; w: number }>>({});
+  // Floating "back to top" pill on the archive feuds list.
+  const archiveListRef = useRef<FlatList<Feud>>(null);
+  const [showTopBtn, setShowTopBtn] = useState(false);
   const { width: winW } = useWindowDimensions();
   const centerChip = useCallback((id: string, animated = true) => {
     const l = chipLayouts.current[id];
@@ -251,10 +255,13 @@ export default function ArchiveScreen() {
           </View>
         ) : (
           <FlatList
+            ref={archiveListRef}
             data={feuds}
             keyExtractor={(f) => f.feud_id}
             contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xxxl }}
             ItemSeparatorComponent={() => <View style={{ height: spacing.lg }} />}
+            onScroll={(e) => setShowTopBtn(e.nativeEvent.contentOffset.y > 600)}
+            scrollEventThrottle={120}
             ListEmptyComponent={
               <View style={styles.center} testID="archive-empty-feuds">
                 <Text style={styles.empty}>NESSUNA FAIDA IN QUESTA CATEGORIA.</Text>
@@ -280,6 +287,11 @@ export default function ArchiveScreen() {
           />
         )
       )}
+      <ScrollToTopButton
+        visible={showTopBtn}
+        onPress={() => archiveListRef.current?.scrollToOffset({ offset: 0, animated: true })}
+        testID="archive-scroll-top"
+      />
     </SafeAreaView>
   );
 }

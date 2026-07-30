@@ -11,6 +11,7 @@ import * as Haptics from "expo-haptics";
 import * as Clipboard from "expo-clipboard";
 import { api, ApiError, Comment, Feud, Reply, Sponsor } from "@/src/api";
 import { colors, spacing, font, sideColor, onSideColor, radius } from "@/src/theme";
+import { ScrollToTopButton } from "@/src/components/ScrollToTopButton";
 import FeudMediaBlock from "@/src/components/FeudMediaBlock";
 import FeudStatsModal from "@/src/components/FeudStatsModal";
 import AiFactionSummaryModal from "@/src/components/AiFactionSummaryModal";
@@ -120,6 +121,14 @@ export default function FeudDetail() {
   const [inAppShareOpen, setInAppShareOpen] = useState(false);
   const { sourcesExpanded, setSourcesExpanded } = useUIPrefs();
   const scrollRef = useRef<ScrollView>(null);
+  // Floating "back to top" pill: appears once the user scrolls past the hero
+  // + poll and is deep into comments. Threshold raised so the button doesn't
+  // pop up while the user is still reading the article.
+  const [showTopBtn, setShowTopBtn] = useState(false);
+  // Y position of the comments section header (captured via onLayout).
+  // Used as the scroll target so the pill returns to the start of comments,
+  // not to the top of the page. Fallback 0 until first layout.
+  const commentsYRef = useRef(0);
 
   // Clear all per-post state the instant the route param changes so the
   // screen never shows the *previous* post's contents while the next one
@@ -415,7 +424,21 @@ export default function FeudDetail() {
       </View>
 
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={80}>
-        <ScrollView ref={scrollRef} contentContainerStyle={{ paddingBottom: spacing.xxxl }}>
+        <ScrollView
+          ref={scrollRef}
+          contentContainerStyle={{ paddingBottom: spacing.xxxl }}
+          onScroll={(e) => {
+            // Show the pill only once the user has scrolled past the
+            // comments header itself + a full viewport — otherwise the
+            // pill pops up while still reading the article. If we don't
+            // yet have a measured Y, fall back to a large hardcoded
+            // threshold so the button doesn't appear at all in the article.
+            const y = e.nativeEvent.contentOffset.y;
+            const target = commentsYRef.current || 0;
+            setShowTopBtn(target > 0 ? y > target + 400 : y > 1400);
+          }}
+          scrollEventThrottle={120}
+        >
           <ImageBackground source={{ uri: feud.image_url }} style={styles.hero}>
             <LinearGradient colors={["rgba(0,0,0,0)", "rgba(0,0,0,0.9)"]} style={StyleSheet.absoluteFill} />
             {!isAnonymous && (
@@ -636,7 +659,16 @@ export default function FeudDetail() {
             </View>
           )}
 
-          <View style={styles.commentsTabs} testID="comments-tabs">
+          <View
+            style={styles.commentsTabs}
+            testID="comments-tabs"
+            onLayout={(e) => {
+              // Persist the Y position of the comments header — used by the
+              // floating scroll-to-top pill so it returns the user right at
+              // the start of the comments section (not to the hero image).
+              commentsYRef.current = e.nativeEvent.layout.y;
+            }}
+          >
             <Pressable
               onPress={() => setActiveSide((s) => (s === "A" ? null : "A"))}
               testID="comments-tab-a"
@@ -711,6 +743,11 @@ export default function FeudDetail() {
           )}
         </ScrollView>
       </KeyboardAvoidingView>
+      <ScrollToTopButton
+        visible={showTopBtn}
+        onPress={() => scrollRef.current?.scrollTo({ y: Math.max(0, commentsYRef.current - 8), animated: true })}
+        testID="feud-scroll-top"
+      />
       <FeudStatsModal
         visible={statsOpen}
         feudId={feud.feud_id}

@@ -9,6 +9,7 @@ import { useRouter, useFocusEffect } from "expo-router";
 import { useAuth } from "@/src/auth/AuthContext";
 import { api, HistoryItem, UserPhoto } from "@/src/api";
 import { colors, spacing, font, sideColor, radius } from "@/src/theme";
+import { ScrollToTopButton } from "@/src/components/ScrollToTopButton";
 import PhotoCropper from "@/src/components/PhotoCropper";
 import CategoryBadgesModal from "@/src/components/CategoryBadgesModal";
 import ProfessionModal from "@/src/components/profile/ProfessionModal";
@@ -70,6 +71,12 @@ export default function Profile() {
   // stores the offset + restore flag at module scope so they
   // survive the round-trip.
   const scrollRef = useRef<ScrollView>(null);
+  // Toggle for the floating "back to top" pill on the profile.
+  const [showTopBtn, setShowTopBtn] = useState(false);
+  // Y position of the STORICO VOTI section (captured via onLayout).
+  // The pill scrolls to this offset so the user lands back at the top
+  // of their vote history — not at the avatar/header.
+  const historyYRef = useRef(0);
   // Local mirror of the target offset applied by the retry-loop
   // during a restoration. Cleared once we've stopped chasing the
   // offset so normal user scrolling isn't fought.
@@ -787,9 +794,13 @@ export default function Profile() {
         ref={scrollRef}
         contentContainerStyle={styles.content}
         onScroll={(e) => {
+          const y = e.nativeEvent.contentOffset.y;
           // Persist to module scope so a component remount during
           // navigation to a detail screen doesn't wipe the offset.
-          scrollMemory.setY(SCROLL_KEY, e.nativeEvent.contentOffset.y);
+          scrollMemory.setY(SCROLL_KEY, y);
+          // Floating "back to top" pill: show once the user is deep in
+          // the profile (past the badge card + stats + prefs section).
+          setShowTopBtn(y > 700);
         }}
         // 16ms throttle is enough to persist the offset without
         // adding perceptible lag to the scroll gesture.
@@ -1083,7 +1094,17 @@ export default function Profile() {
           </Pressable>
         )}
 
-        <View style={styles.historySection} testID="history-section">
+        <View
+          style={styles.historySection}
+          testID="history-section"
+          onLayout={(e) => {
+            // Y offset of the STORICO VOTI section header inside the
+            // profile ScrollView — used by the floating scroll-to-top
+            // pill so it returns to the first history post rather than
+            // all the way to the avatar at the top of the page.
+            historyYRef.current = e.nativeEvent.layout.y;
+          }}
+        >
           <View style={styles.historyHeadRow}>
             <Pressable
               onPress={() => setHistoryExpanded((v) => !v)}
@@ -1274,6 +1295,12 @@ export default function Profile() {
           </Pressable>
         ) : null}
       </ScrollView>
+
+      <ScrollToTopButton
+        visible={showTopBtn}
+        onPress={() => scrollRef.current?.scrollTo({ y: Math.max(0, historyYRef.current - 8), animated: true })}
+        testID="profile-scroll-top"
+      />
 
       <PrefsModal
         visible={prefsOpen}

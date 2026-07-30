@@ -23,6 +23,7 @@ import { api, ChatMessage, MiniUser } from "@/src/api";
 import { useAuth } from "@/src/auth/AuthContext";
 import { useMessaging } from "@/src/messaging/MessagingContext";
 import { colors, spacing, font, radius } from "@/src/theme";
+import { ScrollToTopButton } from "@/src/components/ScrollToTopButton";
 import { useSmartBack } from "@/src/utils/useSmartBack";
 
 const REACTIONS = ["❤️", "😂", "😮", "😢", "😡", "👍", "👎", "🔥"];
@@ -174,6 +175,8 @@ export default function ChatScreen() {
     onConfirm: () => void;
   } | null>(null);
   const listRef = useRef<FlatList>(null);
+  // Toggle for the floating "back to latest" pill in the chat.
+  const [showLatestBtn, setShowLatestBtn] = useState(false);
 
   const openViewerForMessage = useCallback(async (msg: ChatMessage) => {
     if (!msg.image_data) return;
@@ -735,6 +738,12 @@ export default function ChatScreen() {
             keyExtractor={(m) => m.message_id}
             renderItem={renderMessage}
             contentContainerStyle={styles.list}
+            // Track how far the user has scrolled UP into older messages
+            // (contentOffset.y grows as you drag up, because the list is
+            // inverted). Show the floating "back to latest" pill once the
+            // user is >600px away from the freshest message.
+            onScroll={(e) => setShowLatestBtn(e.nativeEvent.contentOffset.y > 600)}
+            scrollEventThrottle={120}
             // No scrollToBottom needed with inverted — new messages
             // being prepended (from a WS push) will already appear
             // at the bottom automatically. We still call it once on
@@ -753,6 +762,13 @@ export default function ChatScreen() {
             }
           />
         )}
+        <ScrollToTopButton
+          visible={showLatestBtn}
+          direction="down"
+          onPress={() => listRef.current?.scrollToOffset({ offset: 0, animated: true })}
+          bottomOffset={80}
+          testID="chat-scroll-latest"
+        />
 
         {(iBlocked || theyBlocked) && (
           <View style={styles.blockedBar}>

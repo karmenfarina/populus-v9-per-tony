@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   View, Text, StyleSheet, FlatList, RefreshControl, Pressable, ActivityIndicator,
 } from "react-native";
@@ -9,6 +9,7 @@ import { api, Feud } from "@/src/api";
 import { useAuth } from "@/src/auth/AuthContext";
 import { colors, spacing, font, radius } from "@/src/theme";
 import FeudCard from "@/src/components/FeudCard";
+import { ScrollToTopButton } from "@/src/components/ScrollToTopButton";
 
 export default function TopScreen() {
   const router = useRouter();
@@ -17,6 +18,9 @@ export default function TopScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Floating "back to top" pill on the TOP list.
+  const topListRef = useRef<FlatList<Feud>>(null);
+  const [showTopBtn, setShowTopBtn] = useState(false);
 
   const load = useCallback(async () => {
     if (!user) return;
@@ -111,10 +115,13 @@ export default function TopScreen() {
         </View>
       ) : (
         <FlatList
+          ref={topListRef}
           data={feuds}
           keyExtractor={(f) => f.feud_id}
           contentContainerStyle={styles.list}
           ItemSeparatorComponent={() => <View style={{ height: spacing.md }} />}
+          onScroll={(e) => setShowTopBtn(e.nativeEvent.contentOffset.y > 600)}
+          scrollEventThrottle={120}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -132,6 +139,11 @@ export default function TopScreen() {
           testID="top-list"
         />
       )}
+      <ScrollToTopButton
+        visible={showTopBtn}
+        onPress={() => topListRef.current?.scrollToOffset({ offset: 0, animated: true })}
+        testID="top-scroll-top"
+      />
     </SafeAreaView>
   );
 }
