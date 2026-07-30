@@ -533,6 +533,20 @@ export default function ChatScreen() {
             style={[styles.bubbleRow, mine ? styles.rowMine : styles.rowTheirs]}
             testID={`msg-bubble-${bubbleId}`}
           >
+            {/* Compact action button on the LEFT of my bubbles. Gives the
+                user a discoverable tap-target to open message actions
+                (reactions + delete) — without relying on long-press,
+                which was not obvious enough to some users. */}
+            {mine && !bubbleDeleted && (
+              <Pressable
+                onPress={() => setReactTarget(item)}
+                hitSlop={10}
+                style={styles.bubbleActionBtn}
+                testID={`msg-action-${bubbleId}`}
+              >
+                <Ionicons name="ellipsis-horizontal" size={16} color={colors.muted} />
+              </Pressable>
+            )}
             <View
               style={[
                 styles.bubble,
@@ -1054,9 +1068,21 @@ const styles = StyleSheet.create({
   list: { padding: spacing.sm, gap: 2 },
   dayDivider: { alignItems: "center", marginVertical: spacing.md },
   dayTxt: { fontSize: font.sizes.xs, color: colors.muted, letterSpacing: 2, backgroundColor: colors.surfaceTertiary, paddingHorizontal: spacing.md, paddingVertical: 4, borderRadius: 8 },
-  bubbleRow: { paddingHorizontal: 4, marginVertical: 2 },
-  rowMine: { alignItems: "flex-end" },
-  rowTheirs: { alignItems: "flex-start" },
+  bubbleRow: { paddingHorizontal: 4, marginVertical: 2, flexDirection: "row", alignItems: "flex-end" },
+  rowMine: { justifyContent: "flex-end" },
+  rowTheirs: { justifyContent: "flex-start" },
+  bubbleActionBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 4,
+    marginBottom: 6,
+    backgroundColor: colors.surfaceSecondary,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
   bubble: {
     maxWidth: "80%",
     paddingHorizontal: spacing.md,

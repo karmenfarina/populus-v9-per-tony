@@ -1,0 +1,32 @@
+{
+  "summary": "Verifica frontend del nuovo pulsante 'msg-action-<id>' sulla schermata chat /(tabs)/messages/[userId].tsx. Tutti i 7 test richiesti sono PASSATI: (1) i propri bubble mostrano sempre un pulsante ellipsis-horizontal circolare (28x28) alla loro sinistra; (2) il tap apre il react sheet con reazioni + pulsante rosso ELIMINA MESSAGGIO; (3) il tap su ELIMINA MESSAGGIO apre il confirm modal (card con icona cestino, bottoni tondi ANNULLA/CONFERMA); (4) CONFERMA marca il messaggio come 'Messaggio eliminato'; (5) i messaggi di User B NON hanno il pulsante action; (6) i messaggi già deleted NON hanno il pulsante action; (7) layout intatto: bubble propri allineati a destra, bubble altrui allineati a sinistra, timestamp visibile. Nota: il login web è passato via Firebase; le credenziali chat_a@test.it/test123 sono legacy backend. Sono stati usati iniettando il JWT via /api/auth/login in AsyncStorage/IndexedDB (chiave faide_token). Il backend endpoint POST /api/messages/send funziona correttamente.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "messages/[userId] (chat)", "issues": ["Il bubble dell'altro utente ('theirs') usa surfaceSecondary con testo onSurface; nello screenshot mobile il contrasto sembra minimo (testo chiaro su fondo chiaro) — verificare palette per assicurare rapporto WCAG AA. Non blocca il fix corrente, segnalato per follow-up."]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/tmp/react_sheet.png",
+    "/tmp/confirm_modal.png",
+    "/tmp/after_delete.png",
+    "/tmp/mixed_chat.png"
+  ],
+  "action_items": [
+    "Nessuna correzione richiesta per questa iterazione — il pulsante action funziona come specificato."
+  ],
+  "critical_code_review_comments": [
+    "File /(tabs)/messages/[userId].tsx è cresciuto oltre le 1370 righe: valutare split in sotto-componenti (Bubble, ReactSheet, ConfirmModal, ImageViewer) per manutenibilità.",
+    "Il ren­der del bubble utilizza un Pressable esterno con onPress/onLongPress + un Pressable annidato per l'action btn: il nested Pressable è corretto ma su alcuni RN-Web builds il tap parent può intercettare l'evento — attualmente sul preview web risulta OK (verificato)."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (frontend-only test)", "frontend": "100% (7/7 verifiche superate)"},
+  "seed_data_creation": "Nessun seed nuovo; usati account pre-esistenti chat_a@test.it e chat_b@test.it. Inviati 2 messaggi da A (uno poi eliminato) + 1 messaggio da B tramite /api/messages/send.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Il login web di Populus usa Firebase (auth.tsx → firebaseLogin). Le credenziali legacy chat_a@test.it/test123 NON funzionano tramite Firebase; per bypass in test iniettare il JWT dopo POST /api/auth/login nel localStorage E in IndexedDB 'RKStorage' → objectStore 'keyvaluepairs' → key 'faide_token' (valore = JSON.stringify(token)). testID chiave in chat: chat-screen, chat-input, chat-send, msg-bubble-<id>, msg-action-<id>, react-sheet-delete, confirm-ok, confirm-cancel. Endpoint per invio: POST /api/messages/send (NON /api/messages).",
+  "rca_of_issue": "N/A — feature aggiunta funziona come atteso."
+}
