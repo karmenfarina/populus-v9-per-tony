@@ -935,21 +935,34 @@ export default function Profile() {
         >
           <View style={[
             styles.badgeIcon,
-            badgeUnlocked && badgeType === "bastian_contrario" && { backgroundColor: colors.brandPrimary },
-            badgeUnlocked && badgeType === "buon_senso" && { backgroundColor: colors.brandSecondary },
+            badgeUnlocked && (badgeType === "bastian_contrario"
+              ? styles.badgeIconUnlockedRed
+              : styles.badgeIconUnlockedYellow),
           ]}>
             {badgeUnlocked ? (
-              // Emoji-based badge art — matches the visual language used
-              // in the full category badge shelf (`CategoryBadgesModal`).
-              // ⚖️ = "Buon Senso" (harmony with majority),
-              // 🎭 = "Bastian Contrario" (drama, opposition).
-              <Text style={styles.badgeEmoji}>
-                {badgeType === "bastian_contrario" ? "🎭" : "⚖️"}
-              </Text>
+              <>
+                {/* Emoji is the primary art. Sits inside a rounded inner
+                    disc so it reads as a proper "coin" no matter the
+                    accent colour of the outer ring. Coherent with the
+                    tier-card look in the full badge shelf. */}
+                <View style={[
+                  styles.badgeInnerDisc,
+                  badgeType === "bastian_contrario" && styles.badgeInnerDiscRed,
+                  badgeType === "buon_senso" && styles.badgeInnerDiscYellow,
+                ]}>
+                  <Text style={styles.badgeEmoji}>
+                    {badgeType === "bastian_contrario" ? "🎭" : "⚖️"}
+                  </Text>
+                </View>
+                {/* Sparkle accents in the corners to give the coin some
+                    life without going full skeuomorphic. */}
+                <Ionicons name="sparkles" size={14} color={colors.onSurface} style={styles.badgeSparkleTL} />
+                <Ionicons name="sparkles" size={12} color={colors.onSurface} style={styles.badgeSparkleBR} />
+              </>
             ) : (
               <Ionicons
                 name="lock-closed"
-                size={64}
+                size={54}
                 color={colors.muted}
               />
             )}
@@ -1415,7 +1428,7 @@ const styles = StyleSheet.create({
   avatarImg: { width: 80, height: 80, borderRadius: 40, borderWidth: 0, overflow: "hidden", backgroundColor: colors.surfaceInverse },
   avatarPlaceholder: { alignItems: "center", justifyContent: "center" },
   avatarEditBadge: { position: "absolute", right: -2, bottom: -2, width: 24, height: 24, borderRadius: 12, backgroundColor: colors.brandPrimary, borderWidth: 2, borderColor: colors.surface, alignItems: "center", justifyContent: "center" },
-  headerBio: { fontSize: font.sizes.base, color: colors.onSurfaceInverse, lineHeight: 20, borderLeftWidth: 2, borderColor: colors.brandSecondary, paddingLeft: spacing.sm },
+  headerBio: { fontSize: font.sizes.base, color: colors.onSurface, lineHeight: 20, borderLeftWidth: 2, borderColor: colors.brandSecondary, paddingLeft: spacing.sm },
   headerEditBtn: { flexDirection: "row", alignItems: "center", gap: 8, alignSelf: "flex-start", borderWidth: 1.5, borderColor: colors.brandSecondary, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
   headerEditTxt: { fontSize: font.sizes.sm, letterSpacing: 1, fontWeight: "800", color: colors.brandSecondary },
   anonBanner: { borderWidth: 2, borderColor: colors.brandSecondary, padding: spacing.md, gap: spacing.sm, backgroundColor: "rgba(255,230,0,0.08)" },
@@ -1424,12 +1437,30 @@ const styles = StyleSheet.create({
   anonRegisterBtn: { alignSelf: "flex-start", backgroundColor: colors.brandPrimary, borderWidth: 2, borderColor: colors.brandSecondary, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
   anonRegisterTxt: { color: colors.onBrandPrimary, fontSize: font.sizes.base, letterSpacing: 2, fontWeight: "500" },
   anonLockScreen: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.xxl, gap: spacing.md, backgroundColor: colors.surface },
-  anonLockCircle: { width: 140, height: 140, borderRadius: 70, borderWidth: 0, alignItems: "center", justifyContent: "center", backgroundColor: colors.surfaceInverse, marginBottom: spacing.sm, overflow: "hidden" },
-  anonLockTitle: { fontSize: font.sizes.xxxl, letterSpacing: 3, fontWeight: "500", color: colors.onSurface, textAlign: "center" },
-  anonLockSubtitle: { fontSize: font.sizes.base, color: colors.brandPrimary, letterSpacing: 1, marginTop: -spacing.xs },
+  anonLockCircle: { width: 140, height: 140, borderRadius: 70, borderWidth: 0, alignItems: "center", justifyContent: "center", backgroundColor: colors.surfaceSecondary, marginBottom: spacing.sm, overflow: "hidden" },
+  anonLockTitle: { fontSize: font.sizes.xxxl, letterSpacing: 2, fontWeight: "800", color: colors.onSurface, textAlign: "center" },
+  anonLockSubtitle: { fontSize: font.sizes.base, color: colors.brandSecondary, letterSpacing: 1, marginTop: -spacing.xs, fontWeight: "700" },
   anonLockBody: { fontSize: font.sizes.sm, color: colors.muted, textAlign: "center", lineHeight: 20, paddingHorizontal: spacing.md },
-  anonLockCta: { marginTop: spacing.lg, backgroundColor: colors.brandPrimary, borderWidth: 3, borderColor: colors.onSurface, paddingHorizontal: spacing.xxl, paddingVertical: spacing.md },
-  anonLockCtaTxt: { color: colors.onBrandPrimary, fontSize: font.sizes.lg, letterSpacing: 3, fontWeight: "500" },
+  // Refreshed CTA to match the rest of the rounded design system:
+  // • pill-shaped (`radius.pill`)
+  // • no aggressive white border
+  // • slightly smaller/less shouty label
+  anonLockCta: {
+    marginTop: spacing.lg,
+    backgroundColor: colors.brandPrimary,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.sm + 4,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  anonLockCtaTxt: {
+    color: colors.onBrandPrimary,
+    fontSize: font.sizes.base,
+    letterSpacing: 2,
+    fontWeight: "800",
+  },
   anonLockLogout: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: spacing.md, paddingVertical: spacing.xs },
   anonLockLogoutTxt: { color: colors.muted, fontSize: font.sizes.xs, letterSpacing: 1 },
   editSectionTitle: { fontSize: font.sizes.sm, letterSpacing: 2, fontWeight: "500", color: colors.brandPrimary },
@@ -1445,11 +1476,11 @@ const styles = StyleSheet.create({
   socialField: { gap: 4 },
   socialFieldLabel: { fontSize: font.sizes.xs, letterSpacing: 1, color: colors.muted },
   socialInput: { borderWidth: 2, borderColor: colors.border, padding: spacing.sm, fontSize: font.sizes.base, color: colors.onSurface, backgroundColor: colors.surfaceSecondary },
-  brand: { color: colors.onSurfaceInverse, fontSize: font.sizes.xxxl, letterSpacing: 2, fontWeight: "500" },
+  brand: { color: colors.onSurface, fontSize: font.sizes.xxxl, letterSpacing: 2, fontWeight: "500" },
   nickname: { color: colors.brandSecondary, fontSize: font.sizes.xxl, fontWeight: "500" },
-  provider: { color: colors.onSurfaceInverse, fontSize: font.sizes.sm, opacity: 0.7, marginTop: spacing.xs },
+  provider: { color: colors.onSurface, fontSize: font.sizes.sm, opacity: 0.7, marginTop: spacing.xs },
   displayName: {
-    color: colors.onSurfaceInverse,
+    color: colors.onSurface,
     fontSize: font.sizes.base,
     opacity: 0.75,
     marginTop: 2,
@@ -1480,21 +1511,62 @@ const styles = StyleSheet.create({
   badgeIcon: {
     width: 140,
     height: 140,
-    borderRadius: radius.md,
+    borderRadius: 70,
+    backgroundColor: colors.surfaceTertiary,
+    borderWidth: 2,
+    borderColor: colors.border,
+    alignItems: "center",
+    justifyContent: "center",
+    position: "relative",
+    overflow: "hidden",
+  },
+  // Unlocked variants — a colored ring hints at the badge type.
+  badgeIconUnlockedRed: {
+    borderColor: colors.brandPrimary,
+    backgroundColor: colors.surfaceSecondary,
+  },
+  badgeIconUnlockedYellow: {
+    borderColor: colors.brandSecondary,
+    backgroundColor: colors.surfaceSecondary,
+  },
+  badgeInnerDisc: {
+    width: 108,
+    height: 108,
+    borderRadius: 54,
     backgroundColor: colors.surfaceTertiary,
     alignItems: "center",
     justifyContent: "center",
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  badgeInnerDiscRed: {
+    // subtle red-tinted core so the coin doesn't feel flat
+    backgroundColor: "rgba(255,69,58,0.10)",
+    borderColor: "rgba(255,69,58,0.35)",
+  },
+  badgeInnerDiscYellow: {
+    backgroundColor: "rgba(255,199,0,0.10)",
+    borderColor: "rgba(255,199,0,0.40)",
   },
   badgeEmoji: {
-    // Large emoji rendered as the primary badge art, matching the tier
-    // cards in `CategoryBadgesModal.tierEmoji` in scale and presence.
-    fontSize: 82,
-    lineHeight: 96,
+    fontSize: 60,
+    lineHeight: 72,
     textAlign: "center",
-    // slight text shadow so a coloured background makes the glyph pop
     textShadowColor: "rgba(0,0,0,0.35)",
     textShadowOffset: { width: 0, height: 2 },
     textShadowRadius: 4,
+  },
+  badgeSparkleTL: {
+    position: "absolute",
+    top: 8,
+    left: 10,
+    opacity: 0.75,
+  },
+  badgeSparkleBR: {
+    position: "absolute",
+    bottom: 10,
+    right: 12,
+    opacity: 0.6,
   },
   badgeTitle: { fontSize: font.sizes.xxl, letterSpacing: 1.5, fontWeight: "800", color: colors.onSurface, marginTop: spacing.md },
   badgeSubtitle: { fontSize: font.sizes.base, color: colors.muted, marginTop: spacing.xs },

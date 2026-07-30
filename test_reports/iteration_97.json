@@ -1,0 +1,64 @@
+{
+  "summary": "Verificate le 5 rifiniture visive (A-F) su Populus (frontend-only, viewport mobile 390x844). Login admin via injection JWT (chiave 'faide_token' JSON-stringified). Utente anonimo creato via POST /api/auth/anonymous. Tutte le rifiniture superano il test. Nessuna regressione riscontrata.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "verifications": {
+    "A_logo_dark_bg": {
+      "status": "PASS",
+      "evidence": "PIL conferma sfondo icon-dark.png a RGB (10,10,10) = #0A0A0A (identico a theme.surface). Screenshot /auth (A1_auth_login_logo.png): logo bilancia 132x132 senza alcun rettangolo/bordo visibile — si amalgama perfettamente con lo sfondo #0A0A0A. Sull'header home (C_home_stories.png) icona piccola accanto a POPULUS pulita, nessun contorno grigio."
+    },
+    "B_badge_profile_large": {
+      "status": "PASS",
+      "evidence": "In /profile (admin JWT) profile-badge testID trovato. Struttura DOM verificata: outer ring 140x140 borderRadius 70px, bg rgb(23,23,23) = #171717 surfaceSecondary, border 2px rgb(255,199,0) = #FFC700 brandSecondary (buon_senso). Inner disc 108x108 borderRadius 54px, bg rgba(255,199,0,0.1) yellow tint, border 1px rgba(255,199,0,0.4). Emoji ⚖️ visibile al centro (B2_admin_badge_zoom.png/B1_admin_profile_full.png). Design 'moneta' coerente."
+    },
+    "B_badge_user_compact": {
+      "status": "PASS",
+      "evidence": "In /user/user_13f93cbd1ea9 (E1_user_badge_compact.png) card SPILLA mostra: outer 52x52 borderRadius 26px bg #171717 border 2px #FFC700, inner 40x40 borderRadius 20px bg rgba(255,199,0,0.1) border rgba(255,199,0,0.4), emoji ⚖️ centrale. Struttura compatta consistente con la grande."
+    },
+    "C_cta_registrati_ora_pill": {
+      "status": "PASS",
+      "evidence": "Anon-lock in /profile (D1_anon_profile_lock.png): CTA REGISTRATI ORA con borderRadius 999px (pill), backgroundColor rgb(255,69,58) = #FF453A brandPrimary, borderWidth 0px (nessun bordo bianco), width 213px. Idem su /top (D2_anon_top.png) e /support (D3_anon_support.png): stesso stile pill rosso, no border."
+    },
+    "D_stories_bar_thinner": {
+      "status": "PASS",
+      "evidence": "stories-bar altezza totale 110px, paddingTop 2px (era 4px). paddingBottom 0px sull'expandedHeader (era 2px). Cerchi storia invariati come richiesto. Vista espansa in home su viewport 390x844 (C_home_stories.png)."
+    },
+    "E_headers_white_text": {
+      "status": "PASS",
+      "evidence": "getComputedStyle su /profile (admin): profile-nickname color rgb(255,199,0) = #FFC700 giallo (invariato); profile-display-name color rgb(255,255,255) = #FFFFFF bianco (fix E applicato); profile-bio color rgb(255,255,255) = bianco con border-left 2px giallo brandSecondary. Tutti leggibili su sfondo scuro (B1_admin_profile_full.png). NON sono più neri/scuri come nella regressione prima."
+    },
+    "F_anon_lock_subtitle_yellow": {
+      "status": "PASS",
+      "evidence": "In D1_anon_profile_lock.png il subtitle '@testanon99' compare in giallo (brandSecondary #FFC700) e fontWeight 700 sotto 'PROFILO BLOCCATO' — non più rosso brandPrimary. Match visivo confermato."
+    }
+  },
+  "test_report_links": [
+    "/app/test_reports/screenshots_iter97/A1_auth_login_logo.png",
+    "/app/test_reports/screenshots_iter97/B1_admin_profile_full.png",
+    "/app/test_reports/screenshots_iter97/C_home_stories.png",
+    "/app/test_reports/screenshots_iter97/D1_anon_profile_lock.png",
+    "/app/test_reports/screenshots_iter97/D2_anon_top.png",
+    "/app/test_reports/screenshots_iter97/D3_anon_support.png",
+    "/app/test_reports/screenshots_iter97/E1_user_badge_compact.png"
+  ],
+  "action_items": [
+    "Nessun action item bloccante. Le 5 rifiniture (A-F) sono confermate a livello di DOM/CSS + screenshot.",
+    "Nota carry-over da iter_96 (non pertinente al task attuale, ma resta aperto): style 'commentsTabIndicator' orfano in feud/[id].tsx:1147."
+  ],
+  "critical_code_review_comments": [
+    "profile.tsx è cresciuto a 1847 righe — supera abbondantemente 700; frazionare in ProfileHeader, ProfileBadge, AnonLockScreen, EditForm sarebbe indicato.",
+    "profile.tsx e user/[id].tsx continuano a duplicare la logica render badge (colori/emoji buon_senso/bastian_contrario, inner disc). Estrarre <ProfileBadge type={} size='sm'|'lg'/> ridurrebbe drift."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (not tested)", "frontend": "100% (6/6 rifiniture A-F)"},
+  "seed_data_creation": "Nessun seed persistente. Anonimo di test 'TestAnon99' creato via POST /api/auth/anonymous (JWT salvato in localStorage). Admin via JWT pre-baked (/app/memory/test_credentials.md).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Login UI usa Firebase Auth: chat_a/chat_b non funzionano dalla UI. Usare JWT injection: page.evaluate(localStorage.setItem('faide_token', JSON.stringify(TOKEN))) poi navigare. JWT admin pre-baked in test_credentials.md. Per anonimo: POST /api/auth/anonymous con {nickname}. Backend base URL: EXPO_PUBLIC_BACKEND_URL da /app/frontend/.env.",
+  "rca_of_issue": "N/A - solo verifica rifiniture visive; nessun bug riscontrato."
+}

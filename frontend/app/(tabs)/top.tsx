@@ -170,8 +170,8 @@ const styles = StyleSheet.create({
   cta: {
     marginTop: spacing.md,
     backgroundColor: colors.brandPrimary,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.lg, paddingVertical: spacing.md,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.xl, paddingVertical: spacing.sm + 4,
   },
   ctaTxt: { color: colors.onBrandPrimary, letterSpacing: 1.5, fontWeight: "800" },
   list: { padding: spacing.lg, paddingBottom: spacing.xxxl, gap: spacing.md },

@@ -435,20 +435,20 @@ export default function StoriesBar() {
 const styles = StyleSheet.create({
   container: {
     // Expanded strip. Height derived from padding + circle + label.
-    // Left untouched: user asked to slim the COLLAPSED pill only,
-    // not the expanded strip with the story circles.
+    // Slimmed down after removing the "Storie" label above the circles.
     backgroundColor: colors.surface,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
-    paddingTop: 4,
+    paddingTop: 2,
   },
   expandedHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "flex-end",
     paddingHorizontal: spacing.md,
-    paddingBottom: 2,
-    paddingTop: 2,
+    paddingBottom: 0,
+    paddingTop: 0,
+    marginBottom: -2,
   },
   expandedHeaderLabel: {
     color: colors.muted,
@@ -516,7 +516,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     alignItems: "center",
     gap: spacing.md,
-    paddingBottom: 8,
+    paddingBottom: 4,
   },
   item: {
     width: CIRCLE_SIZE + 12,

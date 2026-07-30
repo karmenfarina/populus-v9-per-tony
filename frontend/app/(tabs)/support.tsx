@@ -374,7 +374,7 @@ const styles = StyleSheet.create({
   centerBox: { flex: 1, alignItems: "center", justifyContent: "center", gap: spacing.md, padding: spacing.xl },
   thanksBig: { color: colors.onSurface, fontSize: font.sizes.xxl, letterSpacing: 1, fontWeight: "800" },
   thanksSmall: { color: colors.muted, fontSize: font.sizes.base, textAlign: "center" },
-  homeBtn: { marginTop: spacing.md, borderRadius: radius.md, paddingHorizontal: spacing.lg, paddingVertical: spacing.md, backgroundColor: colors.brandPrimary },
+  homeBtn: { marginTop: spacing.md, borderRadius: radius.pill, paddingHorizontal: spacing.xl, paddingVertical: spacing.sm + 4, backgroundColor: colors.brandPrimary },
   homeBtnTxt: { color: colors.onBrandPrimary, letterSpacing: 1.5, fontWeight: "800" },
   anonLockCircle: { width: 120, height: 120, borderRadius: 60, borderWidth: 1.5, borderColor: colors.brandSecondary, alignItems: "center", justifyContent: "center", backgroundColor: colors.surfaceInverse, marginBottom: spacing.sm },
   anonSecondaryTxt: { color: colors.muted, fontSize: font.sizes.xs, letterSpacing: 1, marginTop: spacing.sm, textDecorationLine: "underline" },

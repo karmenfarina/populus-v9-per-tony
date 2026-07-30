@@ -511,9 +511,17 @@ export default function UserPublicScreen() {
                   badgeType === "bastian_contrario" ? styles.badgeIconRed : styles.badgeIconYellow,
                 ]}
               >
-                <Text style={styles.badgeEmoji}>
-                  {badgeType === "bastian_contrario" ? "🎭" : "⚖️"}
-                </Text>
+                <View
+                  style={[
+                    styles.badgeInnerDisc,
+                    badgeType === "bastian_contrario" && styles.badgeInnerDiscRed,
+                    badgeType !== "bastian_contrario" && styles.badgeInnerDiscYellow,
+                  ]}
+                >
+                  <Text style={styles.badgeEmoji}>
+                    {badgeType === "bastian_contrario" ? "🎭" : "⚖️"}
+                  </Text>
+                </View>
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.badgeKicker}>SPILLA · TOCCA PER LE ALTRE</Text>
@@ -901,12 +909,36 @@ const styles = StyleSheet.create({
   badgeCard: { flexDirection: "row", alignItems: "center", gap: spacing.sm, padding: spacing.md, borderWidth: 2, borderColor: colors.border, marginTop: spacing.sm },
   badgeCardRed: { backgroundColor: colors.brandPrimary },
   badgeCardYellow: { backgroundColor: colors.brandSecondary },
-  badgeIconWrap: { width: 52, height: 52, borderWidth: 2, borderColor: colors.border, alignItems: "center", justifyContent: "center", borderRadius: radius.md },
-  badgeIconRed: { backgroundColor: "#B31700" },
-  badgeIconYellow: { backgroundColor: "#D6A800" },
+  badgeIconWrap: {
+    width: 52, height: 52,
+    borderWidth: 2,
+    alignItems: "center", justifyContent: "center",
+    borderRadius: 26,
+    backgroundColor: colors.surfaceSecondary,
+  },
+  badgeIconRed: { borderColor: colors.brandPrimary },
+  badgeIconYellow: { borderColor: colors.brandSecondary },
+  badgeInnerDisc: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceTertiary,
+  },
+  badgeInnerDiscRed: {
+    backgroundColor: "rgba(255,69,58,0.10)",
+    borderColor: "rgba(255,69,58,0.35)",
+  },
+  badgeInnerDiscYellow: {
+    backgroundColor: "rgba(255,199,0,0.10)",
+    borderColor: "rgba(255,199,0,0.40)",
+  },
   badgeEmoji: {
-    fontSize: 30,
-    lineHeight: 36,
+    fontSize: 24,
+    lineHeight: 28,
     textAlign: "center",
     textShadowColor: "rgba(0,0,0,0.35)",
     textShadowOffset: { width: 0, height: 1 },

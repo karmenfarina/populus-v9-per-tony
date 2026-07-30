@@ -1144,7 +1144,6 @@ const styles = StyleSheet.create({
   commentsTabDim: { opacity: 0.42 },
   commentsTabCount: { color: colors.onBrandPrimary, fontSize: font.sizes.xxl, fontWeight: "800", letterSpacing: 0.5 },
   commentsTabLabel: { color: colors.onBrandPrimary, fontSize: font.sizes.xs, letterSpacing: 1, paddingHorizontal: spacing.xs, fontWeight: "700" },
-  commentsTabIndicator: { position: "absolute", left: 0, right: 0, bottom: 0, height: 3, backgroundColor: colors.onBrandPrimary },
   commentsList: { padding: spacing.md, backgroundColor: colors.surface },
   commentsIdle: { alignItems: "center", justifyContent: "center", paddingVertical: spacing.xxxl, gap: spacing.sm, backgroundColor: colors.surface },
   commentsIdleTxt: { color: colors.muted, fontSize: font.sizes.sm, letterSpacing: 1, textAlign: "center", paddingHorizontal: spacing.xl },
