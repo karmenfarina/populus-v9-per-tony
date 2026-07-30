@@ -241,7 +241,10 @@ export default function FeudDetail() {
       } catch {}
       // Voting can unlock an alignment badge (buon_senso / bastian_contrario).
       // Give the backend a moment to write the notification, then refresh.
+      // Fire two refreshes (fast + safety-net) so the badge counter lights
+      // up even if the first refresh races the async task on slow DB.
       setTimeout(() => { refreshUnreadNotifs().catch(() => {}); }, 800);
+      setTimeout(() => { refreshUnreadNotifs().catch(() => {}); }, 2500);
     } catch (e: any) { setError(e?.message || "Errore"); }
     finally { setVoting(false); }
   };
@@ -255,9 +258,9 @@ export default function FeudDetail() {
       const c = await api.comments(feud.feud_id, ownerUid);
       setSideA(c.side_a); setSideB(c.side_b);
       // Commenting can cross a category-badge threshold (100/250/500).
-      // Refresh the unread counter shortly after so the tab badge lights
-      // up without waiting for the next 30s poll.
+      // Two-shot refresh so the tab badge lights up even under DB load.
       setTimeout(() => { refreshUnreadNotifs().catch(() => {}); }, 800);
+      setTimeout(() => { refreshUnreadNotifs().catch(() => {}); }, 2500);
     } catch (e: any) { setError(e?.message || "Errore"); }
     finally { setPosting(false); }
   };
