@@ -150,7 +150,17 @@ export default function SupportScreen() {
           </Text>
           <Pressable
             style={styles.homeBtn}
-            onPress={async () => { await logout(); router.replace("/auth"); }}
+            onPress={async () => {
+              // Web: hard reload after fire-and-forget logout to avoid the
+              // "setUser(null) during outgoing render" crash the user
+              // reported when logging out of a Google session.
+              if (Platform.OS === "web" && typeof window !== "undefined") {
+                try { logout({ skipStateUpdates: true }).catch(() => {}); } catch {}
+                try { window.location.replace("/auth"); return; } catch {}
+              }
+              try { await logout(); } catch {}
+              router.replace("/auth");
+            }}
             testID="support-register-cta"
           >
             <Text style={styles.homeBtnTxt}>REGISTRATI ORA  ›</Text>

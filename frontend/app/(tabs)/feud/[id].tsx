@@ -18,6 +18,7 @@ import AiFactionSummaryModal from "@/src/components/AiFactionSummaryModal";
 import ShareSheet from "@/src/components/ShareSheet";
 import InAppShareSheet from "@/src/components/InAppShareSheet";
 import ConfirmModal from "@/src/components/ConfirmModal";
+import { useNotifications } from "@/src/notifications/NotificationsContext";
 import AdBanner from "@/src/ads/AdBanner";
 import { useUIPrefs } from "@/src/ui/UIPrefs";
 import { useAuth } from "@/src/auth/AuthContext";
@@ -30,6 +31,14 @@ export default function FeudDetail() {
     }>();
   const router = useRouter();
   const { user } = useAuth();
+  // Notifications badge polling context — we call refresh() after any
+  // action that MAY have earned the user a new badge server-side
+  // (voting for alignment badges, commenting for category badges), so
+  // the tab-bar counter updates within a couple of seconds instead of
+  // waiting up to 30s for the next scheduled poll. The 500ms delay
+  // covers the fire-and-forget `_evaluate_and_notify_*_badge_change`
+  // running in a background task on the backend.
+  const { refresh: refreshUnreadNotifs } = useNotifications();
   const isAnonymous = !!user && user.auth_provider === "anonymous";
 
   // Explicit back destination: when we know which tab launched us we return
@@ -230,6 +239,9 @@ export default function FeudDetail() {
         const c = await api.comments(feud.feud_id, ownerUid);
         setSideA(c.side_a); setSideB(c.side_b);
       } catch {}
+      // Voting can unlock an alignment badge (buon_senso / bastian_contrario).
+      // Give the backend a moment to write the notification, then refresh.
+      setTimeout(() => { refreshUnreadNotifs().catch(() => {}); }, 800);
     } catch (e: any) { setError(e?.message || "Errore"); }
     finally { setVoting(false); }
   };
@@ -242,6 +254,10 @@ export default function FeudDetail() {
       setCommentText("");
       const c = await api.comments(feud.feud_id, ownerUid);
       setSideA(c.side_a); setSideB(c.side_b);
+      // Commenting can cross a category-badge threshold (100/250/500).
+      // Refresh the unread counter shortly after so the tab badge lights
+      // up without waiting for the next 30s poll.
+      setTimeout(() => { refreshUnreadNotifs().catch(() => {}); }, 800);
     } catch (e: any) { setError(e?.message || "Errore"); }
     finally { setPosting(false); }
   };

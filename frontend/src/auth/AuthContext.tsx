@@ -19,7 +19,7 @@ type AuthState = {
   firebaseLogin: (email: string, password: string) => Promise<void>;
   firebaseResendVerification: () => Promise<void>;
   firebasePasswordReset: (email: string) => Promise<void>;
-  logout: () => Promise<void>;
+  logout: (opts?: { skipStateUpdates?: boolean }) => Promise<void>;
   refreshMe: () => Promise<void>;
 };
 
@@ -266,20 +266,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!ok) throw new Error('Session ID mancante nella risposta di Google');
   };
 
-  const logout = async () => {
+  const logout = async (opts?: { skipStateUpdates?: boolean }) => {
     // Set the guard BEFORE anything else — the background pollers
     // (notifications/messaging, both on 30s intervals) will now silently
     // no-op instead of hitting the backend with a bare header.
     markLoggedOut();
-    try { await api.logout(); } catch {}
+    // Fire-and-forget the backend + Firebase calls. Awaiting them can
+    // block the UI transition for hundreds of ms on flaky networks,
+    // and the actual navigation to /auth doesn't depend on them.
+    try { api.logout().catch(() => {}); } catch {}
     try {
       // Fire-and-forget Firebase sign-out so a stale Firebase session
       // can't override our next login attempt. Import inline to keep
       // the auth module tree-shakeable on cold start.
       const fb = await import('./firebase');
-      await fb.fbSignOut(fb.auth);
+      fb.fbSignOut(fb.auth).catch(() => {});
     } catch {}
-    await setToken(null);
+    // Always clear the token from persistent storage first so the next
+    // /users/me call returns null instead of a stale identity.
+    try { await setToken(null); } catch {}
+    // On WEB we defer the React state clear to AFTER `window.location`
+    // has been asked to navigate — otherwise setUser(null) triggers
+    // re-renders on the outgoing tree (Profile / Home / detail routes
+    // that legitimately read `user.foo`) while the hard-reload is
+    // still in flight. Result: red-screen crash on logout — the exact
+    // bug the user reported when logging out from a Google session.
+    //
+    // The caller (see profile.tsx doLogout) sets skipStateUpdates=true
+    // for the web path and initiates the hard reload IMMEDIATELY after
+    // this promise resolves. When the new HTML loads the AuthProvider
+    // mounts fresh with user=null.
+    if (opts?.skipStateUpdates) return;
     setUser(null);
   };
 

@@ -190,11 +190,14 @@ export default function Profile() {
     // Reset scroll memory so the next user doesn't inherit our offset.
     try { scrollMemory.reset(); } catch { /* noop */ }
     if (Platform.OS === "web" && typeof window !== "undefined") {
-      // Fire-and-forget the backend logout; the hard reload nukes the
-      // tree so we don't need to await it. Wrap in try/catch so a
-      // failing /auth/logout call (offline, 5xx, etc) doesn't block
-      // the redirect.
-      try { logout(); } catch { /* noop */ }
+      // WEB: on the hard-reload path we tell AuthContext to SKIP the
+      // `setUser(null)` call. That call would otherwise re-render every
+      // currently-mounted screen with `user === null` while the browser
+      // is still fetching /auth — and any component that reads
+      // `user.something` directly (there are still a few in the detail
+      // routes) would throw a red-screen. We navigate first, then let
+      // the fresh page start from a clean slate.
+      try { logout({ skipStateUpdates: true }).catch(() => {}); } catch { /* noop */ }
       try {
         const { navStack } = await import("@/src/utils/navStack");
         navStack.clear();
@@ -205,7 +208,9 @@ export default function Profile() {
       } catch { /* fall through to router.replace below */ }
     }
     // Native path: await the API call so SecureStore is really cleared
-    // before we mount /auth again.
+    // before we mount /auth again. On native, React Navigation properly
+    // unmounts detail routes when we replace to /auth so a `setUser(null)`
+    // during the transition is fine.
     try { await logout(); } catch { /* still navigate away */ }
     try {
       const { navStack } = await import("@/src/utils/navStack");
