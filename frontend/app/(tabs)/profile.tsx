@@ -1702,15 +1702,16 @@ const styles = StyleSheet.create({
   prefsEditBtnFull: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, borderWidth: 1.5, borderColor: colors.brandSecondary, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, backgroundColor: "transparent", alignSelf: "flex-start" },
   prefsEditTxt: { fontSize: font.sizes.sm, letterSpacing: 1, fontWeight: "800", color: colors.brandSecondary },
   prefsChipsRow: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, marginTop: spacing.xs },
+  // Read-only chip shown on the profile summary. Represents a category the
+  // user has already picked as a favourite → styled like the "selected"
+  // state of the edit-modal chips (red fill, fully rounded).
   prefChip: {
-    borderWidth: 1.5,
-    borderColor: colors.brandSecondary,
-    backgroundColor: "transparent",
-    borderRadius: radius.sm,
-    paddingHorizontal: spacing.sm + 2,
+    backgroundColor: colors.brandPrimary,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.md,
     paddingVertical: 6,
   },
-  prefChipTxt: { color: colors.brandSecondary, fontSize: font.sizes.sm, letterSpacing: 0.5, fontWeight: "700" },
+  prefChipTxt: { color: colors.onBrandPrimary, fontSize: font.sizes.sm, letterSpacing: 0.5, fontWeight: "700" },
   prefEmpty: { fontSize: font.sizes.base, color: colors.muted },
   modalBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
   modalSheet: { backgroundColor: colors.surface, borderTopWidth: 2, borderColor: colors.border, maxHeight: "85%" },

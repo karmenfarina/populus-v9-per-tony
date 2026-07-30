@@ -322,16 +322,19 @@ const styles = StyleSheet.create({
   content: { padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxxl },
   label: { color: colors.onSurface, fontSize: font.sizes.lg, letterSpacing: 0.3, fontWeight: "700", marginTop: spacing.sm },
   chipsWrap: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
+  // Selectable chips in the support form (bug category, frequency, ...).
+  // Same visual language as the edit-preferences modal: transparent-on-dark
+  // when idle, red fill when selected, fully rounded corners.
   chip: {
     borderWidth: 1.5,
-    borderColor: colors.brandSecondary,
-    borderRadius: radius.md,
+    borderColor: colors.border,
+    borderRadius: radius.pill,
     paddingHorizontal: spacing.md,
     paddingVertical: 10,
-    backgroundColor: "transparent",
+    backgroundColor: colors.surfaceSecondary,
   },
   chipOn: { borderColor: colors.brandPrimary, backgroundColor: colors.brandPrimary },
-  chipTxt: { fontSize: font.sizes.sm, color: colors.brandSecondary, letterSpacing: 0.3, fontWeight: "700" },
+  chipTxt: { fontSize: font.sizes.sm, color: colors.onSurface, letterSpacing: 0.3, fontWeight: "600" },
   chipTxtOn: { color: colors.onBrandPrimary, fontWeight: "800" },
   input: {
     borderWidth: 1,

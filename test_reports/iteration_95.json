@@ -1,0 +1,22 @@
+{
+  "summary": "Verifica visiva chip in tre sezioni (Profilo argomenti preferiti, PrefsModal MODIFICA ARGOMENTI, form Assistenza). Tutti i chip risultano correttamente ridisegnati: pill (border-radius 999px), colore rosso brandPrimary #FF453A per lo stato selezionato, sfondo surfaceSecondary #171717 con bordo #2A2A2A per lo stato idle, testo bianco. Nessun contorno giallo residuo sui chip. Il pulsante MODIFICA mantiene il bordo giallo (intenzionale). Test eseguito via Playwright su viewport 390x844 dopo login API + iniezione token in AsyncStorage/localStorage.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "profile.tsx contiene ancora nelle StyleSheet (linee 1722-1728) le vecchie definizioni prefsSelectAllRow/prefsCatChip/prefsCatChipOn/prefsCatTxt/prefsCatTxtOn (borderRadius 0, borderWidth 2). Sono dead code non referenziato (il modal usa PrefsModal.tsx separato) ma andrebbero rimosse per evitare confusione futura."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a", "frontend": "100%"},
+  "seed_data_creation": "Nessuna. L'utente chat_a@test.it aveva gia' favorite_categories=['politica','cronaca'].",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Login web via UI puo' fallire se si clicca il testo 'ACCEDI' (esistono 2 elementi con quel testo: il toggle e il CTA). Usare API login + iniezione token: localStorage.setItem('faide_token', JSON.stringify(token)) prima di caricare /profile. Chiave TOKEN_KEY='faide_token' in src/api.ts; AsyncStorage su web serializza in JSON.",
+  "rca_of_issue": "Task era refinement visivo. Verificati via getComputedStyle in browser: profile prefChip -> bg rgb(255,69,58) br 999px bw 0 color bianco; prefsCatChip idle -> bg rgb(23,23,23) br 999px bw 1px bc rgb(42,42,42), selected -> bg rgb(255,69,58); prefsSelectAllRow -> bg rgb(23,23,23) br 999px bw 1px bc rgb(42,42,42); support chip idle -> bg rgb(23,23,23) br 999px bw 1px bc rgb(42,42,42), selected -> bg rgb(255,69,58). PrefsEditButton (giallo intenzionale) -> border rgb(255,199,0)."
+}

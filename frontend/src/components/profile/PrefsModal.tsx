@@ -1,7 +1,7 @@
 import React from "react";
 import { View, Text, StyleSheet, Modal, Pressable, ScrollView, ActivityIndicator } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { colors, spacing, font } from "@/src/theme";
+import { colors, spacing, font, radius } from "@/src/theme";
 
 /**
  * "MODIFICA ARGOMENTI" (Edit favourite topics) modal — presented on the
@@ -100,13 +100,39 @@ const styles = StyleSheet.create({
   modalHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: spacing.lg, borderBottomWidth: 2, borderColor: colors.border, backgroundColor: colors.surfaceInverse },
   modalTitle: { color: colors.onSurfaceInverse, fontSize: font.sizes.xl, letterSpacing: 2, fontWeight: "500" },
   modalBody: { padding: spacing.lg, gap: spacing.md },
-  prefsSelectAllRow: { alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 6, borderWidth: 2, borderColor: colors.border, paddingHorizontal: spacing.sm, paddingVertical: 6, backgroundColor: colors.surfaceSecondary },
-  prefsSelectAllTxt: { fontSize: font.sizes.xs, letterSpacing: 1, fontWeight: "500", color: colors.onSurface },
+  prefsSelectAllRow: {
+    alignSelf: "flex-start",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 8,
+    backgroundColor: colors.surfaceSecondary,
+  },
+  prefsSelectAllTxt: { fontSize: font.sizes.xs, letterSpacing: 1, fontWeight: "700", color: colors.onSurface },
   prefsCatsGrid: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
-  prefsCatChip: { flexDirection: "row", alignItems: "center", gap: 8, borderWidth: 2, borderColor: colors.border, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, backgroundColor: colors.surfaceSecondary },
+  // Selectable chip in the edit-preferences sheet.
+  //   OFF → transparent-on-dark with a subtle grey outline (surfaceSecondary
+  //         + border), fully rounded (pill).
+  //   ON  → red fill (brandPrimary), no outline. Consistent with the visual
+  //         language used for the read-only chips in the profile summary.
+  prefsCatChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    backgroundColor: colors.surfaceSecondary,
+  },
   prefsCatChipOn: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
   prefsCatTxt: { fontSize: font.sizes.base, color: colors.onSurface, fontWeight: "500" },
-  prefsCatTxtOn: { color: colors.onBrandPrimary },
+  prefsCatTxtOn: { color: colors.onBrandPrimary, fontWeight: "700" },
   prefsErr: { color: colors.error, borderWidth: 2, borderColor: colors.error, padding: spacing.sm, fontSize: font.sizes.base },
   prefsSaveBtn: { backgroundColor: colors.brandPrimary, borderTopWidth: 2, borderColor: colors.border, paddingVertical: spacing.lg, alignItems: "center" },
   prefsSaveTxt: { color: colors.onBrandPrimary, fontSize: font.sizes.xl, letterSpacing: 2, fontWeight: "500" },
