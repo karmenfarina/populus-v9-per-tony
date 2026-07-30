@@ -1,0 +1,23 @@
+{
+  "summary": "Verificato il fix del modal di conferma eliminazione commenti/risposte in /feud/[id]. Il nuovo <ConfirmModal /> a card rotondeggiante (trash-outline rosso, titolo, body, bottoni pill ANNULLA/ELIMINA) sostituisce completamente il vecchio window.confirm nativo. Testati con Playwright entrambi i flussi (elimina commento + elimina risposta) con utente chat_a@test.it. Modal si apre correttamente su tap del cestino, ANNULLA chiude senza eliminare, ELIMINA chiama l'API e rimuove l'elemento. Nessuna chiamata a window.confirm durante il tap dei cestini (counter=0 tra prima e dopo il tap).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": ["/app/test_reports/screenshots_iter87/modal_open.png", "/app/test_reports/screenshots_iter87/reply_modal.png", "/app/test_reports/screenshots_iter87/comments_visible.png"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "ConfirmModal.tsx: pulito, tipizzato correttamente, usa il theme del brand (surfaceSecondary, radius.lg, radius.pill, colors.error). Backdrop Pressable con stopPropagation sulla card evita chiusure accidentali.",
+    "feud/[id].tsx CommentItem: stato locale `confirm` con union type discriminato (kind: 'comment'|'reply') è la scelta idiomatica. Un solo <ConfirmModal /> per item copre entrambi i casi cambiando testID/title/body dinamicamente."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (frontend only)", "frontend": "100%"},
+  "seed_data_creation": "Creato 1 commento (cmt_faf6b4f53d36) + 1 risposta (rep_ec4a4c9a1ece) su feud_e7375b9c3ef2 come user_6e65e19525d5 (chat_a) via API prima del test. Entrambi eliminati dal test stesso in modo pulito.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Il fix del ConfirmModal per delete commento/reply in feud/[id].tsx è verificato e stabile. Il vecchio window.confirm/Alert.alert è stato completamente rimosso da CommentItem. Nota: durante il caricamento iniziale della pagina feud web viene registrata UNA chiamata NATIVE_CONFIRM_CALLED [null] prima di qualsiasi interazione utente; probabilmente artifact del polyfill Alert di react-native-web (non correlato al fix). Zero chiamate durante il tap dei cestini di commento e risposta.",
+  "rca_of_issue": "Bug originale: CommentItem chiamava window.confirm(msg) su web e Alert.alert su nativo prima della DELETE. window.confirm è il dialog grigio del browser, non stilizzabile. Fix applicato: introdotto componente riutilizzabile ConfirmModal (RN Modal + card themed con radius.lg + trash icon cerchiata + pulsanti pill ANNULLA/ELIMINA). Stato locale nel CommentItem con union type per gestire sia comment che reply. testID emessi coerenti: confirm-delete-comment-{confirm|cancel} e confirm-delete-reply-{confirm|cancel}. Reproduzione test: (1) login chat_a@test.it, (2) apri feud_e7375b9c3ef2, tab TUTTI/A, (3) tap cestino su proprio commento -> compare card modal, (4) tap ANNULLA -> chiude, commento resta, (5) tap ELIMINA -> chiama DELETE /api/feuds/{id}/comments/{cid} e commento sparisce. Stesso flusso per reply-delete-{rid} -> DELETE /api/replies/{rid}. window.confirm counter=0 durante il flusso."
+}

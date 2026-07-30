@@ -17,6 +17,7 @@ import FeudStatsModal from "@/src/components/FeudStatsModal";
 import AiFactionSummaryModal from "@/src/components/AiFactionSummaryModal";
 import ShareSheet from "@/src/components/ShareSheet";
 import InAppShareSheet from "@/src/components/InAppShareSheet";
+import ConfirmModal from "@/src/components/ConfirmModal";
 import AdBanner from "@/src/ads/AdBanner";
 import { useUIPrefs } from "@/src/ui/UIPrefs";
 import { useAuth } from "@/src/auth/AuthContext";
@@ -801,38 +802,21 @@ function CommentItem({
   const isMine = !!meId && meId === c.user_id;
   const accent = sideColor(c.side as "A" | "B");
 
-  const confirmDeleteComment = () => {
-    if (Platform.OS === "web") {
-      // Alert.alert on RN-Web is unreliable; use the browser confirm dialog.
-      const ok = typeof window !== "undefined" ? window.confirm("Eliminare questo commento?") : true;
-      if (ok) onDeleteComment();
-      return;
-    }
-    Alert.alert(
-      "Elimina commento",
-      "Sei sicuro? Il commento e tutte le sue risposte verranno eliminati.",
-      [
-        { text: "Annulla", style: "cancel" },
-        { text: "Elimina", style: "destructive", onPress: onDeleteComment },
-      ],
-    );
-  };
+  // Local confirmation modal state. Two kinds:
+  //  • { kind: "comment" }        → confirm deleting THIS comment
+  //  • { kind: "reply", rid: id } → confirm deleting one of its replies
+  // Both use the shared themed <ConfirmModal /> so the UI matches the
+  // rounded design system used elsewhere in the app (no more grey
+  // native browser confirm dialog).
+  const [confirm, setConfirm] = useState<
+    | { kind: "comment" }
+    | { kind: "reply"; rid: string }
+    | null
+  >(null);
 
-  const confirmDeleteReply = (rid: string) => {
-    if (Platform.OS === "web") {
-      const ok = typeof window !== "undefined" ? window.confirm("Eliminare questa risposta?") : true;
-      if (ok) onDeleteReply(rid);
-      return;
-    }
-    Alert.alert(
-      "Elimina risposta",
-      "Sei sicuro?",
-      [
-        { text: "Annulla", style: "cancel" },
-        { text: "Elimina", style: "destructive", onPress: () => onDeleteReply(rid) },
-      ],
-    );
-  };
+  const confirmDeleteComment = () => setConfirm({ kind: "comment" });
+  const confirmDeleteReply = (rid: string) =>
+    setConfirm({ kind: "reply", rid });
 
   return (
     <View style={cs.item} testID={`comment-${c.comment_id}`}>
@@ -924,6 +908,28 @@ function CommentItem({
           </View>
         )}
       </View>
+      {/* Shared themed confirmation modal — replaces window.confirm /
+          Alert.alert with a rounded, on-brand dialog. */}
+      <ConfirmModal
+        visible={confirm !== null}
+        title={confirm?.kind === "reply" ? "Elimina risposta" : "Elimina commento"}
+        body={
+          confirm?.kind === "reply"
+            ? "La risposta verrà eliminata definitivamente."
+            : "Il commento e tutte le sue risposte verranno eliminati."
+        }
+        confirmLabel="ELIMINA"
+        cancelLabel="ANNULLA"
+        danger
+        testID={confirm?.kind === "reply" ? "confirm-delete-reply" : "confirm-delete-comment"}
+        onCancel={() => setConfirm(null)}
+        onConfirm={() => {
+          const c2 = confirm;
+          setConfirm(null);
+          if (c2?.kind === "comment") onDeleteComment();
+          else if (c2?.kind === "reply") onDeleteReply(c2.rid);
+        }}
+      />
     </View>
   );
 }
