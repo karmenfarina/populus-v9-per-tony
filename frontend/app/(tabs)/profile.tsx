@@ -1223,7 +1223,13 @@ export default function Profile() {
                           <Text style={styles.hCat}>{h.category_label.toUpperCase()}</Text>
                           <Text style={styles.hTitle} numberOfLines={2}>{h.title}</Text>
                           <View style={styles.hMetaRow}>
-                            <Text style={[styles.hVoted, { color: sideColor(h.side_voted) }]}>Hai votato: {votedName}</Text>
+                            <Text
+                              style={[styles.hVoted, { color: sideColor(h.side_voted) }]}
+                              numberOfLines={1}
+                              ellipsizeMode="tail"
+                            >
+                              Hai votato: {votedName}
+                            </Text>
                             <Text style={[styles.hBadge, h.aligned ? styles.hBadgeMaj : styles.hBadgeMin]}>
                               {h.aligned ? "MAGGIORANZA" : "MINORANZA"}
                             </Text>
@@ -1544,8 +1550,16 @@ const styles = StyleSheet.create({
   sideBar: { width: 4 },
   hCat: { fontSize: font.sizes.xs, letterSpacing: 1.5, color: colors.muted, fontWeight: "700" },
   hTitle: { fontSize: font.sizes.base, color: colors.onSurface, marginTop: 4, lineHeight: 20, fontWeight: "700" },
-  hMetaRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: spacing.xs, flexWrap: "wrap", gap: spacing.xs },
-  hVoted: { fontSize: font.sizes.xs, fontWeight: "500" },
+  // Row keeps the "Hai votato: X" label on the LEFT and the MAGGIORANZA /
+  // MINORANZA badge anchored on the RIGHT. `flexWrap: wrap` used to be
+  // enabled here — that caused the badge to drop to a second line and
+  // reflow to the LEFT when the votedName was too long, which is exactly
+  // the bug the user reported. We now shrink the label instead so the
+  // badge is always pinned to the right edge.
+  hMetaRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: spacing.xs, gap: spacing.sm },
+  // Left label — shrinks and truncates so the right-anchored badge
+  // never wraps to the next line and jumps to the left.
+  hVoted: { fontSize: font.sizes.sm, fontWeight: "500", flexShrink: 1, flex: 1 },
   hBadge: { fontSize: font.sizes.xs, letterSpacing: 1, paddingHorizontal: 8, paddingVertical: 3, borderWidth: 1, borderRadius: radius.sm, fontWeight: "800" },
   // Neutral outline for MAGGIORANZA/MINORANZA badges: keeping them
   // team-coloured (red/yellow) collided with the vote colours used on

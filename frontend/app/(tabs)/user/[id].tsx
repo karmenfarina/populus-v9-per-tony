@@ -949,8 +949,10 @@ const styles = StyleSheet.create({
   sideBar: { width: 8 },
   hCat: { fontSize: font.sizes.xs, letterSpacing: 2, color: colors.muted },
   hTitle: { fontSize: font.sizes.base, color: colors.onSurface, marginTop: 2, lineHeight: 18 },
-  hMetaRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: spacing.xs, flexWrap: "wrap", gap: spacing.xs },
-  hVoted: { fontSize: font.sizes.xs, fontWeight: "500", flexShrink: 1 },
+  hMetaRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: spacing.xs, gap: spacing.sm },
+  // Left label — shrinks and truncates so the right-anchored badge
+  // never wraps to a new line (and jumps to the left).
+  hVoted: { fontSize: font.sizes.xs, fontWeight: "500", flexShrink: 1, flex: 1 },
   hBadge: { fontSize: font.sizes.xs, letterSpacing: 1, paddingHorizontal: 8, paddingVertical: 3, borderWidth: 1, borderRadius: radius.sm, fontWeight: "800" },
   // Neutral outline for MAGGIORANZA/MINORANZA badges on the public
   // profile — keeps them visually distinct from the vote-side colours.

@@ -1,0 +1,27 @@
+{
+  "summary": "Frontend-only verification of the STORICO VOTI badge alignment fix on /profile and /user/[id]. Verified source code changes AND validated live layout via Playwright DOM geometry measurements. Both hMetaRow styles no longer have flexWrap:'wrap', hVoted has flex:1+flexShrink:1, and profile.tsx 'Hai votato' Text has numberOfLines={1} ellipsizeMode='tail'. Live tests confirm the MAGGIORANZA/MINORANZA badge is consistently pinned to the right edge on every history item on BOTH screens, on the same row as the 'Hai votato/Ha votato' text, even when the votedName is very long (truncated with ellipsis). Filter buttons remain rendered and tappable. No regressions detected.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/tmp/profile_storico_visual.png",
+    "/tmp/user_public_storico.png",
+    "/tmp/storico_expanded.png"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Fix is deterministic and localized to CSS flex behaviour on hMetaRow/hVoted; no other rendering logic touched.",
+    "profile.tsx is 1740 lines — consider splitting the STORICO VOTI subsection (render + styles) into its own component/file in a future refactor (out of scope for this bug)."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (frontend-only)", "frontend": "100%"},
+  "seed_data_creation": "Used existing pre-verified test user chat_a@test.it (has 8 majority votes) and viewed chatUserB (user_16f709708760, 4 votes) as the target public profile.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Login flow requires JSON.stringify-ing the token/user before writing to localStorage under keys 'faide_token' and 'faide_user' because src/storage.retrieve does JSON.parse. Test IDs: history-feud_<id> on /profile, public-history-feud_<id> on /user/[id]. Filter buttons (TUTTI/MAGGIORANZA/MINORANZA) exist as plain Text inside Pressable — no dedicated testID, use text-based selector.",
+  "rca_of_issue": "Verified via DOM getBoundingClientRect that for every history-feud_* item on both screens: (1) Δ(voted.top, badge.top) < 10px (same row), (2) badge.left > voted.right (badge is right of voted text), (3) card.right - badge.right < 30px (badge is at right edge). Longest votedName case (~110 chars, Apple privacy bug feud) still produced same-row + right-anchored layout with the voted text truncated at votedRight=215px while badgeLeft=223px, badgeRight=337px on a card ending at 346px. Fix is confirmed working across both files."
+}
