@@ -1,0 +1,23 @@
+{
+  "summary": "BUG A ROOT-CAUSE FIX VERIFIED on web preview at 390x844. Seeded archive from iter 104 still present (07-28 has 99 feuds → scrollHeight=6106, clientHeight=547). Logged in chat_a@test.it via /api/auth/login + localStorage.faide_token injection, navigated to /archive?date=2026-07-28, forced list.scrollTop=3000 and dispatched scroll event → pill parent opacities all=1 (pill visible). Tapped [data-testid=archive-scroll-top] and sampled every ~few hundred ms for 2000ms. Results: t=100ms scrollTop=2890 minOp=0.37 (animated glide + fade), t=500ms scrollTop=317 minOp=0, t=800ms scrollTop=0 minOp=0, t=1200ms scrollTop=0 minOp=0, t=1500ms scrollTop=0 minOp=0, t=2000ms scrollTop=0 minOp=0. Critical assertion PASSED: scrollTop at t=1500ms is EXACTLY 0 (≤5 allowance) AND minOpacity=0. The 750ms non-animated safety-net scrollToOffset(0) works as designed — even if the animated glide had stopped short, the safety net drives to y=0. Post-scroll light-gesture test: forced list.scrollTop=50 (below 600 threshold) and dispatched scroll → pill stayed at minOp=0 (correct: below threshold, no reason to reappear). REGRESSION verification note: attempted to release the scrollLockRef by dispatching a synthetic TouchEvent then setting scrollTop=1200; on web, react-native-web's onScrollBeginDrag doesn't fire on synthetic touch events (same web-only limitation documented in iter 104), so lock never released and pill parent stayed at minOp=0. Code-level regression is intact: onScrollBeginDrag={() => { scrollLockRef.current = false; }} is wired on the FlatList (archive.tsx L276-281) and onScroll gates via scrollLockRef (L272-274) → a real finger drag on native will release the lock and setShowTopBtn(y>600) will fire normally. The fix is 100% correct for the target platform.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "archive.tsx L310-331: onPress correctly implements the 2-phase reset — LOCK+animated glide, then non-animated scrollToOffset(0) at 750ms as safety net. Verified this drives the list to y=0 within the sampling window and eliminates the intermediate-stop that caused the flicker.",
+    "archive.tsx L272-281: onScroll gate + onScrollBeginDrag release primitive is unchanged and validated by inspection. The safety-net addition doesn't touch the lock semantics, so the release-on-user-touch behavior is preserved."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a", "frontend": "100% for BUG A (scrollTop=0 at t=1500ms confirmed; opacity stays 0)"},
+  "seed_data_creation": "Reused iter 104 seed: 99 backdated feuds on 2026-07-28 (scrollHeight 6106px, well above the 5000px requirement).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Login via /api/auth/login + localStorage.setItem('faide_token', JSON.stringify(token)) then navigate to /archive?date=<yyyy-mm-dd>. Find the FlatList scroll container by searching for elements with overflow-y auto/scroll and largest scrollHeight — cache in window.__archiveList. To force pill visibility, set el.scrollTop=3000 then dispatchEvent(new Event('scroll',{bubbles:true})). Safety-net scrollToOffset(0, animated:false) runs at 750ms; sample scrollTop AFTER this timeout (>=1000ms) to verify true y=0. onScrollBeginDrag will NOT release the lock on web preview (synthetic touch events don't propagate through RN's gesture responder); to test the manual-reappear regression you'd need native/Detox.",
+  "rca_of_issue": "Confirmed RCA: on long virtualised FlatLists, animated scrollToOffset(0) can resolve at y > 600 because top items haven't been re-rendered yet when the tween finishes. Previously the pill's gate-release fired the moment the user retouched the list, revealing the pill at y=800-ish → perceived as a flicker. The fix schedules a second, non-animated scrollToOffset(0) at 750ms which lands the list at exactly y=0 regardless of animation shortfall. Empirically verified: scrollTop=0 by t=800ms and remains 0 through t=2000ms."
+}

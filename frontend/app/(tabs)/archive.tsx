@@ -308,14 +308,26 @@ export default function ArchiveScreen() {
       <ScrollToTopButton
         visible={showTopBtn}
         onPress={() => {
-          // 1) Hide the pill immediately. 2) LOCK the scroll gate — no
-          //    onScroll from here on will re-flip showTopBtn until the
-          //    user manually drags the list (onScrollBeginDrag). This
-          //    survives arbitrarily long/jittery scrollToOffset(0)
-          //    animations without any timing assumption.
+          // 1) Hide the pill immediately and LOCK the gate.
+          // 2) Start the animated glide back to the top (smooth UX).
+          // 3) After ~750ms — well past the typical animation duration —
+          //    perform a NON-animated `scrollToOffset(0)` as a safety net.
+          //    On very long virtualised FlatLists the animated call
+          //    frequently stops short of y=0 (the top items haven't been
+          //    rendered yet when the animation resolves its target), so
+          //    the list ends up at, say, y=800 which is above the 600px
+          //    threshold — the pill correctly re-appears the moment the
+          //    user touches the list again ("perché si trova in un punto
+          //    dove è normale che riappaia"). Forcing y=0 solves this
+          //    root cause instead of trying to lie about the position.
           scrollLockRef.current = true;
           setShowTopBtn(false);
           archiveListRef.current?.scrollToOffset({ offset: 0, animated: true });
+          setTimeout(() => {
+            try {
+              archiveListRef.current?.scrollToOffset({ offset: 0, animated: false });
+            } catch { /* noop */ }
+          }, 750);
         }}
         testID="archive-scroll-top"
       />
