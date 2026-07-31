@@ -50,18 +50,35 @@ export default function RootLayout() {
 
   // Force dark system UI (status bar + Android navigation bar) regardless of
   // the device's light/dark theme setting. Populus is a dark-only app.
+  // NOTE: on Expo Go we're limited to runtime APIs — the config-plugin
+  // values (`enforceContrast: false`, `windowLightNavigationBar: false`)
+  // only take effect once a native build is generated. In Expo Go we still
+  // do our best to make the icons white via repeated imperative calls.
   useEffect(() => {
+    if (Platform.OS === "web") return;
     // Root window background — prevents white flashes during transitions
     // and keeps the area behind the status/navigation bars black.
-    if (Platform.OS !== "web") {
-      SystemUI.setBackgroundColorAsync("#000000").catch(() => {});
-    }
+    SystemUI.setBackgroundColorAsync("#000000").catch(() => {});
+
     if (Platform.OS === "android") {
-      // Light icons/buttons on the Android navigation bar.
-      NavigationBar.setButtonStyleAsync("light").catch(() => {});
-      // In edge-to-edge mode (see app.json) the OS ignores background color
-      // calls; we still set it for older devices where edge-to-edge is off.
-      NavigationBar.setBackgroundColorAsync("#000000").catch(() => {});
+      const applyDarkSystemBars = () => {
+        // Two complementary calls: setStyle('dark') = new declarative API
+        // that maps to a "dark bar" (i.e. LIGHT/white content). We also
+        // call setButtonStyleAsync('light') as an older imperative fallback
+        // — some Expo Go builds honour one but not the other.
+        try { NavigationBar.setStyle?.("dark"); } catch { /* noop */ }
+        NavigationBar.setButtonStyleAsync("light").catch(() => {});
+        // In edge-to-edge mode setBackgroundColorAsync is a no-op (OS
+        // manages the bg) but on older Android it does apply a solid
+        // black bar — set it defensively.
+        NavigationBar.setBackgroundColorAsync("#000000").catch(() => {});
+      };
+      // First pass immediately, then again after Expo Go finishes its own
+      // theme initialisation (~400ms) — otherwise it can override us.
+      applyDarkSystemBars();
+      const t1 = setTimeout(applyDarkSystemBars, 300);
+      const t2 = setTimeout(applyDarkSystemBars, 1200);
+      return () => { clearTimeout(t1); clearTimeout(t2); };
     }
   }, []);
 
