@@ -1,0 +1,25 @@
+{
+  "summary": "BUG A FINAL FIX v2 (dynamic threshold, no lock) VERIFIED — both regressions fixed. Test flow: (i) token-injection login as chat_a@test.it via /api/auth/login + localStorage.setItem('faide_token', ...); (ii) navigate to /profile; (iii) expand STORICO VOTI accordion via `[data-testid=history-section-toggle]` — max scroll grew to 1753, historyOffsetTop=898, so threshold = historyY+500 = 1398 and expected pill target = historyY-8 = 890. VERIFICATION #1 (pill no longer activates too early, complaint #2): programmatic scrollTop set to 200, 500, 700, 800, 1000, 1200 → pill opacity=0 at every step; only at scrollTop=1400 (>1398) did pill opacity become 1. Previous fixed 700px threshold is GONE. VERIFICATION #2 (pill re-appears after tap — complaint #1, the KEY regression): ran 3 tap → scroll-back cycles, ALL 3 identical: pre-tap scrollTop=1753 pill_opacity=1 → tap → post-tap scrollTop=890 (EXACT match with expected 890) pill_opacity=0 → programmatic scrollTop back to 1598 → pill_opacity=1 ✅ → scrollTop back to 1753 → pill_opacity=1 ✅. The scrollLockRef gate is removed; showTopBtn is driven purely by the onScroll y > threshold comparison and correctly re-appears every time the user scrolls back down past the threshold. Post-tap screenshot confirms the pill (red circle w/ up arrow) is visible at the bottom-right AFTER scrolling back down, proving the fix is durable across repeated cycles.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/test_reports/iter108_final.png"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Reiterating iter106/107 note: /app/frontend/app/(tabs)/profile.tsx is 1880 lines (>2.6× the 700-line guideline). Not a regression, good candidate for future refactor into sub-components (Header, BadgeCard, Stats, StoricoVoti, Prefs, Photos).",
+    "The new fix is markedly simpler than iter107's scrollLockRef+onScrollBeginDrag scheme — no lock, no drag-release path required. This means the fix is fully observable via programmatic scroll (which is what real mouse-wheel scroll dispatches in RN Web), so the regression 'pill reappears' is now provable in desktop Playwright (unlike iter107 where the release depended on touchstart)."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (frontend-only test)", "frontend": "100% — pill target exact (890/890), pill hidden while <1398, pill visible while >1398, all 3 tap-scroll-back cycles behaved identically"},
+  "seed_data_creation": "None. chat_a@test.it already has enough STORICO VOTI history entries to make max-scroll 1753 once accordion is expanded.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Reuse login pattern: `await page.goto('/'); await page.evaluate(async () => { const r = await fetch('/api/auth/login', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({email:'chat_a@test.it', password:'test123'})}); const j = await r.json(); localStorage.setItem('faide_token', JSON.stringify(j.token)); }); await page.goto('/profile')`. STORICO VOTI accordion is COLLAPSED by default — click `[data-testid=history-section-toggle]` before scrolling. Find the RN Web scroller by picking the descendant of `[data-testid=profile-screen]` with the largest scrollHeight-clientHeight delta and tag it with a temporary attribute. Read `document.querySelector('[data-testid=history-section]').offsetTop` after expanding — pill target is `offsetTop - 8`, threshold is `offsetTop + 500`. Programmatic scrollTop assignment DOES fire onScroll in RNW (unlike touchstart), so this test scheme works reliably.",
+  "rca_of_issue": "Iter107 fix used scrollLockRef gated by onScrollBeginDrag to prevent flicker after the pill scrolled the user to historyY-8=890 (which is above the fixed 700px threshold). Two user-reported regressions of that fix: (A) after first tap the pill stayed hidden forever because onScrollBeginDrag doesn't fire reliably (esp. on mouse-wheel scroll in RN Web), so scrollLockRef never released; (B) pill appeared too early (at y=700, before user was actually inside STORICO VOTI). Iter108 fix (verified now): (a) REMOVED scrollLockRef entirely; (b) threshold moved from static 700 to dynamic `historyYRef.current + 500` (fallback 1200) — pill only appears when user is 500px DEEP into the STORICO VOTI section; (c) pill onPress target unchanged at historyY-8; (d) since target 890 is ~508 px BELOW the visibility threshold 1398, the pill naturally hides on its own after scroll AND naturally re-appears when the user scrolls back down past 1398 — no gate/lock needed. Test confirms all three properties: correct target, no early activation, guaranteed re-appearance over 3 cycles. FIX IS WORKING AS INTENDED."
+}

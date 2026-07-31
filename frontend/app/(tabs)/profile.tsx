@@ -73,15 +73,6 @@ export default function Profile() {
   const scrollRef = useRef<ScrollView>(null);
   // Toggle for the floating "back to top" pill on the profile.
   const [showTopBtn, setShowTopBtn] = useState(false);
-  // When we programmatically scroll back to the STORICO VOTI section
-  // via the floating pill, the final Y position (~ historyYRef) is
-  // still deeper than the 700 px visibility threshold, so the pill
-  // would immediately re-appear on the next `onScroll` tick. We LOCK
-  // showTopBtn updates on tap and release the lock ONLY when the user
-  // manually starts a drag (`onScrollBeginDrag`) — mirroring the pattern
-  // used in archive.tsx. This survives arbitrarily long/jittery
-  // scrollTo animations without any timing assumption.
-  const scrollLockRef = useRef(false);
   // Y position of the STORICO VOTI section (captured via onLayout).
   // The pill scrolls to this offset so the user lands back at the top
   // of their vote history — not at the avatar/header.
@@ -839,24 +830,26 @@ export default function Profile() {
           // don't yank the list back and lock scrolling for ~1s.
           userInteractedRef.current = true;
           pendingScrollYRef.current = null;
-          // The user has physically touched the ScrollView — release
-          // the "showTopBtn" gate so the pill can legitimately turn
-          // back on when they scroll deep again.
-          scrollLockRef.current = false;
         }}
         onScroll={(e) => {
           const y = e.nativeEvent.contentOffset.y;
           // Persist to module scope so a component remount during
           // navigation to a detail screen doesn't wipe the offset.
           scrollMemory.setY(SCROLL_KEY, y);
-          // Floating "back to top" pill: show once the user is deep in
-          // the profile (past the badge card + stats + prefs section).
-          // If we're mid-programmatic scroll from a pill tap, IGNORE the
-          // intermediate positions — they'd otherwise flip the pill
-          // back on because the target position (STORICO VOTI header)
-          // is itself above the 700 px threshold.
-          if (scrollLockRef.current) return;
-          setShowTopBtn(y > 700);
+          // Floating "back to top" pill appears only when the user has
+          // scrolled DEEP into the STORICO VOTI history (500 px past
+          // the section header). This has two advantages over a fixed
+          // threshold:
+          //   1. The pill doesn't nag the user during the earlier
+          //      sections of the profile.
+          //   2. When the pill scrolls them back to `historyYRef - 8`
+          //      the new position is ~508 px above the visibility
+          //      threshold, so the pill hides on its own and
+          //      re-appears correctly the moment the user scrolls
+          //      back down past the threshold — no gate/lock needed.
+          const hy = historyYRef.current;
+          const threshold = hy > 0 ? hy + 500 : 1200;
+          setShowTopBtn(y > threshold);
         }}
         // 16ms throttle is enough to persist the offset without
         // adding perceptible lag to the scroll gesture.
@@ -1379,22 +1372,17 @@ export default function Profile() {
         visible={showTopBtn}
         onPress={() => {
           // Bring the user to the START of the STORICO VOTI section
-          // (header "STORICO VOTI" + first history rows visible) —
-          // NOT all the way to the avatar (too far up) and NOT to the
-          // deep-scrolled position where they were (too far down).
-          // Because that target Y is itself > 700 px (our own pill
-          // threshold), we LOCK the `showTopBtn` gate so onScroll
-          // events fired during the animated glide can't flip the
-          // pill back on. The lock is released only when the user
-          // manually drags the ScrollView again (see onScrollBeginDrag).
-          scrollLockRef.current = true;
-          setShowTopBtn(false);
+          // (header + first history rows visible at the top of the
+          // viewport). The pill's visibility threshold is
+          // `historyYRef.current + 500`, so this target (~ historyYRef
+          // - 8) is ~500 px above the threshold and the pill hides
+          // naturally without any gate.
           const target = Math.max(0, historyYRef.current - 8);
           scrollRef.current?.scrollTo({ y: target, animated: true });
           // Safety net: on very tall content the animated scroll can
-          // undershoot; snap to the exact target after the animation
-          // has had time to run so the user is really at the section
-          // start.
+          // undershoot — snap to the exact target after the animation
+          // has had time to run so the user really lands on the
+          // section start.
           setTimeout(() => {
             try {
               scrollRef.current?.scrollTo({ y: target, animated: false });
