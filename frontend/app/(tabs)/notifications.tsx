@@ -155,11 +155,16 @@ export default function NotificationsScreen() {
                   if (item.feud_id) {
                     // Deep-link into the feud so the specific comment (and its
                     // reply thread) is opened automatically without extra taps.
+                    // We ALSO carry `from=notifications` so the feud detail's
+                    // top-left back arrow returns to /notifications instead
+                    // of dumping the user on the home tab (feud/[id]'s
+                    // `goBack` reads this param — same pattern used by
+                    // top/archive/messages entrypoints).
                     const q = new URLSearchParams();
+                    q.set("from", "notifications");
                     if (item.comment_id) q.set("comment", item.comment_id);
                     if (item.side) q.set("side", item.side);
-                    const qs = q.toString();
-                    router.push(`/feud/${item.feud_id}${qs ? `?${qs}` : ""}`);
+                    router.push(`/feud/${item.feud_id}?${q.toString()}`);
                   } else if (item.type === "badge") {
                     // Badge notifications (new/changed) → open the user's own
                     // profile so they can see the current badge and the full

@@ -70,15 +70,15 @@ export default function ArchiveScreen() {
   // Floating "back to top" pill on the archive feuds list.
   const archiveListRef = useRef<FlatList<Feud>>(null);
   const [showTopBtn, setShowTopBtn] = useState(false);
-  // When the user taps the floating pill we run an animated scrollToOffset.
-  // React Native keeps firing `onScroll` during that animation with the
-  // intermediate positions — many of which are still above the 600px
-  // threshold. Without this gate, `setShowTopBtn(true)` would be called
-  // mid-animation and the pill would flicker back on the moment the
-  // internal suppress timer in <ScrollToTopButton /> expires. We lift the
-  // gate for a comfortable 1.2s so even a long list has time to finish
-  // its glide.
-  const suppressScrollUpdatesRef = useRef(false);
+  // Bulletproof "scroll to top" gate: once we tap the floating pill we
+  // LOCK all `showTopBtn` updates until the user MANUALLY grabs the list
+  // again (`onScrollBeginDrag`). This is the only way to be 100% immune
+  // to onScroll firing at intermediate y > 600 during the animated
+  // scrollToOffset(0) glide (which on long lists can last several seconds
+  // and produce jittery intermediate values on Android). Fixed timeouts
+  // and momentum-end signals both proved unreliable — waiting for an
+  // explicit user gesture is the correct primitive.
+  const scrollLockRef = useRef(false);
   const { width: winW } = useWindowDimensions();
   const centerChip = useCallback((id: string, animated = true) => {
     const l = chipLayouts.current[id];
@@ -270,24 +270,14 @@ export default function ArchiveScreen() {
             contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xxxl }}
             ItemSeparatorComponent={() => <View style={{ height: spacing.lg }} />}
             onScroll={(e) => {
-              if (suppressScrollUpdatesRef.current) return;
+              if (scrollLockRef.current) return;
               setShowTopBtn(e.nativeEvent.contentOffset.y > 600);
             }}
-            onMomentumScrollEnd={(e) => {
-              // Fires whenever inertial or programmatic-animated scrolling
-              // comes to a rest. This is the ONLY reliable signal that our
-              // scrollToOffset(0) animation is truly finished — a fixed
-              // setTimeout underestimates the duration on long lists and
-              // causes the pill to flicker back on if the animation is
-              // still gliding when the gate re-opens.
-              suppressScrollUpdatesRef.current = false;
-              setShowTopBtn(e.nativeEvent.contentOffset.y > 600);
-            }}
-            onScrollEndDrag={(e) => {
-              // Belt-and-braces: when the user aborts a programmatic scroll
-              // by grabbing the list, resync immediately.
-              suppressScrollUpdatesRef.current = false;
-              setShowTopBtn(e.nativeEvent.contentOffset.y > 600);
+            onScrollBeginDrag={() => {
+              // The user has physically touched the list — this is the
+              // ONLY event we treat as "release the lock". Any subsequent
+              // onScroll can now legitimately turn the pill back on.
+              scrollLockRef.current = false;
             }}
             scrollEventThrottle={120}
             ListEmptyComponent={
@@ -318,18 +308,14 @@ export default function ArchiveScreen() {
       <ScrollToTopButton
         visible={showTopBtn}
         onPress={() => {
-          // 1) Immediately hide the pill (parent state + component's own
-          //    suppress kick in). 2) Freeze the onScroll gate so events
-          //    fired during the animated glide can't re-flip the state.
-          //    3) Start the animated scroll. The gate is released by
-          //    onMomentumScrollEnd (which fires exactly when the glide
-          //    settles) OR — as a fallback for very short lists where
-          //    the animation never enters momentum phase — after a
-          //    generous 3 s timeout.
-          suppressScrollUpdatesRef.current = true;
+          // 1) Hide the pill immediately. 2) LOCK the scroll gate — no
+          //    onScroll from here on will re-flip showTopBtn until the
+          //    user manually drags the list (onScrollBeginDrag). This
+          //    survives arbitrarily long/jittery scrollToOffset(0)
+          //    animations without any timing assumption.
+          scrollLockRef.current = true;
           setShowTopBtn(false);
           archiveListRef.current?.scrollToOffset({ offset: 0, animated: true });
-          setTimeout(() => { suppressScrollUpdatesRef.current = false; }, 3000);
         }}
         testID="archive-scroll-top"
       />
