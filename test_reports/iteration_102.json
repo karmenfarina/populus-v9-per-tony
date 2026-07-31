@@ -1,0 +1,25 @@
+{
+  "summary": "Iteration 102 frontend-only verification of two fixes (Bug A: archive scroll-to-top no-flicker; Bug B: notification red-border optimistic clear). Both PASSED end-to-end with runtime instrumentation. Seeded 16 unread notifications for chat_a@test.it directly in Mongo, then ran instrumented tests. Bug A: sampled the pill's wrapper opacity every 100ms for 2s after tapping [data-testid=archive-scroll-top] — measured trajectory 1.000 → 0.378 (100ms) → 0.000 (200ms) and STAYED at 0.000 through the entire 2000ms window while scrollTop animated 714 → 225 → 77 → 12 → 0. suppressScrollUpdatesRef gate is working. Bug B: with router.push suppressed via history.pushState monkey-patch (so the row stayed mounted for observation), tapping a specific unread row flipped its computed style from borderWidth:2px + borderColor:rgb(255,69,58) + bg:rgba(255,69,58,0.10) → borderWidth:1px + borderColor:rgb(42,42,42) + bg:rgb(23,23,23) within 200ms — matching the exact read-state look. Simultaneously the 15 OTHER unread rows remained unread (2px red), confirming the optimistic mutation targeted only the tapped notif_id. No regressions detected in the ScrollToTopButton fallback (700ms internal suppress remains).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "archive.tsx onScroll handler correctly early-returns when suppressScrollUpdatesRef.current is true (line 273), and onPress sets suppressScrollUpdatesRef.current=true + setShowTopBtn(false) + scrollToOffset(animated) + setTimeout(release, 1200ms) — 1.2s window is safely > any observed animation length (arrived at scrollTop=0 by 500ms in the test).",
+    "notifications.tsx onPress (lines 141-167) synchronously calls setItems(prev => prev.map(...)) BEFORE router.push, so React commits the read-state re-render in the same batch as the click handler — the visual clear happens instantly, before navigation unmounts the screen.",
+    "ScrollToTopButton.tsx internal suppress (lines 56-75) remains as fallback for other consumers (index feed, top, profile, feud detail, notifications); no changes required.",
+    "notifications.tsx useFocusEffect still fires api.notificationsMarkRead() fire-and-forget WITHOUT reloading items — combined with the optimistic per-tap mutation, the on-screen state now converges correctly: first visit shows red until user interacts; subsequent visits (after server mark-read) show gray from server response."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (skipped per request)", "frontend": "100% (2/2 bug fixes verified with runtime instrumentation)"},
+  "seed_data_creation": "Set read:false on all 16 notifications for user_6e65e19525d5 via `db.notifications.updateMany({user_id:'user_6e65e19525d5'}, {$set:{read:false}})` to create the test condition. Restored read:true on all after test completion.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Bug A test technique: run headless Playwright, scroll the FlatList's underlying scrollable div to scrollTop=1000 to trigger showTopBtn=true, click [data-testid=archive-scroll-top], then sample the wrapper's computed opacity + scrollTop every 100ms for 2s — flicker would appear as opacity rising back above ~0.2 after the initial fade at ~200ms. Bug B test technique: monkey-patch window.history.pushState/replaceState to no-op BEFORE clicking a notification, so router.push cannot unmount the screen; then read the row's computed borderColor/borderWidth 200ms after click — success = borderWidth flips from 2px to 1px and borderColor from rgb(255,69,58) to rgb(42,42,42). Regression: verify OTHER unread rows still show 2px red (only the tapped one flipped).",
+  "rca_of_issue": "Bug A RCA: FlatList's scrollToOffset({animated:true}) emits many intermediate onScroll events during the ~500ms glide. The archive parent's onScroll ran setShowTopBtn(e.nativeEvent.contentOffset.y > 600) on every such event, so mid-animation (while scrollTop was still 700+) it kept setting visible=true. The ScrollToTopButton's internal 700ms suppress kept the pill hidden — but the moment that timer expired, if animation was slower than 700ms OR if the last onScroll fired just after the 700ms mark, the pill flickered back on. Fix: add a suppressScrollUpdatesRef ref gate in the parent's onScroll (1200ms), so no intermediate onScroll can push visible back to true during the glide. Bug B RCA: previously, the row's read state was only refreshed via server-side reload on next focus. Tapping and navigating left the row's client-side read=false intact until unmount, so if the user went back the pill still showed red for a split second while the fetch resolved. Fix: optimistically mutate the specific item in local `items` state inside onPress, BEFORE calling router.push, so React commits the visual change synchronously in the click batch."
+}

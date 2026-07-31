@@ -70,6 +70,15 @@ export default function ArchiveScreen() {
   // Floating "back to top" pill on the archive feuds list.
   const archiveListRef = useRef<FlatList<Feud>>(null);
   const [showTopBtn, setShowTopBtn] = useState(false);
+  // When the user taps the floating pill we run an animated scrollToOffset.
+  // React Native keeps firing `onScroll` during that animation with the
+  // intermediate positions — many of which are still above the 600px
+  // threshold. Without this gate, `setShowTopBtn(true)` would be called
+  // mid-animation and the pill would flicker back on the moment the
+  // internal suppress timer in <ScrollToTopButton /> expires. We lift the
+  // gate for a comfortable 1.2s so even a long list has time to finish
+  // its glide.
+  const suppressScrollUpdatesRef = useRef(false);
   const { width: winW } = useWindowDimensions();
   const centerChip = useCallback((id: string, animated = true) => {
     const l = chipLayouts.current[id];
@@ -260,7 +269,10 @@ export default function ArchiveScreen() {
             keyExtractor={(f) => f.feud_id}
             contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xxxl }}
             ItemSeparatorComponent={() => <View style={{ height: spacing.lg }} />}
-            onScroll={(e) => setShowTopBtn(e.nativeEvent.contentOffset.y > 600)}
+            onScroll={(e) => {
+              if (suppressScrollUpdatesRef.current) return;
+              setShowTopBtn(e.nativeEvent.contentOffset.y > 600);
+            }}
             scrollEventThrottle={120}
             ListEmptyComponent={
               <View style={styles.center} testID="archive-empty-feuds">
@@ -289,7 +301,14 @@ export default function ArchiveScreen() {
       )}
       <ScrollToTopButton
         visible={showTopBtn}
-        onPress={() => archiveListRef.current?.scrollToOffset({ offset: 0, animated: true })}
+        onPress={() => {
+          // Freeze the parent state and ignore intermediate onScroll events
+          // while the animated scrollToOffset is in flight, then release.
+          suppressScrollUpdatesRef.current = true;
+          setShowTopBtn(false);
+          archiveListRef.current?.scrollToOffset({ offset: 0, animated: true });
+          setTimeout(() => { suppressScrollUpdatesRef.current = false; }, 1200);
+        }}
         testID="archive-scroll-top"
       />
     </SafeAreaView>

@@ -139,6 +139,17 @@ export default function NotificationsScreen() {
               <Pressable
                 testID={`notif-${item.notif_id}`}
                 onPress={() => {
+                  // Optimistically flip THIS notification to "read" in local
+                  // state so the red border disappears the moment the user
+                  // taps it — regardless of whether they end up navigating
+                  // to the linked feud, comment or their profile. The
+                  // server-side mark-read has already fired on focus (see
+                  // useFocusEffect above), so no extra API call is needed.
+                  if (!item.read) {
+                    setItems((prev) => prev.map((n) =>
+                      n.notif_id === item.notif_id ? { ...n, read: true } : n
+                    ));
+                  }
                   if (item.feud_id) {
                     // Deep-link into the feud so the specific comment (and its
                     // reply thread) is opened automatically without extra taps.
