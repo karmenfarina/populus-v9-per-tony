@@ -1023,7 +1023,7 @@ export default function Profile() {
           </View>
           <View style={styles.statBox}>
             <Text style={styles.statValue}>{user.minority_votes}</Text>
-            <Text style={[styles.statLabel, { color: colors.brandSecondary }]}>MINORANZA</Text>
+            <Text style={styles.statLabel}>MINORANZA</Text>
           </View>
         </View>
 
