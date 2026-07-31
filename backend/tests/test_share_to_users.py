@@ -13,7 +13,7 @@ import time
 import pytest
 import requests
 
-BASE_URL = (os.environ.get('EXPO_PUBLIC_BACKEND_URL') or 'https://google-logout-stable.preview.emergentagent.com').rstrip('/')
+BASE_URL = (os.environ.get('EXPO_PUBLIC_BACKEND_URL') or 'https://voti-scroll-fix.preview.emergentagent.com').rstrip('/')
 
 USER_A = {'email': 'chat_a@test.it', 'password': 'test123', 'user_id': 'user_6e65e19525d5'}
 USER_B = {'email': 'chat_b@test.it', 'password': 'test123', 'user_id': 'user_16f709708760'}

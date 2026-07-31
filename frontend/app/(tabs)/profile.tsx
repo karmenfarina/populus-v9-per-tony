@@ -1018,11 +1018,11 @@ export default function Profile() {
             <Text style={styles.statLabel}>VOTI</Text>
           </View>
           <View style={styles.statBox}>
-            <Text style={[styles.statValue, { color: colors.brandPrimary }]}>{user.majority_votes}</Text>
+            <Text style={styles.statValue}>{user.majority_votes}</Text>
             <Text style={styles.statLabel}>MAGGIORANZA</Text>
           </View>
           <View style={styles.statBox}>
-            <Text style={[styles.statValue, { color: colors.brandSecondary }]}>{user.minority_votes}</Text>
+            <Text style={styles.statValue}>{user.minority_votes}</Text>
             <Text style={[styles.statLabel, { color: colors.brandSecondary }]}>MINORANZA</Text>
           </View>
         </View>

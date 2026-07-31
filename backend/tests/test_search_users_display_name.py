@@ -5,7 +5,7 @@ import os
 import pytest
 import requests
 
-BASE_URL = os.environ.get('EXPO_PUBLIC_BACKEND_URL', 'https://google-logout-stable.preview.emergentagent.com').rstrip('/')
+BASE_URL = os.environ.get('EXPO_PUBLIC_BACKEND_URL', 'https://voti-scroll-fix.preview.emergentagent.com').rstrip('/')
 
 
 @pytest.fixture(scope='module')

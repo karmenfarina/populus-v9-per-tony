@@ -4,7 +4,7 @@ import uuid
 import pytest
 import requests
 
-BASE_URL = "https://google-logout-stable.preview.emergentagent.com"
+BASE_URL = "https://voti-scroll-fix.preview.emergentagent.com"
 
 
 @pytest.fixture

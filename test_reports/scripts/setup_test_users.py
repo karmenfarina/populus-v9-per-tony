@@ -13,7 +13,7 @@ import sys
 import requests
 from pymongo import MongoClient
 
-BASE_URL = "https://google-logout-stable.preview.emergentagent.com"
+BASE_URL = "https://voti-scroll-fix.preview.emergentagent.com"
 MONGO_URL = "mongodb://localhost:27017"
 DB_NAME = "test_database"
 
