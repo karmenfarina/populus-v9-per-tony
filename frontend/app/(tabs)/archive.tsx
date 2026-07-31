@@ -273,6 +273,22 @@ export default function ArchiveScreen() {
               if (suppressScrollUpdatesRef.current) return;
               setShowTopBtn(e.nativeEvent.contentOffset.y > 600);
             }}
+            onMomentumScrollEnd={(e) => {
+              // Fires whenever inertial or programmatic-animated scrolling
+              // comes to a rest. This is the ONLY reliable signal that our
+              // scrollToOffset(0) animation is truly finished — a fixed
+              // setTimeout underestimates the duration on long lists and
+              // causes the pill to flicker back on if the animation is
+              // still gliding when the gate re-opens.
+              suppressScrollUpdatesRef.current = false;
+              setShowTopBtn(e.nativeEvent.contentOffset.y > 600);
+            }}
+            onScrollEndDrag={(e) => {
+              // Belt-and-braces: when the user aborts a programmatic scroll
+              // by grabbing the list, resync immediately.
+              suppressScrollUpdatesRef.current = false;
+              setShowTopBtn(e.nativeEvent.contentOffset.y > 600);
+            }}
             scrollEventThrottle={120}
             ListEmptyComponent={
               <View style={styles.center} testID="archive-empty-feuds">
@@ -302,12 +318,18 @@ export default function ArchiveScreen() {
       <ScrollToTopButton
         visible={showTopBtn}
         onPress={() => {
-          // Freeze the parent state and ignore intermediate onScroll events
-          // while the animated scrollToOffset is in flight, then release.
+          // 1) Immediately hide the pill (parent state + component's own
+          //    suppress kick in). 2) Freeze the onScroll gate so events
+          //    fired during the animated glide can't re-flip the state.
+          //    3) Start the animated scroll. The gate is released by
+          //    onMomentumScrollEnd (which fires exactly when the glide
+          //    settles) OR — as a fallback for very short lists where
+          //    the animation never enters momentum phase — after a
+          //    generous 3 s timeout.
           suppressScrollUpdatesRef.current = true;
           setShowTopBtn(false);
           archiveListRef.current?.scrollToOffset({ offset: 0, animated: true });
-          setTimeout(() => { suppressScrollUpdatesRef.current = false; }, 1200);
+          setTimeout(() => { suppressScrollUpdatesRef.current = false; }, 3000);
         }}
         testID="archive-scroll-top"
       />

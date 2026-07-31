@@ -156,6 +156,8 @@ export const api = {
   notifications: () => request('/notifications'),
   notificationsUnreadCount: () => request('/notifications/unread-count'),
   notificationsMarkRead: () => request('/notifications/mark-read', { method: 'POST' }),
+  notificationMarkOneRead: (id: string) =>
+    request(`/notifications/${encodeURIComponent(id)}/read`, { method: 'POST' }),
   registerPush: (platform: string, device_token: string) =>
     request('/register-push', {
       method: 'POST',

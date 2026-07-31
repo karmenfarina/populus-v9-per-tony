@@ -68,29 +68,22 @@ export default function NotificationsScreen() {
     })();
   }, [load]);
 
-  // Whenever the screen gains focus we do two things IN PARALLEL:
-  //   1. Fetch the latest notifications so the list renders the current
-  //      unread state — this preserves the red border/tinted background
-  //      on any notification the user hasn't opened yet.
-  //   2. Fire the "mark all read" call on the server in the background.
-  //      We deliberately do NOT reload the list after that call resolves:
-  //      if we did, the freshly-fetched items would come back with
-  //      `read: true` and the visual "new" indicator would disappear the
-  //      instant the user opens the screen — before they've had a chance
-  //      to look at what's new. The tab-badge refresh is enough to clear
-  //      the numeric counter on the bell icon.
+  // On focus we refresh the list (so we see any brand-new notifications
+  // that arrived while the user was elsewhere) BUT we deliberately do NOT
+  // mark anything as read here — the user's explicit request is that a
+  // notification's red-border "unread" indicator only clears when they
+  // TAP that specific notification, not when they merely open the screen.
+  // The per-item mark-read is fired in the row's onPress below.
   useFocusEffect(
     useCallback(() => {
       let cancelled = false;
       (async () => {
         await load();
         if (cancelled) return;
-        // Fire-and-forget the server-side mark-read so the badge count
-        // on the tab bar drops to 0 without altering the on-screen
-        // items' `read` flag mid-view.
-        api.notificationsMarkRead()
-          .then(() => { if (!cancelled) refreshBadge(); })
-          .catch(() => { /* silent */ });
+        // Keep the bell-icon tab badge in sync with the actual unread
+        // count on the server (which only changes now when the user taps
+        // an individual notification below).
+        refreshBadge();
       })();
       return () => { cancelled = true; };
     }, [load, refreshBadge])
@@ -139,16 +132,25 @@ export default function NotificationsScreen() {
               <Pressable
                 testID={`notif-${item.notif_id}`}
                 onPress={() => {
-                  // Optimistically flip THIS notification to "read" in local
-                  // state so the red border disappears the moment the user
-                  // taps it — regardless of whether they end up navigating
-                  // to the linked feud, comment or their profile. The
-                  // server-side mark-read has already fired on focus (see
-                  // useFocusEffect above), so no extra API call is needed.
+                  // 1) Optimistically flip THIS notification to "read" in
+                  //    local state so the red border disappears the moment
+                  //    the user taps it.
+                  // 2) Persist the change to the server (per-item endpoint)
+                  //    so the same notification does not come back with a
+                  //    red border after a screen refresh, and so the bell
+                  //    tab-badge decrements to reflect the new state.
+                  // 3) Deep-link into whatever the notification is about.
                   if (!item.read) {
                     setItems((prev) => prev.map((n) =>
                       n.notif_id === item.notif_id ? { ...n, read: true } : n
                     ));
+                    // Fire-and-forget: no need to block navigation. The
+                    // .then() refreshes the bell badge count so the
+                    // number on the tab bar updates without waiting for
+                    // the next full focus cycle.
+                    api.notificationMarkOneRead(item.notif_id)
+                      .then(() => { refreshBadge(); })
+                      .catch(() => { /* silent */ });
                   }
                   if (item.feud_id) {
                     // Deep-link into the feud so the specific comment (and its

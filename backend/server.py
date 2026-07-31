@@ -3506,6 +3506,22 @@ async def mark_read(user: dict = Depends(get_current_user)):
     return {'updated': r.modified_count}
 
 
+@api_router.post('/notifications/{notif_id}/read')
+async def mark_one_read(notif_id: str, user: dict = Depends(get_current_user)):
+    """Mark a SINGLE notification as read.
+
+    Called by the /notifications screen when the user taps a specific row.
+    The frontend already updates the item's `read` flag optimistically in
+    local state so the red-border indicator disappears immediately — this
+    endpoint just makes the change durable so the same notification does
+    not come back highlighted after a full refresh."""
+    r = await db.notifications.update_one(
+        {'notif_id': notif_id, 'user_id': user['user_id']},
+        {'$set': {'read': True, 'read_at': now_utc()}},
+    )
+    return {'updated': r.modified_count}
+
+
 def _image_for_category(cat_id: str, seed: Optional[str] = None) -> str:
     # Verified working Unsplash IDs (Feb 2026). Two options per category, chosen by seed hash for variety.
     mapping = {
