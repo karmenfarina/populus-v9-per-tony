@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState, useCallback } from "react";
 import { Animated, Pressable, StyleSheet, ViewStyle, StyleProp } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -46,18 +46,37 @@ export function ScrollToTopButton({
   style,
 }: ScrollToTopButtonProps) {  const insets = useSafeAreaInsets();
   const opacity = useRef(new Animated.Value(0)).current;
+  // When the user taps the pill we already KNOW they're on their way back
+  // to the top/bottom of the list — hide the button immediately without
+  // waiting for the animated scroll events to catch up (they can lag,
+  // fire below throttle threshold, or get suppressed by nested scrollers,
+  // leaving the pill stuck visible even after arrival). We stay hidden
+  // for a short window (700ms > typical scrollToOffset duration) then
+  // re-yield to the parent's `visible` prop.
+  const [suppress, setSuppress] = useState(false);
+  const effectiveVisible = visible && !suppress;
 
   useEffect(() => {
     Animated.timing(opacity, {
-      toValue: visible ? 1 : 0,
+      toValue: effectiveVisible ? 1 : 0,
       duration: 180,
       useNativeDriver: true,
     }).start();
-  }, [visible, opacity]);
+  }, [effectiveVisible, opacity]);
+
+  const handlePress = useCallback(() => {
+    setSuppress(true);
+    try { onPress(); } catch { /* swallow */ }
+    // Release the suppression flag after the scroll animation has had
+    // time to finish. Any subsequent scroll from the user will still
+    // trigger the parent to set `visible` back to true and the pill
+    // will re-appear.
+    setTimeout(() => setSuppress(false), 700);
+  }, [onPress]);
 
   return (
     <Animated.View
-      pointerEvents={visible ? "auto" : "none"}
+      pointerEvents={effectiveVisible ? "auto" : "none"}
       style={[
         styles.wrapper,
         { bottom: insets.bottom + bottomOffset, right: rightOffset, opacity },
@@ -65,7 +84,7 @@ export function ScrollToTopButton({
       ]}
     >
       <Pressable
-        onPress={onPress}
+        onPress={handlePress}
         testID={testID}
         accessibilityRole="button"
         accessibilityLabel={direction === "up" ? "Torna all'inizio" : "Vai alla fine"}

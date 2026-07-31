@@ -68,16 +68,29 @@ export default function NotificationsScreen() {
     })();
   }, [load]);
 
-  // Whenever the screen gains focus, mark all as read and refresh both the
-  // list and the tab badge — so the little red dot goes away as soon as the
-  // user sees the notifications.
+  // Whenever the screen gains focus we do two things IN PARALLEL:
+  //   1. Fetch the latest notifications so the list renders the current
+  //      unread state — this preserves the red border/tinted background
+  //      on any notification the user hasn't opened yet.
+  //   2. Fire the "mark all read" call on the server in the background.
+  //      We deliberately do NOT reload the list after that call resolves:
+  //      if we did, the freshly-fetched items would come back with
+  //      `read: true` and the visual "new" indicator would disappear the
+  //      instant the user opens the screen — before they've had a chance
+  //      to look at what's new. The tab-badge refresh is enough to clear
+  //      the numeric counter on the bell icon.
   useFocusEffect(
     useCallback(() => {
       let cancelled = false;
       (async () => {
-        try { await api.notificationsMarkRead(); } catch { /* silent */ }
         await load();
-        if (!cancelled) refreshBadge();
+        if (cancelled) return;
+        // Fire-and-forget the server-side mark-read so the badge count
+        // on the tab bar drops to 0 without altering the on-screen
+        // items' `read` flag mid-view.
+        api.notificationsMarkRead()
+          .then(() => { if (!cancelled) refreshBadge(); })
+          .catch(() => { /* silent */ });
       })();
       return () => { cancelled = true; };
     }, [load, refreshBadge])
@@ -183,7 +196,13 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     borderRadius: radius.md,
   },
-  rowUnread: { backgroundColor: "rgba(240,26,26,0.06)", borderColor: `${colors.brandPrimary}55` },
+  rowUnread: {
+    // Distinct red border + soft red tint so the user can tell at a
+    // glance which notifications they haven't opened yet.
+    backgroundColor: "rgba(255,69,58,0.10)",
+    borderColor: colors.brandPrimary,
+    borderWidth: 2,
+  },
   iconWrap: {
     width: 44,
     height: 44,

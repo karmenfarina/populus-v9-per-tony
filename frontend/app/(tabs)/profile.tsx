@@ -207,17 +207,22 @@ export default function Profile() {
         return;
       } catch { /* fall through to router.replace below */ }
     }
-    // Native path: await the API call so SecureStore is really cleared
-    // before we mount /auth again. On native, React Navigation properly
-    // unmounts detail routes when we replace to /auth so a `setUser(null)`
-    // during the transition is fine.
-    try { await logout(); } catch { /* still navigate away */ }
+    // NATIVE path: navigate FIRST so all tab screens (feud detail, profile
+    // itself, etc.) unmount before AuthContext sets `user = null`. If we
+    // await logout() first, React re-renders any mounted screen that reads
+    // `user.foo` → crash on Expo Go after a Google session.
+    try { (router as any).dismissAll?.(); } catch { /* noop */ }
+    router.replace("/auth");
     try {
       const { navStack } = await import("@/src/utils/navStack");
       navStack.clear();
     } catch { /* noop */ }
-    try { (router as any).dismissAll?.(); } catch { /* noop */ }
-    router.replace("/auth");
+    // Give React one frame to unmount the tab tree before we null out the
+    // user. By the time this callback runs the previous screens have
+    // already been detached, so `setUser(null)` in `logout()` is safe.
+    setTimeout(() => {
+      logout().catch(() => {});
+    }, 0);
   }, [logout, router]);
 
   useEffect(() => {
