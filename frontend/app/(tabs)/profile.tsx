@@ -73,6 +73,15 @@ export default function Profile() {
   const scrollRef = useRef<ScrollView>(null);
   // Toggle for the floating "back to top" pill on the profile.
   const [showTopBtn, setShowTopBtn] = useState(false);
+  // When we programmatically scroll back to the STORICO VOTI section
+  // via the floating pill, the final Y position (~ historyYRef) is
+  // still deeper than the 700 px visibility threshold, so the pill
+  // would immediately re-appear on the next `onScroll` tick. We LOCK
+  // showTopBtn updates on tap and release the lock ONLY when the user
+  // manually starts a drag (`onScrollBeginDrag`) — mirroring the pattern
+  // used in archive.tsx. This survives arbitrarily long/jittery
+  // scrollTo animations without any timing assumption.
+  const scrollLockRef = useRef(false);
   // Y position of the STORICO VOTI section (captured via onLayout).
   // The pill scrolls to this offset so the user lands back at the top
   // of their vote history — not at the avatar/header.
@@ -830,6 +839,10 @@ export default function Profile() {
           // don't yank the list back and lock scrolling for ~1s.
           userInteractedRef.current = true;
           pendingScrollYRef.current = null;
+          // The user has physically touched the ScrollView — release
+          // the "showTopBtn" gate so the pill can legitimately turn
+          // back on when they scroll deep again.
+          scrollLockRef.current = false;
         }}
         onScroll={(e) => {
           const y = e.nativeEvent.contentOffset.y;
@@ -838,6 +851,11 @@ export default function Profile() {
           scrollMemory.setY(SCROLL_KEY, y);
           // Floating "back to top" pill: show once the user is deep in
           // the profile (past the badge card + stats + prefs section).
+          // If we're mid-programmatic scroll from a pill tap, IGNORE the
+          // intermediate positions — they'd otherwise flip the pill
+          // back on because the target position (STORICO VOTI header)
+          // is itself above the 700 px threshold.
+          if (scrollLockRef.current) return;
           setShowTopBtn(y > 700);
         }}
         // 16ms throttle is enough to persist the offset without
@@ -1360,21 +1378,28 @@ export default function Profile() {
       <ScrollToTopButton
         visible={showTopBtn}
         onPress={() => {
-          // Bring the user all the way back to the top of the profile
-          // (avatar / badge card / preferences / … visible again).
-          // Previously we scrolled to `historyYRef.current - 8`, which
-          // lands the STORICO VOTI header at the very top of the
-          // viewport — but on tall profiles that Y value is > 700px,
-          // which is our own pill visibility threshold: the pill would
-          // correctly hide during the animation and then re-appear the
-          // second the user touched the list, because the final
-          // position is still "deep-scrolled" as far as our threshold
-          // is concerned. Scrolling to y=0 unambiguously satisfies the
-          // user's expectation ("bring me AT LEAST to the height where
-          // PROFESSIONE is visible") and is guaranteed to be well
-          // under 700, so the pill stays hidden until the user
-          // manually scrolls back down.
-          scrollRef.current?.scrollTo({ y: 0, animated: true });
+          // Bring the user to the START of the STORICO VOTI section
+          // (header "STORICO VOTI" + first history rows visible) —
+          // NOT all the way to the avatar (too far up) and NOT to the
+          // deep-scrolled position where they were (too far down).
+          // Because that target Y is itself > 700 px (our own pill
+          // threshold), we LOCK the `showTopBtn` gate so onScroll
+          // events fired during the animated glide can't flip the
+          // pill back on. The lock is released only when the user
+          // manually drags the ScrollView again (see onScrollBeginDrag).
+          scrollLockRef.current = true;
+          setShowTopBtn(false);
+          const target = Math.max(0, historyYRef.current - 8);
+          scrollRef.current?.scrollTo({ y: target, animated: true });
+          // Safety net: on very tall content the animated scroll can
+          // undershoot; snap to the exact target after the animation
+          // has had time to run so the user is really at the section
+          // start.
+          setTimeout(() => {
+            try {
+              scrollRef.current?.scrollTo({ y: target, animated: false });
+            } catch { /* noop */ }
+          }, 750);
         }}
         testID="profile-scroll-top"
       />
