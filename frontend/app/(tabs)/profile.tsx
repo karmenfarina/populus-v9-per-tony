@@ -1359,7 +1359,23 @@ export default function Profile() {
 
       <ScrollToTopButton
         visible={showTopBtn}
-        onPress={() => scrollRef.current?.scrollTo({ y: Math.max(0, historyYRef.current - 8), animated: true })}
+        onPress={() => {
+          // Bring the user all the way back to the top of the profile
+          // (avatar / badge card / preferences / … visible again).
+          // Previously we scrolled to `historyYRef.current - 8`, which
+          // lands the STORICO VOTI header at the very top of the
+          // viewport — but on tall profiles that Y value is > 700px,
+          // which is our own pill visibility threshold: the pill would
+          // correctly hide during the animation and then re-appear the
+          // second the user touched the list, because the final
+          // position is still "deep-scrolled" as far as our threshold
+          // is concerned. Scrolling to y=0 unambiguously satisfies the
+          // user's expectation ("bring me AT LEAST to the height where
+          // PROFESSIONE is visible") and is guaranteed to be well
+          // under 700, so the pill stays hidden until the user
+          // manually scrolls back down.
+          scrollRef.current?.scrollTo({ y: 0, animated: true });
+        }}
         testID="profile-scroll-top"
       />
 

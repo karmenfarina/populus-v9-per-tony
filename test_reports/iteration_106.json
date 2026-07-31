@@ -1,0 +1,26 @@
+{
+  "summary": "BUG A verified FIXED. Profile /profile ScrollToTopButton onPress now correctly scrolls the profile ScrollView to y=0 (previously landed at ~historyYRef, still above the 700px pill-visibility threshold). Test flow: logged in as chat_a@test.it, injected backend session token into AsyncStorage (Firebase Google-auth flow blocks direct email/password UI login for pre-verified backend users; used the /api/auth/login endpoint + localStorage.setItem('faide_token', JSON.stringify(token)) which is exactly what storage.secureSet writes). Expanded the STORICO VOTI accordion to grow the ScrollView (max scroll went from 616 -> 1753). Set scrollTop to 1200 to force showTopBtn=true — pill parent opacity=1 confirmed. Tapped [data-testid=profile-scroll-top]. Sampled every 250ms for 3.5s: scrollTop dropped 1200 -> 240 -> 8 -> 0 by t=750ms and STAYED at 0 through t=3500ms. Pill parent opacity was 0 across the entire 3.5s window (never flickered back). REGRESSION check: manually scrolling the profile back down to 1200 re-triggers the pill (opacity=1) confirming the visibility threshold logic is untouched — only the destination changed.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/test_reports/scrolled_down.png",
+    "/app/test_reports/after_tap.png"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Note (not blocking): profile.tsx is 1867 lines — well past the 700-line guideline. Consider splitting into smaller modules (Header, BadgeCard, Stats, StoricoVoti, Prefs, Photos) in a future refactor. Not a regression, just a code-hygiene follow-up.",
+    "Login UX gap for pre-verified backend users: chat_a@test.it can auth via /api/auth/login (returns 200 + token) but the Auth screen only supports Firebase (email+password) or Google/Anon. As a result an automated testing agent (and any manual QA) cannot log the seeded chat_a/chat_b users in through the UI — Firebase reports 'Email o password sbagliata' because no Firebase account exists for them. Not caused by this iteration's change, but worth flagging: either seed corresponding Firebase accounts, expose the legacy /auth/login on the UI behind a debug flag, or update test_credentials.md to make the token-injection procedure explicit. In this iteration I used the AsyncStorage/localStorage injection workaround."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (frontend-only test as requested)", "frontend": "100%"},
+  "seed_data_creation": "None. chat_a@test.it already had 9 vote entries — sufficient once STORICO VOTI accordion is expanded (max scroll 1753 > 700 threshold).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "To log in as chat_a@test.it / chat_b@test.it, DO NOT use the /auth screen (Firebase-only). Instead, from any page: `await page.goto('/'); await page.evaluate(\\\"async () => { const r = await fetch('/api/auth/login', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({email:'chat_a@test.it', password:'test123'})}); const j = await r.json(); localStorage.setItem('faide_token', JSON.stringify(j.token)); }\\\"); await page.goto('/profile')`. The token key `faide_token` is written by storage.secureSet which uses AsyncStorage.setItem which on web is just window.localStorage with JSON.stringify. Also: the STORICO VOTI accordion on profile.tsx is COLLAPSED by default (historyExpanded=false) — click the section header (text 'STORICO VOTI', click nearest ancestor with role=button) before you scroll, otherwise max-scroll is ~616px < the 700 threshold and the pill will never appear. The pill lives at [data-testid=profile-scroll-top]; its visibility comes from the parent Animated.View opacity (getComputedStyle(btn.parentElement).opacity).",
+  "rca_of_issue": "PREVIOUS BUG (now fixed by main agent E1 in profile.tsx line 1377): onPress used scrollTo({y: historyYRef.current - 8}). On profiles with expanded history + populated stats, historyYRef.current is > 700, so tapping the pill landed the user at y>700 which is STILL above the showTopBtn threshold (setShowTopBtn(y > 700)). The pill therefore stayed lit up after animation completed, giving the illusion the tap did nothing. FIX: scrollTo({y: 0, animated:true}) — guaranteed to be under the 700 threshold, so showTopBtn transitions to false and the pill hides. Test confirms scrollTop lands at 0 within ~750ms and stays there; pill opacity=0 for full 3.5s post-tap sampling; regression path (user scrolls back down) re-triggers pill correctly."
+}
