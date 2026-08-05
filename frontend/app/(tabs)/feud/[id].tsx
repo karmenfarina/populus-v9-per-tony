@@ -698,7 +698,9 @@ export default function FeudDetail() {
                 activeSide !== "A" && styles.commentsTabDim,
               ]}
             >
-              <Text style={styles.commentsTabCount}>{sideA.length}</Text>
+              {feud.my_vote && (
+                <Text style={styles.commentsTabCount}>{sideA.length}</Text>
+              )}
               <Text style={styles.commentsTabLabel} numberOfLines={1}>
                 PRO {feud.party_a.toUpperCase()}
               </Text>
@@ -712,7 +714,9 @@ export default function FeudDetail() {
                 activeSide !== "B" && styles.commentsTabDim,
               ]}
             >
-              <Text style={[styles.commentsTabCount, { color: colors.onBrandSecondary }]}>{sideB.length}</Text>
+              {feud.my_vote && (
+                <Text style={[styles.commentsTabCount, { color: colors.onBrandSecondary }]}>{sideB.length}</Text>
+              )}
               <Text style={[styles.commentsTabLabel, { color: colors.onBrandSecondary }]} numberOfLines={1}>
                 PRO {feud.party_b.toUpperCase()}
               </Text>
@@ -1159,7 +1163,7 @@ const styles = StyleSheet.create({
   postBtn: { paddingVertical: spacing.md, alignItems: "center", borderRadius: radius.md },
   postBtnTxt: { fontSize: font.sizes.base, letterSpacing: 1.5, fontWeight: "800" },
   commentsTabs: { flexDirection: "row", gap: spacing.sm, paddingHorizontal: spacing.lg, paddingBottom: spacing.sm },
-  commentsTab: { flex: 1, paddingVertical: spacing.md, paddingHorizontal: spacing.sm, alignItems: "center", gap: 2, position: "relative", overflow: "hidden", borderRadius: radius.md },
+  commentsTab: { flex: 1, paddingVertical: spacing.md, paddingHorizontal: spacing.sm, alignItems: "center", justifyContent: "center", gap: 2, position: "relative", overflow: "hidden", borderRadius: radius.md, minHeight: 74 },
   commentsTabDim: { opacity: 0.42 },
   commentsTabCount: { color: colors.onBrandPrimary, fontSize: font.sizes.xxl, fontWeight: "800", letterSpacing: 0.5 },
   commentsTabLabel: { color: colors.onBrandPrimary, fontSize: font.sizes.xs, letterSpacing: 1, paddingHorizontal: spacing.xs, fontWeight: "700" },

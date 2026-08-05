@@ -207,25 +207,31 @@ export default function Profile() {
         return;
       } catch { /* fall through to router.replace below */ }
     }
-    // NATIVE path: navigate FIRST so all tab screens (feud detail, profile
-    // itself, etc.) unmount before AuthContext touches auth state. We pass
-    // `skipStateUpdates: true` so `setUser(null)` is NEVER called on
-    // native — under flaky networks the awaits inside logout() (Firebase
-    // signout, SecureStore write, dynamic imports) can take seconds and
-    // any component that reads `user.foo` and hasn't unmounted yet would
-    // crash. By skipping the state clear entirely we make logout crash-
-    // proof: the tab tree has already been replaced by `/auth`, no one
-    // reads `user` anymore, and on the next successful login
-    // `applyAuthResult` swaps `user` to the fresh identity.
-    try { (router as any).dismissAll?.(); } catch { /* noop */ }
+    // NATIVE path — Belt-and-braces sequence:
+    //   1. Navigate away FIRST so profile.tsx (and any other tab route
+    //      currently mounted that reads `user.foo` directly) is
+    //      immediately replaced by /auth. This unmounts the whole
+    //      (tabs) group.
+    //   2. On the NEXT tick (after router.replace finished its
+    //      internal state transitions), invoke `logout()` which is now
+    //      completely defensive: it wraps every side-effect in
+    //      try/catch, dynamic-imports Firebase inside a self-contained
+    //      IIFE, and finally does `setUser(null)`.
+    //   3. Clear the manual back-stack in the background — must never
+    //      throw.
+    //
+    // We intentionally DO NOT call `router.dismissAll()` here — on
+    // certain Expo Go builds it can throw synchronously when the
+    // current route is not inside a native stack, which was the
+    // source of the "app crashes on every logout" report.
     try { router.replace("/auth"); } catch { /* noop */ }
-    // Fire the logout API + Firebase sign-out + token wipe in the
-    // background. All of these are wrapped in try/catch inside logout()
-    // itself, so no error can bubble here.
-    try {
-      logout({ skipStateUpdates: true }).catch(() => {});
-    } catch { /* noop */ }
-    // Clear the navigation memory in the background too — the dynamic
+    setTimeout(() => {
+      // Now that we're off (tabs) and profile.tsx has unmounted, it's
+      // safe to clear the auth state. Any remaining consumer of
+      // `useAuth().user` (root providers) already handles null.
+      logout().catch(() => {});
+    }, 60);
+    // Clear the navigation memory in the background — the dynamic
     // import can time out on a flaky connection but must never throw.
     (async () => {
       try {

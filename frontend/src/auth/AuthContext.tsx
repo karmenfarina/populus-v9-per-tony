@@ -271,20 +271,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // (notifications/messaging, both on 30s intervals) will now silently
     // no-op instead of hitting the backend with a bare header.
     markLoggedOut();
+    // Wipe the persisted token FIRST and synchronously so any subsequent
+    // request from a background poller/WS reconnect sees a null token.
+    try { await setToken(null); } catch { /* swallow */ }
     // Fire-and-forget the backend + Firebase calls. Awaiting them can
     // block the UI transition for hundreds of ms on flaky networks,
-    // and the actual navigation to /auth doesn't depend on them.
-    try { api.logout().catch(() => {}); } catch {}
-    try {
-      // Fire-and-forget Firebase sign-out so a stale Firebase session
-      // can't override our next login attempt. Import inline to keep
-      // the auth module tree-shakeable on cold start.
-      const fb = await import('./firebase');
-      fb.fbSignOut(fb.auth).catch(() => {});
-    } catch {}
-    // Always clear the token from persistent storage first so the next
-    // /users/me call returns null instead of a stale identity.
-    try { await setToken(null); } catch {}
+    // and the actual navigation to /auth doesn't depend on them. All
+    // are wrapped in aggressive try/catch so a native Firebase quirk
+    // (uninitialised auth on some Expo Go builds, Android WebView
+    // teardown) can never surface as a red-screen.
+    try { api.logout().catch(() => {}); } catch { /* ignore */ }
+    // Dynamic-import Firebase in a self-contained IIFE so any failure
+    // there (module resolution, native module missing, etc.) is fully
+    // contained and doesn't crash the logout caller.
+    (async () => {
+      try {
+        const fb = await import('./firebase');
+        try { fb.fbSignOut(fb.auth).catch(() => {}); } catch { /* ignore */ }
+      } catch { /* ignore */ }
+    })();
     // On WEB we defer the React state clear to AFTER `window.location`
     // has been asked to navigate — otherwise setUser(null) triggers
     // re-renders on the outgoing tree (Profile / Home / detail routes
