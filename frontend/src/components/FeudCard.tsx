@@ -76,7 +76,16 @@ export default function FeudCard({ feud, onPress, showArchivedBadge = false }: {
         </View>
       </View>
       <View style={styles.cardFooter}>
-        <Text style={styles.cardFooterText}>{revealed ? `${feud.total_votes} VOTI` : "VOTA PER VEDERE"}</Text>
+        <Text style={styles.cardFooterText}>
+          {revealed
+            ? `${feud.total_votes} VOTI`
+            : (feud.total_votes > 0
+                ? `${feud.total_votes} VOTI · VOTA PER VEDERE %`
+                : "VOTA PER VEDERE")}
+          {typeof feud.hype_comments === "number" && feud.hype_comments > 0
+            ? `  ·  💬 ${feud.hype_comments}`
+            : ""}
+        </Text>
         <Text style={styles.cardFooterOpen}>APRI ›</Text>
       </View>
     </Pressable>

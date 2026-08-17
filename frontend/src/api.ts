@@ -445,6 +445,10 @@ export type Feud = {
   hashtag?: string;
   hashtag_display?: string;
   is_favorite?: boolean;
+  /** Only present in HYPE payloads — visible-comment + reply counts for
+   *  the card badge (so the user sees real engagement before voting). */
+  hype_comments?: number;
+  hype_engagement?: number;
 };
 
 export type Mention = {

@@ -1862,6 +1862,14 @@ async def list_hype_feuds(user: Optional[dict] = Depends(get_current_user_option
         my_vote = voted_map.get(d['feud_id']) if user else None
         _attach_percentages(d, revealed=bool(my_vote))
         d['my_vote'] = my_vote
+        # Expose the visible comment count on the HYPE payload so the
+        # card can render "🔥 X commenti" even before the viewer has
+        # voted (percentages remain hidden). Without this signal the
+        # cards look empty to users who haven't voted yet — even though
+        # the feud has real engagement, which was exactly the "vedo
+        # faide vuote in hype" report.
+        d['hype_comments'] = d.get('_comments', 0)
+        d['hype_engagement'] = int(d.get('_comments', 0) or 0) + int(d.get('_replies', 0) or 0)
         if isinstance(d.get('created_at'), datetime):
             d['created_at'] = _iso_utc(d['created_at'])
         d.pop('_hype_score', None)
