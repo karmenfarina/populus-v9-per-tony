@@ -1578,10 +1578,22 @@ async def replace_photo(photo_id: str, body: PhotoUploadBody, user: dict = Depen
 
 
 @api_router.get('/users/{user_id}')
-async def public_user(user_id: str):
+async def public_user(user_id: str, viewer: Optional[dict] = Depends(get_current_user_optional)):
     u = await db.users.find_one({'user_id': user_id}, {'_id': 0})
     if not u:
         raise HTTPException(status_code=404, detail='Utente non trovato')
+    # Block guard — a blocked pair cannot see each other's profile. We
+    # return 403 with a neutral message so the client can gracefully
+    # render an "Utente non disponibile" empty state without leaking
+    # the fact that a block relationship exists.
+    if viewer and viewer.get('user_id') != user_id:
+        try:
+            if await _is_blocked_pair(viewer['user_id'], user_id):
+                raise HTTPException(status_code=403, detail='Profilo non disponibile')
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.warning(f"public_user block check failed: {e}")
     is_anonymous = u.get('auth_provider') == 'anonymous'
     # Anonymous accounts only expose their opaque identifier — no photos,
     # profile, socials, badge, or voting stats.
@@ -2607,6 +2619,16 @@ async def public_user_history(
     )
     if not u:
         raise HTTPException(status_code=404, detail='Utente non trovato')
+    # Block guard — a blocked pair cannot see each other's public
+    # voting history. Same rule as `public_user`.
+    if user and user.get('user_id') != user_id:
+        try:
+            if await _is_blocked_pair(user['user_id'], user_id):
+                raise HTTPException(status_code=403, detail='Cronologia non disponibile')
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.warning(f"public_user_history block check failed: {e}")
     if u.get('auth_provider') == 'anonymous':
         # Anonymous voting history is hidden from other users.
         return {'history': [], 'is_anonymous': True, 'hidden': True, 'reason': 'anonymous'}
@@ -2679,6 +2701,13 @@ async def get_comments(
     user: Optional[dict] = Depends(get_current_user_optional),
 ):
     docs = await db.comments.find({'feud_id': feud_id}, {'_id': 0}).sort('created_at', -1).to_list(500)
+    # Bi-directional block filter: hide comments authored by users who
+    # have blocked the viewer (or vice versa). Public-facing rule so a
+    # blocked pair never shares a comment thread.
+    if docs and user:
+        blocked = await _blocked_ids_for(user['user_id'])
+        if blocked:
+            docs = [c for c in docs if c.get('user_id') not in blocked]
     # Visibility rule: a comment is shown only if its author is CURRENTLY voting
     # for the same side the comment was posted on. Comments where the author has
     # since switched sides are hidden — they reappear if the author switches
@@ -3062,9 +3091,14 @@ async def add_comment(feud_id: str, body: CommentBody, user: dict = Depends(get_
             status_code=400,
             detail='Commento bloccato: contenuto non consentito (hate speech, minacce o incitamento alla violenza).',
         )
+    # Resolve @nicknames → real user_ids. Silently drops mentions to
+    # self, anonymous accounts, non-existent nicknames and any user
+    # in a bi-directional block with the author.
+    mentions = await _resolve_mentions(clean_text, user['user_id'])
     doc = {
         'comment_id': new_id('cmt'), 'feud_id': feud_id, 'user_id': user['user_id'],
         'nickname': user.get('nickname'), 'side': vote['side'], 'text': clean_text,
+        'mentions': mentions,
         'created_at': now_utc(),
     }
     await db.comments.insert_one(doc)
@@ -3072,6 +3106,25 @@ async def add_comment(feud_id: str, body: CommentBody, user: dict = Depends(get_
     doc['reply_count'] = 0
     # normalize datetime
     doc['created_at'] = _iso_utc(doc['created_at'])
+    # Fire a "mention" notification to each mentioned user. Deduplicated
+    # against the author (already filtered in _resolve_mentions).
+    if mentions:
+        try:
+            feud = await db.feuds.find_one({'feud_id': feud_id}, {'_id': 0, 'title': 1})
+            feud_title = (feud or {}).get('title') or 'una faida'
+            for m in mentions:
+                asyncio.create_task(_emit_notification(
+                    m['user_id'],
+                    'mention',
+                    title=f"{user.get('nickname', 'Qualcuno')} ti ha taggato in un commento",
+                    body=f"Su «{feud_title[:60]}»: {clean_text[:80]}",
+                    feud_id=feud_id,
+                    comment_id=doc['comment_id'],
+                    side=vote['side'],
+                    send_push_too=True,
+                ))
+        except Exception as e:
+            logger.warning(f"notification emit (comment mention) failed: {e}")
     # Analytics — comment created
     asyncio.create_task(_log_event(
         db, user['user_id'], EVT_COMMENT_CREATED,
@@ -3114,8 +3167,13 @@ async def delete_reply(reply_id: str, user: dict = Depends(get_current_user)):
 
 
 @api_router.get('/comments/{comment_id}/replies')
-async def list_replies(comment_id: str):
+async def list_replies(comment_id: str, user: Optional[dict] = Depends(get_current_user_optional)):
     docs = await db.replies.find({'comment_id': comment_id}, {'_id': 0}).sort('created_at', 1).to_list(500)
+    # Bi-directional block filter — same rule as get_comments.
+    if docs and user:
+        blocked = await _blocked_ids_for(user['user_id'])
+        if blocked:
+            docs = [r for r in docs if r.get('user_id') not in blocked]
     if docs:
         # Same visibility rule as comments: a reply is shown only if its author
         # is currently voting on the side the reply was posted on.
@@ -3141,6 +3199,13 @@ async def add_reply(comment_id: str, body: ReplyBody, user: dict = Depends(get_c
     parent = await db.comments.find_one({'comment_id': comment_id}, {'_id': 0})
     if not parent:
         raise HTTPException(status_code=404, detail='Commento non trovato')
+    # Block guard: if the parent-comment author has blocked me (or vice
+    # versa), reject the reply entirely. Prevents circumventing the
+    # block by leaving a public retort under their comment.
+    parent_uid = parent.get('user_id')
+    if parent_uid and parent_uid != user['user_id']:
+        if await _is_blocked_pair(user['user_id'], parent_uid):
+            raise HTTPException(status_code=403, detail='Non puoi rispondere a questo utente')
     vote = await db.votes.find_one({'feud_id': parent['feud_id'], 'user_id': user['user_id']}, {'_id': 0})
     side = vote['side'] if vote else parent['side']
     clean_text, flagged = _moderate_text(body.text)
@@ -3154,10 +3219,12 @@ async def add_reply(comment_id: str, body: ReplyBody, user: dict = Depends(get_c
             status_code=400,
             detail='Risposta bloccata: contenuto non consentito (hate speech, minacce o incitamento alla violenza).',
         )
+    # Resolve @nicknames (same rules as `add_comment`).
+    mentions = await _resolve_mentions(clean_text, user['user_id'])
     doc = {
         'reply_id': new_id('rep'), 'comment_id': comment_id, 'feud_id': parent['feud_id'],
         'user_id': user['user_id'], 'nickname': user.get('nickname'), 'side': side,
-        'text': clean_text, 'created_at': now_utc(),
+        'text': clean_text, 'mentions': mentions, 'created_at': now_utc(),
     }
     await db.replies.insert_one(doc)
     doc.pop('_id', None)
@@ -3183,6 +3250,30 @@ async def add_reply(comment_id: str, body: ReplyBody, user: dict = Depends(get_c
             )
     except Exception as e:
         logger.warning(f"notification emit (reply) failed: {e}")
+    # Mention notifications — same as add_comment. Skip mentioning the
+    # parent author (they already got a "reply" notification above).
+    if mentions:
+        try:
+            feud = await db.feuds.find_one(
+                {'feud_id': parent['feud_id']}, {'_id': 0, 'title': 1}
+            )
+            feud_title = (feud or {}).get('title') or 'una faida'
+            parent_uid = parent.get('user_id')
+            for m in mentions:
+                if m['user_id'] == parent_uid:
+                    continue
+                asyncio.create_task(_emit_notification(
+                    m['user_id'],
+                    'mention',
+                    title=f"{user.get('nickname', 'Qualcuno')} ti ha taggato in una risposta",
+                    body=f"Su «{feud_title[:60]}»: {clean_text[:80]}",
+                    feud_id=parent['feud_id'],
+                    comment_id=comment_id,
+                    side=side,
+                    send_push_too=True,
+                ))
+        except Exception as e:
+            logger.warning(f"notification emit (reply mention) failed: {e}")
     # Analytics — reply created
     asyncio.create_task(_log_event(
         db, user['user_id'], EVT_REPLY_CREATED,
@@ -5056,6 +5147,109 @@ async def _is_blocked_pair(a: str, b: str) -> bool:
     return n > 0
 
 
+async def _blocked_ids_for(uid: str) -> set[str]:
+    """Return the set of user_ids that either blocked `uid` or were
+    blocked by `uid`. Used to filter public interactions (comments,
+    replies, mentions, story visibility, etc.) so a blocked pair
+    cannot see each other's public activity."""
+    ids: set[str] = set()
+    try:
+        async for b in db.user_blocks.find(
+            {'$or': [{'blocker_id': uid}, {'blocked_id': uid}]},
+            {'_id': 0, 'blocker_id': 1, 'blocked_id': 1},
+        ):
+            other = b.get('blocked_id') if b.get('blocker_id') == uid else b.get('blocker_id')
+            if other and other != uid:
+                ids.add(other)
+    except Exception as e:
+        logger.warning(f"_blocked_ids_for failed for {uid}: {e}")
+    return ids
+
+
+# @mention regex — matches Instagram-style handles (2..24 chars,
+# letters, digits, dot, underscore, case-insensitive). Anchored to a
+# word boundary on the left so we don't match "hello@example.com"
+# style email addresses. The captured group is normalised to
+# lowercase in `_parse_mention_nicknames` for consistent lookup.
+_MENTION_RE = _re.compile(r"(?:^|(?<=\s)|(?<=[^\w.]))@([A-Za-z0-9._]{2,24})")
+
+
+def _parse_mention_nicknames(text: str) -> list[str]:
+    """Extract unique @nicknames from a comment/reply text (order-preserving)."""
+    if not text:
+        return []
+    seen: set[str] = set()
+    out: list[str] = []
+    for m in _MENTION_RE.finditer(text):
+        nk = (m.group(1) or '').lower().strip('.').strip('_')
+        # Skip degenerate matches like "@..." or "@___"
+        if not nk or nk in seen:
+            continue
+        seen.add(nk)
+        out.append(nk)
+        if len(out) >= 20:  # hard cap to prevent notification spam
+            break
+    return out
+
+
+async def _resolve_mentions(
+    text: str,
+    author_id: str,
+) -> list[dict]:
+    """Resolve @nicknames in `text` to actual users, filtering out:
+    - self (can't mention yourself)
+    - non-existent users
+    - anonymous accounts (can't be mentioned)
+    - users involved in a bi-directional block with `author_id`
+
+    Returns a list of `{user_id, nickname}` dicts in the order the
+    mentions appeared in the text. Safe to call with empty text —
+    returns []. Never raises.
+    """
+    nicks = _parse_mention_nicknames(text)
+    if not nicks:
+        return []
+    try:
+        # Case-insensitive batch lookup. Some legacy accounts were
+        # seeded with mixed-case nicknames (e.g. `chatUserB`) while
+        # the mention regex only captures the lowercase form — a
+        # plain `$in: nicks` would silently miss them. We use one
+        # `$regex` per candidate with `$options: 'i'` OR'd together
+        # so it's still a single round-trip.
+        or_clauses = [
+            {'nickname': {'$regex': f'^{_re.escape(n)}$', '$options': 'i'}}
+            for n in nicks
+        ]
+        cursor = db.users.find(
+            {
+                '$or': or_clauses,
+                'auth_provider': {'$ne': 'anonymous'},
+                'is_anonymous': {'$ne': True},
+            },
+            {'_id': 0, 'user_id': 1, 'nickname': 1},
+        )
+        by_nick: dict[str, str] = {}
+        async for u in cursor:
+            nk = (u.get('nickname') or '').lower()
+            if nk and nk not in by_nick:
+                by_nick[nk] = u['user_id']
+        if not by_nick:
+            return []
+        blocked = await _blocked_ids_for(author_id)
+        out: list[dict] = []
+        for nk in nicks:
+            uid = by_nick.get(nk)
+            if not uid:
+                continue
+            if uid == author_id or uid in blocked:
+                continue
+            out.append({'user_id': uid, 'nickname': nk})
+        return out
+    except Exception as e:
+        logger.warning(f"_resolve_mentions failed: {e}")
+        return []
+
+
 async def _ensure_conversation(uid_a: str, uid_b: str) -> dict:
     cid = _conv_key(uid_a, uid_b)
     existing = await db.conversations.find_one({'conversation_id': cid}, {'_id': 0})
@@ -5898,6 +6092,28 @@ async def block_user(user_id: str, user: dict = Depends(get_current_user)):
         {'$setOnInsert': {'blocker_id': user['user_id'], 'blocked_id': user_id, 'created_at': now_utc()}},
         upsert=True,
     )
+    # Cascade: sever any Cerchia friendship in either direction so
+    # neither party sees the other in their circle, story feed or
+    # circle-based ranking. This mirrors the "no public interaction"
+    # invariant enforced by comments, replies and mentions elsewhere.
+    try:
+        await db.friendships.delete_many({
+            '$or': [
+                {'user_id': user['user_id'], 'friend_id': user_id},
+                {'user_id': user_id, 'friend_id': user['user_id']},
+            ],
+        })
+    except Exception as e:
+        logger.warning(f"block_user: friendship cascade delete failed: {e}")
+    # Also drop any pending story-hidden entries — they become moot
+    # once friendships are gone and it keeps the collection tidy.
+    try:
+        await db.users.update_one(
+            {'user_id': user['user_id']},
+            {'$pull': {'story_hidden_viewers': user_id}},
+        )
+    except Exception:
+        pass
     return {'ok': True, 'blocked': True}
 
 

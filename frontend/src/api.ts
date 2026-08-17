@@ -447,6 +447,11 @@ export type Feud = {
   is_favorite?: boolean;
 };
 
+export type Mention = {
+  user_id: string;
+  nickname: string;
+};
+
 export type Comment = {
   comment_id: string;
   feud_id: string;
@@ -456,6 +461,7 @@ export type Comment = {
   nickname_side?: 'A' | 'B';
   text: string;
   reply_count?: number;
+  mentions?: Mention[];
   created_at: string;
 };
 

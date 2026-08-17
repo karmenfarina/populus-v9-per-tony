@@ -1,0 +1,44 @@
+{
+  "summary": "Backend: 12/13 passed, 1 xfailed (documented case-sensitivity bug). Frontend smoke test: home + feud detail render without red screen; login token injection works. All @mention parsing and block enforcement flows verified server-side: (1) @mention in comment resolves to fresh-user (lowercase nickname), (2) mention notification delivered to tagged user (type='mention', notif_id present), (3) self-mention silently dropped, (4) non-existent nick silently dropped, (5) anonymous users cannot be mentioned (regex+DB filter), (6) block cascades friendships in BOTH directions (verified via GET /api/users/{owner}/circle — endpoint is /users/{owner_id}/circle not /users/me/circle), (7) A blocks B → GET /api/users/B by A → 403 'Profilo non disponibile', (8) GET /api/users/B/history by A → 403 'Cronologia non disponibile', (9) POST /comments/{A_cmt}/replies by B → 403 'Non puoi rispondere a questo utente' (and reverse), (10) GET /feuds/{id}/comments filters bi-directionally (verified via side_a+side_b buckets — response is NOT {comments:[]} but {side_a:[], side_b:[]}), (11) GET /comments/{id}/replies filters bi-directionally, (12) block-mention (B tags A while A has blocked B) → comment created but mentions=[] and NO 'mention' notification to A, (13) DELETE /users/B/block restores profile visibility. Known bug discovered: @mention of `chatUserB` (pre-seeded mixed-case nickname) does NOT resolve because _resolve_mentions Mongo query is case-sensitive; newer signup accounts are auto-lowercased by _normalize_and_validate_nickname so this only affects legacy seeded users. Frontend testing limited to smoke test (login+home+feud-detail) — full autocomplete flow requires voting first and testing MentionInput popup rendering.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/feuds/{id}/comments", "issue": "Response shape is {side_a:[], side_b:[]} not {comments:[]} — main agent should confirm the frontend feud detail page destructures accordingly."},
+      {"endpoint": "POST /api/feuds/{id}/comments (mentions)", "issue": "Case-sensitivity bug: _resolve_mentions queries Mongo with exact-match `{'nickname': {'$in': nicks}}` where `nicks` is lowercased. Legacy users like `chatUserB` (mixed case stored in DB) can never be @-mentioned. Fix: (a) migrate DB nicknames to lowercase, or (b) build a case-insensitive $in via regex. New signups are already normalized so bug only affects legacy seeds. Test test_mention_case_sensitivity_bug marked xfail."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "expo-notifications (web)", "issue": "Console warns 'Listening to push token changes is not yet fully supported on web'. Expected on web preview; no action needed unless push tokens must be tested on device (mention notif works via /api/notifications regardless)."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_mentions_and_blocks.py",
+    "/app/test_reports/pytest/iter109_mentions_blocks.xml",
+    "/app/test_reports/iter109_home.png",
+    "/app/test_reports/iter109_feud.png"
+  ],
+  "action_items": [
+    "Decide on the case-sensitivity mention bug: either (a) run a one-off migration to lowercase existing DB nicknames (`db.users.updateMany({}, [{$set: {nickname: {$toLower: '$nickname'}}}])`), or (b) change _resolve_mentions to build case-insensitive regex $in queries. Preferred: (a) since new signups are already lowercased and Mongo case-insensitive $in is expensive.",
+    "Optional: expose an ID field named `id` (not just `notif_id`) on notifications so consumers don't need to check multiple field names — cosmetic.",
+    "Frontend live autocomplete + tap-to-profile flow not exercised due to voting prerequisite complexity — safe for main agent to self-test on device: login as chat_a, vote on any feud, open comment input, type `@ch`, verify [data-testid=mention-popup] and [data-testid=mention-suggestion-<nick>] rows appear."
+  ],
+  "critical_code_review_comments": [
+    "/app/backend/server.py is 7064 lines — well beyond the 700-line guideline. Consider splitting into modules (auth, feuds, comments, blocks, messaging, admin, scheduler) for maintainability. Not a regression but reiterated.",
+    "get_comments (line 2697) response shape is {side_a, side_b} split, but list_replies (line 3169) returns {replies:[...]}. Inconsistent — either bucket both or neither.",
+    "_resolve_mentions uses `db.users.find({'nickname': {'$in': nicks}})` — case-sensitive Mongo lookup on a lowercase list. This is the root of the observed bug with `chatUserB`. Recommend a defensive normalization on write (already done in _normalize_and_validate_nickname) plus a one-off migration.",
+    "block_user (line 6074) atomically inserts the block row and cascades friendship deletes but does NOT wrap the two operations in a Mongo transaction. If the friendship delete throws mid-way, only one row could remain. Low-risk because of try/except swallow, but worth noting."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_mentions_and_blocks.py (new)"
+  ],
+  "success_rate": {"backend": "92% (12/13 pass, 1 xfail for known DB case-sensitivity bug)", "frontend": "smoke only — home + feud detail render OK, no red screen"},
+  "seed_data_creation": "One fresh registered account per test run via /api/auth/signup (nickname `targ<hex>`) for the mention resolution test. Anonymous accounts created for the anonymous-cannot-be-mentioned test. No cleanup — signup users pile up but are harmless.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend test file: /app/backend/tests/test_mentions_and_blocks.py. Key findings: (1) get_comments returns {side_a, side_b} not {comments}. (2) Circle list endpoint is /api/users/{owner_id}/circle NOT /api/users/me/circle (latter is 404 because 'me' isn't a user_id). (3) Notifications use `notif_id` field. (4) Pre-seeded chat_a/chat_b test users → chat_a has lowercase nickname (`chat_a`) but chat_b has mixed-case (`chatUserB`) which breaks lowercase @mentions. When testing mentions, either signup a fresh user OR use `@chat_a` as the tagged target. (5) When testing block-hides-comments, ensure the comments are POSTED WHILE UNBLOCKED then block, otherwise the block check on the reply endpoint returns 403 before the comment even gets created (self-defeating).",
+  "rca_of_issue": "N/A — no user-reported bug this iteration. Feature-verification iteration for @mention + block enforcement. One backend bug surfaced (case-sensitive mention lookup on legacy mixed-case nicknames) — see action_items."
+}

@@ -12,6 +12,8 @@ import * as Clipboard from "expo-clipboard";
 import { api, ApiError, Comment, Feud, Reply, Sponsor } from "@/src/api";
 import { colors, spacing, font, sideColor, onSideColor, radius } from "@/src/theme";
 import { ScrollToTopButton } from "@/src/components/ScrollToTopButton";
+import MentionInput from "@/src/components/MentionInput";
+import MentionText from "@/src/components/MentionText";
 import FeudMediaBlock from "@/src/components/FeudMediaBlock";
 import FeudStatsModal from "@/src/components/FeudStatsModal";
 import AiFactionSummaryModal from "@/src/components/AiFactionSummaryModal";
@@ -657,10 +659,10 @@ export default function FeudDetail() {
 
           {feud.my_vote && (
             <View style={styles.commentInputWrap}>
-              <TextInput
-                testID="comment-input"
-                style={styles.commentInput}
-                placeholder="Scrivi il tuo commento..."
+              <MentionInput
+                inputTestID="comment-input"
+                containerStyle={styles.commentInput}
+                placeholder="Scrivi il tuo commento... usa @ per taggare"
                 placeholderTextColor={colors.muted}
                 value={commentText}
                 onChangeText={setCommentText}
@@ -867,7 +869,12 @@ function CommentItem({
             ) : null}
           </View>
         </View>
-        <Text style={cs.text}>{c.text}</Text>
+        <MentionText
+          text={c.text}
+          mentions={c.mentions}
+          style={cs.text}
+          accentColor={accent}
+        />
         <View style={cs.actions}>
           <Pressable onPress={onToggle} hitSlop={6} testID={`replies-toggle-${c.comment_id}`}>
             <Text style={cs.actionTxt}>
@@ -905,7 +912,12 @@ function CommentItem({
                         </Pressable>
                       ) : null}
                     </View>
-                    <Text style={[cs.text, { fontSize: font.sizes.sm, marginTop: 2 }]}>{r.text}</Text>
+                    <MentionText
+                      text={r.text}
+                      mentions={r.mentions}
+                      style={[cs.text, { fontSize: font.sizes.sm, marginTop: 2 }]}
+                      accentColor={rAccent}
+                    />
                   </View>
                 </View>
               );
@@ -914,14 +926,14 @@ function CommentItem({
         )}
         {isReplying && (
           <View style={cs.replyInputWrap}>
-            <TextInput
-              style={cs.replyInput}
+            <MentionInput
+              containerStyle={cs.replyInput}
               value={replyText}
               onChangeText={setReplyText}
-              placeholder="Rispondi..."
+              placeholder="Rispondi... usa @ per taggare"
               placeholderTextColor={colors.muted}
               multiline
-              testID={`reply-input-${c.comment_id}`}
+              inputTestID={`reply-input-${c.comment_id}`}
             />
             <Pressable onPress={onSubmitReply} style={cs.replySend} testID={`reply-send-${c.comment_id}`}>
               <Text style={cs.replySendTxt}>INVIA</Text>

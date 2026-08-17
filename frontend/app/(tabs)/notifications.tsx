@@ -39,6 +39,7 @@ function formatWhen(iso: string): string {
 
 const ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
   reply: "chatbubble-ellipses",
+  mention: "at",
   new_feud: "flame",
   vote_result: "checkmark-done",
 };
