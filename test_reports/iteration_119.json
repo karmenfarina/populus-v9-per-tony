@@ -1,0 +1,50 @@
+{
+  "summary": "Iter 119 validated the fix for the Google-OAuth logout red-screen (Uncaught 'Missing bearer token' at api.ts:128, thrown from loadPhotos in profile.tsx). New pytest suite test_iter119_logout_crash.py: 11 tests, all pass. Backend contract confirmed: (A) authed endpoints (/auth/me, /auth/me/photos, /users/me/history, /notifications) return 401 with detail 'Missing bearer token' when no Authorization header is sent — this is the exact string the frontend used to surface as a red screen, which the api.ts short-circuit now prevents from being fetched at all. (B) Public endpoints (/categories, /professions, /auth/login) return 200 without a token. (C) Authed endpoints with a valid token return 200 (photos, /auth/me with correct user_id user_6e65e19525d5). (D) /feuds/hype supports both anon and authed calls (optional auth). Regression: iter115+iter116+iter117+iter118 (40 tests) all pass — including the previously-flagged stale iter115 test_mention_from_blocked_user_hidden which is now green (main agent must have updated it). Frontend Playwright probe on mobile viewport (375x667): loaded /auth → injected valid JWT into localStorage → navigated to /profile → removed token to simulate mid-logout race → navigated again → observed 0 'Missing bearer token' console/pageerror hits and clean /auth screen redirect (see screenshots). No red screen appeared at any point. The client-side short-circuit in api.ts (requiresAuth + PUBLIC_PATH_PREFIXES whitelist) works as intended.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {
+        "component": "expo-notifications (web)",
+        "issue": "Console warning: '[expo-notifications] Listening to push token changes is not yet fully supported on web. Adding a listener will have no effect.' — benign, expected on web preview, unrelated to iter119."
+      },
+      {
+        "component": "StyleSheet shadow*/textShadow*/pointerEvents",
+        "issue": "Deprecation warnings: 'shadow*' style props are deprecated (use boxShadow), 'textShadow*' deprecated (use textShadow), props.pointerEvents deprecated (use style.pointerEvents). Not iter119-related but should be migrated in a housekeeping pass. Multiple occurrences across the app tree."
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter119_logout_crash.py",
+    "/app/test_reports/pytest/iter119.xml",
+    "/app/test_reports/pytest/iter119_regression.xml"
+  ],
+  "action_items": [
+    "Housekeeping (not iter119): migrate deprecated RN style props shadow*/textShadow*/pointerEvents to boxShadow/textShadow/style.pointerEvents across the frontend to clear console noise."
+  ],
+  "critical_code_review_comments": [
+    "api.ts:85-100 (PUBLIC_PATH_PREFIXES + requiresAuth) — whitelist is correct and covers all current public routes: /auth/{login,register,anonymous,google,emergent/session,firebase,session,verify}, /health, /categories, /professions. Verified against api.ts's own callsites: only api.categories(), api.professions(), and the auth entry points hit these prefixes without needing a token. Every other call routes through an authed endpoint. Good.",
+    "api.ts:119 (short-circuit condition) — `(_isLoggedOut && !token) || (!token && requiresAuth(path))` is the correct defense. Second clause is the new fix and covers the race window where the token has been cleared but the (tabs) tree has not yet unmounted. First clause is the belt-and-suspenders retained from iter101 for explicit logout signalling. Both fire before any fetch, so the backend's raw 'Missing bearer token' message is never surfaced.",
+    "AuthContext.tsx logout() ordering (markLoggedOut → setToken(null)) — matches iter119 fix intent: the flag is raised BEFORE the storage write completes, so any in-flight poller tick reads _isLoggedOut=true and short-circuits. Combined with the new !token+requiresAuth guard, the race is closed from both sides.",
+    "profile.tsx loadPhotos / loadHistory try/catch that swallows ApiError silently — correct final line of defense. Even if a request escapes the short-circuit for some reason, the promise rejection cannot bubble to a red screen.",
+    "Micro-suggestion (non-blocking): if a future endpoint is added that is public but does NOT match one of the whitelisted prefixes (e.g. a new /public/* or /legal/terms — actually /legal/terms IS currently authed via requiresAuth but api.getLegalTerms is called pre-login on first-run! Verify manually — if 401s during onboarding, add '/legal' to PUBLIC_PATH_PREFIXES). Same for /analytics/app-open which is fire-and-forget but is called on cold start possibly before login. api.ts:211 already .catch(()=>null)s the analytics call so a synthetic 401 is silently swallowed — harmless. But /legal/terms is called via getLegalTerms and if that lands during signup/login (before token is stored), it will now throw a client-side 401. Recommend a quick manual check on the terms-acceptance flow.",
+    "Regression: all 40 tests from iter115/116/117/118 still pass. The iter115 test_mention_from_blocked_user_hidden which was flagged as stale in iter118 report is now green — either the test was updated or the underlying feature realigned. Either way, no regression."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter119_logout_crash.py (new, 11 tests: 4 missing-bearer contract + 3 public endpoints + 2 authed with token + 2 hype optional auth)"
+  ],
+  "success_rate": {
+    "backend": "100% (11/11 iter119 tests). Regression: 40/40 (iter115+116+117+118).",
+    "frontend": "100% probe pass: 0 'Missing bearer token' console/pageerror hits across /auth → /profile (authed) → token cleared → /profile (unauth) sequence. Clean redirect to /auth on cleared-token nav."
+  },
+  "seed_data_creation": "None. Reused pre-seeded chat_a@test.it / user_6e65e19525d5.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Re-run: `pytest /app/backend/tests/test_iter119_logout_crash.py -v` (11 tests, ~1s). Full iter115-119 regression: `pytest /app/backend/tests/test_iter11{5,6,7,8,9}_bugfixes.py /app/backend/tests/test_iter119_logout_crash.py -v` (51 tests, ~60s). Follow-up spot-check (not automated): verify api.getLegalTerms() during signup/login does not hit the new '!token && requiresAuth' short-circuit — /legal/terms is called before a token exists and may need to be added to PUBLIC_PATH_PREFIXES if the T&C modal fails to load on cold start.",
+  "rca_of_issue": "Original bug (fixed by main agent, verified here): profile.tsx loadPhotos fired an authenticated request AFTER AuthContext.logout() cleared the token but BEFORE the (tabs) layout unmounted. api.ts had no guard for the (!token && requiresAuth) case — it sent the fetch anyway, the backend replied 401 with detail 'Missing bearer token', and the ApiError bubbled uncaught into Metro's red-screen overlay. Fix (verified): PUBLIC_PATH_PREFIXES whitelist + requiresAuth(path) helper + the new second clause in the short-circuit condition throw a client-side ApiError(401, 'Sessione terminata') before any network call for authed endpoints when the token is missing. Combined with profile.tsx's try/catch swallowing ApiError and (tabs)/_layout.tsx's user-null redirect, three independent defenses close the race. Backend contract intact: 401 'Missing bearer token' is still returned to any actual missing-bearer call, so the server-side behavior the frontend depends on is unchanged."
+}

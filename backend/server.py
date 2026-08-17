@@ -3240,7 +3240,7 @@ async def add_comment(feud_id: str, body: CommentBody, user: dict = Depends(get_
     # Resolve @nicknames → real user_ids. Silently drops mentions to
     # self, anonymous accounts, non-existent nicknames and any user
     # in a bi-directional block with the author.
-    mentions = await _resolve_mentions(clean_text, user['user_id'])
+    mentions = await _resolve_mentions(clean_text, user['user_id'], raise_on_blocked=True)
     doc = {
         'comment_id': new_id('cmt'), 'feud_id': feud_id, 'user_id': user['user_id'],
         'nickname': user.get('nickname'), 'side': vote['side'], 'text': clean_text,
@@ -3383,7 +3383,7 @@ async def add_reply(comment_id: str, body: ReplyBody, user: dict = Depends(get_c
             detail='Risposta bloccata: contenuto non consentito (hate speech, minacce o incitamento alla violenza).',
         )
     # Resolve @nicknames (same rules as `add_comment`).
-    mentions = await _resolve_mentions(clean_text, user['user_id'])
+    mentions = await _resolve_mentions(clean_text, user['user_id'], raise_on_blocked=True)
     doc = {
         'reply_id': new_id('rep'), 'comment_id': comment_id, 'feud_id': parent['feud_id'],
         'user_id': user['user_id'], 'nickname': user.get('nickname'), 'side': side,
@@ -5502,6 +5502,8 @@ def _parse_mention_nicknames(text: str) -> list[str]:
 async def _resolve_mentions(
     text: str,
     author_id: str,
+    *,
+    raise_on_blocked: bool = False,
 ) -> list[dict]:
     """Resolve @nicknames in `text` to actual users, filtering out:
     - self (can't mention yourself)
@@ -5511,18 +5513,17 @@ async def _resolve_mentions(
 
     Returns a list of `{user_id, nickname}` dicts in the order the
     mentions appeared in the text. Safe to call with empty text —
-    returns []. Never raises.
+    returns []. Never raises unless `raise_on_blocked` is True.
+
+    When `raise_on_blocked=True`, raises HTTPException(400) if the
+    text contains an @mention of a user in a block pair with the
+    author — used at comment/reply POST time so the client shows a
+    clear error rather than silently dropping the mention.
     """
     nicks = _parse_mention_nicknames(text)
     if not nicks:
         return []
     try:
-        # Case-insensitive batch lookup. Some legacy accounts were
-        # seeded with mixed-case nicknames (e.g. `chatUserB`) while
-        # the mention regex only captures the lowercase form — a
-        # plain `$in: nicks` would silently miss them. We use one
-        # `$regex` per candidate with `$options: 'i'` OR'd together
-        # so it's still a single round-trip.
         or_clauses = [
             {'nickname': {'$regex': f'^{_re.escape(n)}$', '$options': 'i'}}
             for n in nicks
@@ -5543,15 +5544,38 @@ async def _resolve_mentions(
         if not by_nick:
             return []
         blocked = await _blocked_ids_for(author_id)
+        blocked_nick_hit: Optional[str] = None
         out: list[dict] = []
         for nk in nicks:
             uid = by_nick.get(nk)
             if not uid:
                 continue
-            if uid == author_id or uid in blocked:
+            if uid == author_id:
+                continue
+            if uid in blocked:
+                # Remember the first blocked-user nickname so we can
+                # surface it in the error message to the client.
+                if blocked_nick_hit is None:
+                    # Prefer the DB-cased nickname over the lowercased
+                    # regex capture so the error reads naturally.
+                    async for orig in db.users.find(
+                        {'user_id': uid}, {'_id': 0, 'nickname': 1},
+                    ).limit(1):
+                        blocked_nick_hit = orig.get('nickname') or nk
+                    if blocked_nick_hit is None:
+                        blocked_nick_hit = nk
                 continue
             out.append({'user_id': uid, 'nickname': nk})
+        if raise_on_blocked and blocked_nick_hit is not None:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Non puoi taggare @{blocked_nick_hit}: c'è un blocco tra voi."
+                ),
+            )
         return out
+    except HTTPException:
+        raise
     except Exception as e:
         logger.warning(f"_resolve_mentions failed: {e}")
         return []

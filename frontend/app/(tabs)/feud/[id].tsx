@@ -4,7 +4,7 @@ import {
   KeyboardAvoidingView, Platform, ImageBackground, Linking, Alert, BackHandler,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
-import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
+import { useLocalSearchParams, useRouter, useFocusEffect, usePathname } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
@@ -26,6 +26,7 @@ import { useUIPrefs } from "@/src/ui/UIPrefs";
 import { useAuth } from "@/src/auth/AuthContext";
 import { blockEvents } from "@/src/utils/blockEvents";
 import { scrollMemory } from "@/src/utils/scrollMemory";
+import { navStack } from "@/src/utils/navStack";
 
 export default function FeudDetail() {
   const { id, comment: commentParam, side: sideParam, from, archiveCat, archiveDate, messagesUserId } =
@@ -160,11 +161,14 @@ export default function FeudDetail() {
     setError(null);
     setGone(false);
     setShowContext(false);
-    // Fresh visit to this feud → wipe any leftover scroll offset from a
-    // previous session so the restore-on-focus effect doesn't yank the
-    // user mid-hero. We only want restoration when they COME BACK from
-    // a child screen inside the SAME session.
-    if (id) scrollMemory.setY(`feud:${id}`, 0);
+    // NOTE: intentionally do NOT wipe scrollMemory here. On web,
+    // expo-router unmounts the feud screen when the user taps into a
+    // child route (/user/X) and re-mounts it on back, which would fire
+    // this effect and destroy the offset we just persisted. The
+    // useFocusEffect below reads whatever's currently in memory:
+    //   • Fresh visit → memory is 0, ScrollView starts at top anyway.
+    //   • Return from child → memory holds the last-scrolled Y and we
+    //     restore to it.
     scrollRef.current?.scrollTo({ y: 0, animated: false });
   }, [id]);
 
@@ -216,25 +220,58 @@ export default function FeudDetail() {
   // find the comment they were reading. Handles the exact spec:
   // "tornando indietro devo essere riportato alla stessa faida,
   // esattamente nel punto dei commenti che avevo lasciato".
-  const restoredOnceRef = useRef(false);
+  const restoreTargetRef = useRef<number>(0);
+  const restoreDoneRef = useRef<boolean>(false);
+  const pathname = usePathname();
   useFocusEffect(
     useCallback(() => {
+      // Register the feud path in the manual navigation stack so that
+      // `useSmartBack` (used by /user/[id] and other detail screens)
+      // can pop back HERE instead of falling through to the tab root.
+      // Without this, tapping @avatar → INDIETRO would go straight to
+      // /home instead of returning to this feud — which also nukes any
+      // scroll-restore attempt because the feud screen never remounts.
+      if (pathname) navStack.push(pathname);
       if (!id) return;
       const y = scrollMemory.getY(`feud:${id}`);
-      if (y <= 0) return;
-      // Defer the scroll until after the first paint so the ScrollView
-      // has its content measured. Two rAFs cover both native (single
-      // pass) and web (React scheduler + browser paint).
+      if (y <= 0) {
+        restoreTargetRef.current = 0;
+        restoreDoneRef.current = true;
+        return;
+      }
+      restoreTargetRef.current = y;
+      restoreDoneRef.current = false;
       const t1 = setTimeout(() => {
         try { scrollRef.current?.scrollTo({ y, animated: false }); } catch { /* noop */ }
       }, 0);
-      const t2 = setTimeout(() => {
-        try { scrollRef.current?.scrollTo({ y, animated: false }); } catch { /* noop */ }
-        restoredOnceRef.current = true;
-      }, 120);
-      return () => { clearTimeout(t1); clearTimeout(t2); };
-    }, [id]),
+      return () => { clearTimeout(t1); };
+    }, [id, pathname]),
   );
+
+  // Second-chance restore once the feud data + comments have loaded.
+  // On web the screen is remounted on back-navigation, so the very
+  // first scrollTo above runs against an EMPTY ScrollView (contentSize
+  // ≈ viewport) and clamps back to 0. This effect fires as soon as
+  // loading flips false — the ScrollView is now tall enough to accept
+  // the target, so scrolling actually sticks.
+  useEffect(() => {
+    if (loading) return;
+    if (restoreDoneRef.current) return;
+    const target = restoreTargetRef.current;
+    if (target <= 0) { restoreDoneRef.current = true; return; }
+    // Fire twice: once immediately (RN native tends to be ready on the
+    // same tick) and once after a short delay to catch web's async
+    // layout pass. Marking done after the second attempt keeps this
+    // idempotent — subsequent renders won't fight the user's scroll.
+    const t1 = setTimeout(() => {
+      try { scrollRef.current?.scrollTo({ y: target, animated: false }); } catch { /* noop */ }
+    }, 0);
+    const t2 = setTimeout(() => {
+      try { scrollRef.current?.scrollTo({ y: target, animated: false }); } catch { /* noop */ }
+      restoreDoneRef.current = true;
+    }, 200);
+    return () => { clearTimeout(t1); clearTimeout(t2); };
+  }, [loading, sideA.length, sideB.length]);
 
   // Refresh comments whenever the screen re-focuses (e.g. user tapped a
   // commenter's avatar → went to their profile → blocked them → came

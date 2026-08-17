@@ -1,0 +1,45 @@
+{
+  "summary": "Iter 118 backend validated via new pytest suite test_iter118_bugfixes.py (10 tests, 100% pass on first run). Feature A (tag-blocked rejection on POST) works end-to-end: A→B tag after A blocks B returns HTTP 400 with detail 'Non puoi taggare @chatUserB: c\u2019\u00e8 un blocco tra voi.' — verified for both comment endpoint and reply endpoint, symmetric block direction, case-insensitive nickname match (@CHATUSERB) with canonical DB-cased nickname surfaced in error, mixed valid+blocked mention correctly all-or-nothing rejects, plain-text with no mention still 200, unblock+retry succeeds and mention resolves. Feature B (existing-mention scrub, iter117 regression) also passes: A's pre-block comment tagging @chatUserB is scrubbed to '[utente bloccato]' and mentions[] no longer includes B; bi-directional (B fetches same behaviour); after unblock the raw @chatUserB and mention are restored. Iter117 (30 tests) + iter116 (5 tests) + iter115 (5 tests) regression: 29/30 pass. The 1 iter115 failure (test_mention_from_blocked_user_hidden) is a DELIBERATE spec supersession by iter118 — that test tried to POST a comment tagging a blocked user and expected 200 (then checked no notification was emitted); iter118 now rejects the POST with 400 upstream, which is strictly stronger than the iter115 assertion. Test needs updating to expect 400 instead of 200 (or be replaced by iter118 coverage). No other regressions detected.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "test_iter115_bugfixes.py::TestNotificationsBlockFilter::test_mention_from_blocked_user_hidden",
+        "issue": "Stale test — deliberate spec supersession by iter118. Old assertion expected POST /api/feuds/{fid}/comments to return 200 when the blocked user tries to @mention the blocker; iter118 rule now rejects it with 400 (before it can even generate a notification). The intent of the old test (\"blocked mention notification must not appear\") is now covered by the stronger POST-level rejection in test_iter118_bugfixes.py. Main agent should update the iter115 test to `assert r.status_code == 400` OR delete it (superseded)."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter118_bugfixes.py",
+    "/app/test_reports/pytest/iter118.xml",
+    "/app/test_reports/pytest/iter118_regression.xml"
+  ],
+  "action_items": [
+    "Update /app/backend/tests/test_iter115_bugfixes.py::test_mention_from_blocked_user_hidden — change `assert r.status_code == 200` at line 504 to `assert r.status_code == 400` and drop the notification-list checks that follow (they no longer apply because the comment is never persisted). Alternatively delete the whole test since iter118 covers the same protection upstream.",
+    "Frontend items #3 (profile flash on /user/[id] navigation) and #4 (scroll restoration on INDIETRO from user profile back to feud) were EXPLICITLY out of scope for this iteration per review request — user will validate manually. If desired, a future Playwright pass could cover them via a mobile viewport once tabs+expo-router history quirks are stabilised."
+  ],
+  "critical_code_review_comments": [
+    "server.py:5502-5581 (_resolve_mentions with raise_on_blocked) — implementation is correct and minimal. The canonical nickname is fetched via a bounded find({user_id: uid}).limit(1) which is fine but happens inside the loop; if a comment mentions 20 blocked users the current code short-circuits on the first hit (blocked_nick_hit is only set once) so the extra roundtrip is O(1) not O(N). Good.",
+    "server.py:3243 (add_comment) and server.py:3386 (add_reply) — both correctly pass raise_on_blocked=True. Both paths run AI moderation BEFORE _resolve_mentions, which is fine but means an AI moderation call is spent on a comment that will be rejected on mention grounds. Micro-opt (not required): swap the order so cheap mention resolution runs before the AI call. Impact is minor (blocked-mention posts are rare) and swapping would slightly weaken the moderation trail for flagged content. Leave as-is.",
+    "The error message hardcodes 'Non puoi taggare @{nick}: c\u2019\u00e8 un blocco tra voi.' — good UX (Italian, actionable, names the offender). Consider extracting the string to a constant if it needs i18n later.",
+    "Symmetric block check via _blocked_ids_for(author_id) — verified this returns the bi-directional union (blocks I made + blocks against me). Both directions are covered by a single call. No leak."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter118_bugfixes.py (new, 10 tests: 7 rejection cases + 3 scrub regression cases)"
+  ],
+  "success_rate": {
+    "backend": "iter118 suite: 100% (10/10). Regression: iter117 19/19 pass, iter116 5/5 pass, iter115 4/5 pass (1 deliberate spec supersession — see action_items). Overall regression success: 29/30 = 96.7%, and the 1 failure is a test-side stale assertion, NOT a backend regression.",
+    "frontend": "N/A (backend-only per review request; frontend items #3 and #4 to be validated manually by user)"
+  },
+  "seed_data_creation": "None. Test suite uses only the pre-seeded chat_a/chat_b users and the pre-existing feud_7c6d16e4baee. Test comments are prefixed with iter118-<hex> for identifiability but not explicitly torn down (they are harmless, side_a/side_b are hidden behind vote-then-view UI). Auto-use _reset fixture unblocks A\u2194B before and after the module.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Re-run: `pytest /app/backend/tests/test_iter118_bugfixes.py -v` (10 tests, ~14s). For full regression: `pytest /app/backend/tests/test_iter11{5,6,7,8}_bugfixes.py -v` (40 tests, ~55s). Expect 1 pre-existing failure in iter115::test_mention_from_blocked_user_hidden — this is a deliberate iter118 supersession (POST now 400 instead of 200), NOT a bug; the underlying feature the old test verified is now covered by iter118's rejection tests. Main agent should update or delete that stale iter115 test. Frontend items (profile flash on /user/[id] change, scroll restoration on INDIETRO) were intentionally not automated — validate manually in the mobile viewport.",
+  "rca_of_issue": "No new bug found. The iter115 test failure is a test-code staleness issue introduced by the deliberate spec change in iter118 (POST-level rejection replaces silent notification-suppression). Reproduction: `pytest /app/backend/tests/test_iter115_bugfixes.py::TestNotificationsBlockFilter::test_mention_from_blocked_user_hidden -v` → 400 vs expected 200 at line 504. Mitigation: change the expected status_code to 400 and drop the subsequent notification-list assertions (a rejected comment can never generate a notification, so the property under test is trivially satisfied)."
+}

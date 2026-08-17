@@ -496,13 +496,17 @@ class TestNotificationsBlockFilter:
                        headers=_h(tok["A"]), timeout=15)
         assert rb.status_code == 200
 
-        # B posts a comment mentioning @chat_a
+        # B posts a comment mentioning @chat_a — iter118 upgrades this
+        # from "silent drop" to a hard 400: you cannot tag someone
+        # you're in a bi-directional block with, period. The whole POST
+        # is rejected so nothing is persisted, notified, or leaked.
         stamp = uuid.uuid4().hex[:6]
         r = sess.post(f"{API}/feuds/{BLOCK_FEUD}/comments",
                       json={"text": f"@{A_NICK} iter115-mention {stamp}"},
                       headers=_h(tok["B"]), timeout=15)
-        assert r.status_code == 200, r.text
-        cid = r.json()["comment"]["comment_id"]
+        assert r.status_code == 400, r.text
+        assert "Non puoi taggare" in (r.json().get("detail") or ""), r.text
+        cid = None  # nothing was created, sanity below still runs
 
         # Wait for the async _emit_notification task
         time.sleep(2.5)
@@ -513,6 +517,7 @@ class TestNotificationsBlockFilter:
             offender = [n for n in notifs
                         if n.get("type") == "mention"
                         and n.get("actor_id") == B_ID
+                        and cid is not None
                         and n.get("comment_id") == cid]
             assert not offender, (
                 f"BUG #3: mention from blocked B is present in A's "
@@ -535,13 +540,14 @@ class TestNotificationsBlockFilter:
 
             # Also verify direct DB state: notification either was NOT
             # persisted OR is filtered out at API level.
-            db_persisted = mdb.notifications.count_documents({
-                "user_id": A_ID, "actor_id": B_ID, "comment_id": cid,
-            })
-            # Either way is acceptable (skip persistence in _emit_notification,
-            # OR filter at query time). We just care that API doesn't return it.
-            # Log for debugging.
-            print(f"[iter115] mention notif persisted in DB while blocked: {db_persisted}")
+            if cid is not None:
+                db_persisted = mdb.notifications.count_documents({
+                    "user_id": A_ID, "actor_id": B_ID, "comment_id": cid,
+                })
+                # Either way is acceptable (skip persistence in _emit_notification,
+                # OR filter at query time). We just care that API doesn't return it.
+                # Log for debugging.
+                print(f"[iter115] mention notif persisted in DB while blocked: {db_persisted}")
 
             # Now unblock and have B post ANOTHER mention → should now appear
             sess.delete(f"{API}/users/{B_ID}/block",

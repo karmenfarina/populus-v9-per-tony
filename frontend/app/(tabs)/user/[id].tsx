@@ -90,7 +90,32 @@ export default function UserPublicScreen() {
     // target is on our blocklist, and a 403 (blocked pair) would set
     // `error` permanently, hiding the ghost view.
     if (me === null) return;
+    // CRITICAL: wipe every piece of previous-profile state the instant
+    // `id` changes. Without this, navigating from /user/A → /user/B
+    // paints the OLD profile (avatar, nickname, bio, history) for one
+    // full render pass while the new fetch is in flight — exactly the
+    // "vedo il profilo precedente per una frazione di secondo" report.
+    setProfile(null);
+    setLoading(true);
     setError(null);
+    setIdx(0);
+    setViewerOpen(false);
+    setHistoryCache({} as Record<HFilter, HistoryItem[]>);
+    historyLoadedAtRef.current = {} as Record<HFilter, number>;
+    setFilter("all");
+    setHistoryExpanded(false);
+    setMenuOpen(false);
+    setReportOpen(false);
+    setReportText("");
+    setIsBlocked(false);
+    setBlockConfirmOpen(false);
+    setInCircle(false);
+    setCircleCount(0);
+    setBadgesOpen(false);
+    // Reset scroll to top so the new profile doesn't inherit the old
+    // one's offset (the pending scroll-restore hook keys per-profile
+    // so this is only a paint hint, not a memory wipe).
+    try { scrollRef.current?.scrollTo({ y: 0, animated: false }); } catch { /* noop */ }
     (async () => {
       try {
         // Fetch my own blocklist FIRST so a 403 from the backend

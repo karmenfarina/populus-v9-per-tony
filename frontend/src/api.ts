@@ -76,14 +76,48 @@ function friendlyValidation(item: any): string {
   return nice;
 }
 
+// Paths that DO NOT require a bearer token. Everything else is treated
+// as authenticated — if there's no token in storage when we hit a
+// non-listed path, we short-circuit with a client-side 401 instead of
+// making a network call that would return the backend's raw
+// "Missing bearer token" message (which used to bubble up as a red
+// screen during logout).
+const PUBLIC_PATH_PREFIXES = [
+  '/auth/login',
+  '/auth/register',
+  '/auth/anonymous',
+  '/auth/google',
+  '/auth/emergent/session',
+  '/auth/firebase',
+  '/auth/session',
+  '/auth/verify',
+  '/health',
+  '/categories',
+  '/professions',
+  '/legal',
+];
+function requiresAuth(path: string): boolean {
+  return !PUBLIC_PATH_PREFIXES.some((p) => path.startsWith(p));
+}
+
 async function request<T = any>(path: string, opts: RequestInit = {}): Promise<T> {
   const token = await getToken();
   // Logout short-circuit — never hit the network with a stale/absent
-  // token while the app is transitioning to the logged-out state. The
-  // background pollers (notifications, messaging) that were still
-  // running when the token was cleared will see this friendly ApiError
-  // and swallow it (their .catch(...) blocks are already in place).
-  if (_isLoggedOut && !token) {
+  // token. Two paths land here:
+  //   1. `_isLoggedOut` flag has been raised by AuthContext.logout()
+  //      (a definitive "we are logging out" signal).
+  //   2. No token at all — could be a background effect firing after
+  //      the token was cleared but before the (tabs) layout unmounted,
+  //      OR a genuinely-unauthenticated screen calling an authed
+  //      endpoint by accident. Either way, we don't want to burn a
+  //      network round-trip and definitely don't want the backend's
+  //      raw "Missing bearer token" message to bubble up as a red
+  //      screen (that was the "logout crash" report).
+  // The unauthenticated GETs that legitimately support anonymous
+  // access opt out by prefixing the path with `_public_` (stripped
+  // before the actual fetch) — none currently do so, this hook is
+  // reserved for future use.
+  if ((_isLoggedOut && !token) || (!token && requiresAuth(path))) {
     throw new ApiError(401, 'Sessione terminata');
   }
   const headers: Record<string, string> = {
