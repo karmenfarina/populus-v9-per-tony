@@ -395,6 +395,20 @@ export default function UserPublicScreen() {
       </SafeAreaView>
     );
   }
+  // Render gate: NEVER paint a profile whose `user_id` doesn't match the
+  // current route `id`. Without this, navigating from /user/A → /user/B
+  // paints A's photos/nickname/history for one full frame while React
+  // still holds the previous `profile` state — exactly the "vedo il
+  // profilo precedente per un millisecondo" report. The useEffect
+  // resets state on `id` change but that setState only takes effect
+  // on the NEXT render pass; this guard covers the current one.
+  if (profile && (profile as any).user_id && (profile as any).user_id !== id) {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <View style={styles.center}><ActivityIndicator size="large" color={colors.brandPrimary} /></View>
+      </SafeAreaView>
+    );
+  }
   if (error || !profile) {
     return (
       <SafeAreaView style={styles.safe}>

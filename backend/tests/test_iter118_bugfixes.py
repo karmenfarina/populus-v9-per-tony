@@ -278,6 +278,7 @@ class TestTagBlockedRejection:
 
 class TestExistingMentionScrub:
 
+    @pytest.mark.xfail(reason="Superseded by iter120: own comment tagging a blocked user is now HIDDEN entirely, not scrubbed.", strict=True)
     def test_pre_block_mention_scrubbed_after_block(self, sess, tok):
         """A posts a comment tagging @chatUserB while NOT blocked. Then
         A blocks B. Fetching /comments as A must render the tagged text

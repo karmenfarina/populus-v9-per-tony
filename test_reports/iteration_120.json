@@ -1,0 +1,46 @@
+{
+  "summary": "Iter120 verified. Backend: 4/4 new iter120 total-erasure tests PASS (own comment/reply tagging blocked user is HIDDEN to both parties, reappears intact after unblock; reply to blocked parent → 403 'Non puoi rispondere a questo utente'; POST tagging blocked → 400 'Non puoi taggare'). Regression: iter113/115/117/119 fully PASS (47/47). iter116 has 2 expected failures (test_scrub_mention_of_blocked_user_in_own_comment, test_scrub_mention_of_blocked_user_in_reply) — these tests encode the SUPERSEDED iter116 spec ('scrub own comment') and now conflict with iter120 spec ('hide own comment entirely'). Frontend: Bug1 (profile flash) — MutationObserver during A→B transition captured NO frame containing both 'chat_a' and 'chatUserB'; render gate at /app/frontend/app/(tabs)/user/[id].tsx:405-411 confirmed live. Bug2 (back nav) — navigation feud → comment-user avatar → user profile → user-back correctly returns to /feud/feud_2e5b4481a8a4 (not tab root); navStack.push(pathname) in useFocusEffect at /app/frontend/app/(tabs)/feud/[id].tsx:226-249 confirmed live.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "N/A (test suite hygiene)",
+        "issue": "test_iter116_bugfixes.py::TestMentionScrubbingOnComments and TestMentionScrubbingOnReplies encode iter116 'scrub own comment' behavior which iter120 explicitly supersedes ('hide own comment entirely'). Main agent should either update these iter116 tests to expect hide-not-scrub OR mark them xfail with a reference to iter120. Also test_mentions_and_blocks.py::TestBlocks::test_block_mention_dropped expects a legacy pre-iter118 flow (POST returned 200 with mention dropped); iter118+ returns 400 with detail 'Non puoi taggare'. Same recommendation."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter120_strict_block.py",
+    "/app/test_reports/pytest/iter120_results.xml",
+    "/app/test_reports/pytest/iter120_regression.xml",
+    "/app/test_reports/iter120_bug1_profileA.png",
+    "/app/test_reports/iter120_bug1_profileB.png"
+  ],
+  "action_items": [
+    "None for iter120 fixes — all three bugs verified fixed.",
+    "Optional cleanup: update or xfail the 3 legacy tests (iter116 scrub-own-comment/reply, test_mentions_and_blocks::test_block_mention_dropped) that encode superseded specs so future full-regression runs are green."
+  ],
+  "critical_code_review_comments": [
+    "Render gate in /app/frontend/app/(tabs)/user/[id].tsx:405-411 is correctly placed BEFORE the main render — good defensive pattern. Consider extracting the check into a small local `stale = profile && profile.user_id !== id` for readability.",
+    "In /app/frontend/app/(tabs)/feud/[id].tsx:226-249 the useFocusEffect callback pushes pathname unconditionally on every focus — for a screen re-focused multiple times without leaving, this can inflate navStack. Verify navStack.push is idempotent (dedupes top), otherwise back may need multiple presses.",
+    "_comment_tags_blocked_user (server.py:5376-5407) correctly handles both structured `mentions` array and raw @nickname text. Case-insensitive regex uses proper word-boundary handling for handle chars — solid."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter120_strict_block.py (new)"
+  ],
+  "success_rate": {
+    "backend": "100% (4/4 new iter120 tests + 47/47 iter113/115/117/119 regression). iter116 has 2 expected-fail tests due to spec supersession by iter120.",
+    "frontend": "100% (both bugs verified via Playwright)"
+  },
+  "seed_data_creation": "Ensured chat_a voted on feud_2e5b4481a8a4 and posted one comment 'iter120 back-nav test comment' for avatar-click test. Not cleaned up (safe test data).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend .env has DB_NAME='test_database' (not 'faide_database'). Both required for pytest env: MONGO_URL=mongodb://localhost:27017, DB_NAME=test_database, EXPO_BACKEND_URL=http://localhost:8001. On web preview, faide_token in localStorage must be JSON.stringified (double-quoted). To trigger client-side nav in Expo Router web, create an <a href> and .click() — programmatic anchor clicks are intercepted; page.goto forces a hard reload. To test comment-user avatars on a feud, first must vote AND click comments-tab-a (otherwise state is comments-idle and list not rendered).",
+  "rca_of_issue": "Iter120 spec change: previously (iter117/118) an own comment tagging a blocked user was 'scrubbed' to '[utente bloccato]' but kept visible. User feedback: total interaction erasure required. Fix: _comment_tags_blocked_user is now called against ALL comments (including own) in get_comments and list_replies, and matching docs are dropped from the response. Unblock restores visibility because the block set becomes empty."
+}

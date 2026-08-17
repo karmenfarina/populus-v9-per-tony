@@ -2807,26 +2807,11 @@ async def get_comments(
             viewer_blocked_nicks = await _blocked_nicknames_for(viewer_blocked)
             # Hard-filter 1: drop comments authored by a blocked user.
             docs = [c for c in docs if c.get('user_id') not in viewer_blocked]
-            # Hard-filter 2: drop comments where a THIRD-PARTY has tagged
-            # a blocked user. If the tag lives in the viewer's OWN
-            # comment we don't drop it — that would erase the viewer's
-            # own content from their own thread which is jarring — we
-            # instead SCRUB the handle in the same pass below.
-            # User spec: "commenti in cui quell'utente è stato taggato
-            # da qualcun altro" (by SOMEONE ELSE).
-            me_id = user['user_id']
-            kept: list[dict] = []
-            for c in docs:
-                if c.get('user_id') != me_id and _comment_tags_blocked_user(c, viewer_blocked, viewer_blocked_nicks):
-                    continue  # third-party tagged a blocked user → hide
-                # If it's the viewer's own comment (or any other survivor)
-                # containing a blocked-user handle, scrub the raw text so
-                # the tappable @nickname link never renders.
-                c['text'], c['mentions'] = _scrub_blocked_mentions(
-                    c.get('text', ''), c.get('mentions') or [], viewer_blocked, viewer_blocked_nicks,
-                )
-                kept.append(c)
-            docs = kept
+            # Hard-filter 2: drop ANY comment (mine OR third-party) that
+            # tags a blocked user. Stricter than iter117/118 — the user
+            # explicitly asked for total erasure of interactions, so
+            # even own comments referencing a blocked handle disappear.
+            docs = [c for c in docs if not _comment_tags_blocked_user(c, viewer_blocked, viewer_blocked_nicks)]
     # Visibility rule: a comment is shown only if its author is CURRENTLY voting
     # for the same side the comment was posted on. Comments where the author has
     # since switched sides are hidden — they reappear if the author switches
@@ -3323,20 +3308,9 @@ async def list_replies(comment_id: str, user: Optional[dict] = Depends(get_curre
             blocked_nicks = await _blocked_nicknames_for(blocked)
             # Hard-filter 1: drop replies authored by a blocked user.
             docs = [r for r in docs if r.get('user_id') not in blocked]
-            # Hard-filter 2 + scrub — same third-party-vs-self rule as
-            # get_comments. Only OTHER users' replies tagging a blocked
-            # user disappear; the viewer's own reply gets its blocked
-            # mention text scrubbed but stays visible.
-            me_id = user['user_id']
-            kept_r: list[dict] = []
-            for r in docs:
-                if r.get('user_id') != me_id and _comment_tags_blocked_user(r, blocked, blocked_nicks):
-                    continue
-                r['text'], r['mentions'] = _scrub_blocked_mentions(
-                    r.get('text', ''), r.get('mentions') or [], blocked, blocked_nicks,
-                )
-                kept_r.append(r)
-            docs = kept_r
+            # Hard-filter 2: drop ANY reply (mine or third-party) that
+            # tags a blocked user — total interaction erasure.
+            docs = [r for r in docs if not _comment_tags_blocked_user(r, blocked, blocked_nicks)]
     if docs:
         # Same visibility rule as comments: a reply is shown only if its author
         # is currently voting on the side the reply was posted on.

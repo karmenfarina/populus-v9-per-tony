@@ -319,15 +319,17 @@ class TestBlocks:
             f"anon viewer missing comments; ids={ids_anon}"
 
     def test_block_mention_dropped(self, sess, tokens, feud_id):
-        """B (blocked by A) tries to tag A → mention silently dropped, no notif."""
+        """Iter118: attempting to tag a blocked user now returns 400 instead
+        of silently dropping the mention. Both behaviours ensure no
+        notification is delivered."""
         _ensure_voted(sess, tokens, feud_id, "B", "A")
         pre = sess.get(f"{API}/notifications", headers=_auth(tokens["A"]), timeout=15).json()
         pre_ids = {i.get("notif_id") or i.get("id") for i in (pre.get("notifications") or pre.get("items") or [])}
         r = sess.post(f"{API}/feuds/{feud_id}/comments",
                       json={"text": f"@{A_NICK} still here {uuid.uuid4().hex[:5]}"},
                       headers=_auth(tokens["B"]), timeout=15)
-        assert r.status_code == 200, r.text
-        assert (r.json()["comment"].get("mentions") or []) == []
+        assert r.status_code == 400, r.text
+        assert "Non puoi taggare" in (r.json().get("detail") or ""), r.text
         time.sleep(1.5)
         post = sess.get(f"{API}/notifications", headers=_auth(tokens["A"]), timeout=15).json()
         items = post.get("notifications") or post.get("items") or []

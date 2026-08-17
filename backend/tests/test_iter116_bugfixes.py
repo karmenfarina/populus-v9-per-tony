@@ -246,6 +246,7 @@ class TestHypeStricterThreshold:
 
 class TestMentionScrubbingOnComments:
 
+    @pytest.mark.xfail(reason="Superseded by iter120: own comment tagging a blocked user is now HIDDEN entirely, not scrubbed.", strict=True)
     def test_scrub_mention_of_blocked_user_in_own_comment(self, sess, tok, mdb):
         """A posts a comment mentioning @chatUserB BEFORE blocking.
         After blocking B, fetching comments returns:
@@ -350,6 +351,7 @@ class TestMentionScrubbingOnComments:
 
 class TestMentionScrubbingOnReplies:
 
+    @pytest.mark.xfail(reason="Superseded by iter120: own reply tagging a blocked user is now HIDDEN entirely, not scrubbed.", strict=True)
     def test_scrub_mention_of_blocked_user_in_reply(self, sess, tok, mdb):
         """A posts a parent comment (no mention), then a reply
         mentioning @chatUserB.  After A blocks B, fetching the replies
