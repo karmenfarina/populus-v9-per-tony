@@ -1727,12 +1727,27 @@ async def list_hype_feuds(user: Optional[dict] = Depends(get_current_user_option
     if not docs:
         return {'feuds': [], 'personalized': False}
     feud_ids = [d['feud_id'] for d in docs]
+    # Compute the viewer's bidirectional blocklist once so we can
+    # discount comments/replies from those users below. Rationale: a
+    # feud whose ENTIRE thread is authored by users the viewer has
+    # blocked (or been blocked by) looks totally silent from the
+    # viewer's POV — and a "silent" post has no business in the HYPE
+    # rail, which is meant to surface active debate.
+    viewer_blocked: set[str] = set()
+    if user:
+        try:
+            viewer_blocked = await _blocked_ids_for(user['user_id'])
+        except Exception as e:
+            logger.warning(f"hype: blocklist lookup failed: {e}")
     # Comment + reply counts in ONE aggregation per collection.
     comment_counts: dict = {}
     reply_counts: dict = {}
     try:
+        comment_match: dict = {'feud_id': {'$in': feud_ids}}
+        if viewer_blocked:
+            comment_match['user_id'] = {'$nin': list(viewer_blocked)}
         async for row in db.comments.aggregate([
-            {'$match': {'feud_id': {'$in': feud_ids}}},
+            {'$match': comment_match},
             {'$group': {'_id': '$feud_id', 'count': {'$sum': 1}}},
         ]):
             comment_counts[row['_id']] = int(row.get('count') or 0)
@@ -1740,15 +1755,26 @@ async def list_hype_feuds(user: Optional[dict] = Depends(get_current_user_option
         logger.warning(f"hype: comments aggregation failed: {e}")
     # Replies live under a comment_id. Do a lookup: replies → comment → feud.
     try:
-        async for row in db.replies.aggregate([
+        reply_pipeline: list[dict] = [
             {'$lookup': {
                 'from': 'comments', 'localField': 'comment_id',
                 'foreignField': 'comment_id', 'as': 'c',
             }},
             {'$unwind': '$c'},
             {'$match': {'c.feud_id': {'$in': feud_ids}}},
-            {'$group': {'_id': '$c.feud_id', 'count': {'$sum': 1}}},
-        ]):
+        ]
+        if viewer_blocked:
+            # Exclude replies from users the viewer can't see AND
+            # replies whose PARENT comment author is blocked (that
+            # parent comment is hidden from the viewer's thread so
+            # its replies never render either).
+            blist = list(viewer_blocked)
+            reply_pipeline.append({'$match': {
+                'user_id': {'$nin': blist},
+                'c.user_id': {'$nin': blist},
+            }})
+        reply_pipeline.append({'$group': {'_id': '$c.feud_id', 'count': {'$sum': 1}}})
+        async for row in db.replies.aggregate(reply_pipeline):
             reply_counts[row['_id']] = int(row.get('count') or 0)
     except Exception as e:
         logger.warning(f"hype: replies aggregation failed: {e}")

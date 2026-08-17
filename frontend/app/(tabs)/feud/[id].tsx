@@ -208,14 +208,36 @@ export default function FeudDetail() {
   // return trip snappy — the feud itself doesn't need to reload.
   useFocusEffect(
     useCallback(() => {
-      // Skip on the very first focus (the mount-time effect above
-      // already did the initial fetch — running a second fetch would
-      // be wasteful).
       if (!id) return;
-      const t = setTimeout(() => {
-        api.comments(id, ownerUid)
-          .then((c) => { setSideA(c.side_a); setSideB(c.side_b); })
-          .catch(() => { /* silent — the mount fetch handles hard errors */ });
+      const t = setTimeout(async () => {
+        try {
+          const c = await api.comments(id, ownerUid);
+          setSideA(c.side_a);
+          setSideB(c.side_b);
+          // Refetch every currently-expanded reply thread so that any
+          // reply from a user who was blocked WHILE we were away from
+          // the screen (e.g. user navigated to that user's profile
+          // and tapped "Blocca") disappears from the thread too.
+          // Without this the top-level comments update on focus but
+          // the expanded reply lists remain frozen at the pre-block
+          // snapshot — the exact bug reported after iteration 113.
+          setExpanded((prev) => {
+            const openIds = Object.keys(prev);
+            if (openIds.length === 0) return prev;
+            // Kick off refetches in parallel; we don't await here
+            // because the effect must return synchronously. The
+            // setter callback below patches state as each promise
+            // resolves.
+            openIds.forEach((cid) => {
+              api.replies(cid)
+                .then((r) => {
+                  setExpanded((cur) => (cid in cur ? { ...cur, [cid]: r.replies } : cur));
+                })
+                .catch(() => { /* silent */ });
+            });
+            return prev;
+          });
+        } catch { /* silent — the mount fetch handles hard errors */ }
       }, 50);
       return () => clearTimeout(t);
     }, [id, ownerUid]),

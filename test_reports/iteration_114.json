@@ -1,0 +1,37 @@
+{
+  "summary": "Verified BUG A (frontend: useFocusEffect refetches expanded reply threads on focus so blocked users' replies vanish) and BUG B (backend: /api/feuds/hype now excludes comment/reply counts from bidirectionally-blocked users). Backend: created /app/backend/tests/test_iter114_hype_block_filter.py — 5/5 PASS. Regression: iter113 reply_count filter + mentions_and_blocks — 17/17 PASS. Frontend: 1 Playwright E2E scenario against feud_198672d881cc side B — PASS (reply visible pre-block, filtered post-block after re-focus, A's own top-level comment untouched).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter114_hype_block_filter.py",
+    "/app/test_reports/pytest/iter114_hype_block.xml",
+    "/app/test_reports/pytest/iter114_regression.xml",
+    "/app/test_reports/iter114_pre_block.png",
+    "/app/test_reports/iter114_post_block.png"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py:1736-1780 — viewer_blocked correctly applied to BOTH aggregations. Comment $match uses $nin on user_id; reply pipeline additionally applies $nin on c.user_id (parent-comment author) so replies whose parent is hidden don't count either. This matches the UI behavior: hidden parent → replies never render. Anonymous branch skipped cleanly (if user: block). Behavior verified end-to-end.",
+    "server.py:1793-1794 — eligibility gate `(cc + rc) < 1 or votes < 1` runs on the FILTERED counts, so a feud loses hype eligibility as soon as the viewer's block hides all discussion — exactly the fix goal. Test test_hype_excludes_feuds_when_only_commenter_is_blocked exercises this path.",
+    "feud/[id].tsx:209-244 — useFocusEffect now iterates `expanded` keys and fires api.replies(cid) per open thread. Non-awaited (parallel), state patched via functional setter with `cid in cur` guard so late-arriving refetches for threads the user collapsed in the meantime don't accidentally reopen them. Idempotent + safe. E2E flow confirms blocked user's reply is scrubbed on re-focus.",
+    "feud/[id].tsx:224-239 — inner setExpanded returns `prev` unchanged and only kicks off effects, so it doesn't cause an unnecessary re-render. Good pattern.",
+    "Minor (pre-existing, non-blocking): server.py — logger.warning falls back on aggregation errors but returns empty dicts, so a Mongo hiccup silently drops hype counts to 0. Not a regression, but worth a metric someday."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter114_hype_block_filter.py (new, 5 tests)"
+  ],
+  "success_rate": {
+    "backend": "100% (5/5 iter114 hype + 17/17 iter113 + mentions_and_blocks regression)",
+    "frontend": "100% (1/1 BUG A E2E)"
+  },
+  "seed_data_creation": "Ephemeral: comment cmt_b49deb12f983 by chat_a + reply rep_9a50999b4f86 by chatUserB on feud_198672d881cc side B (frontend E2E). Backend tests seed transient feuds via Mongo direct insert and clean up (delete comments/votes/feud) in the finally block of each test. All blocks unblocked at end (both directions).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "For hype block-filter testing, reuse test_iter114_hype_block_filter.py — it seeds feuds via Mongo direct insert because no user-facing POST /api/feuds endpoint exists. Pattern: _seed_feud(mdb, tag) → _vote both users → post comments/replies via API → assert presence in _hype_ids(sess, tok) → block → assert absence → unblock cleanup. For frontend focus refetch: on web, `useFocusEffect` fires when router.push/replace returns to a stack screen; page.goto to another URL then back to /feud/{id} triggers it. localStorage key is `faide_token` stored as JSON.stringify(token).",
+  "rca_of_issue": "BUG A: `useFocusEffect` only refetched top-level `sideA/sideB` on focus. `expanded[cid]` state map holding open reply threads was never refreshed after the initial /replies fetch, so a user who had already opened a thread → left → blocked someone → returned still saw the pre-block reply snapshot. FIX (iter114): after refreshing sideA/sideB, iterate all open expanded thread ids and refetch each via api.replies(cid). Functional setState guard `cid in cur` prevents accidental reopen if the user collapses the thread mid-flight. BUG B: `/api/feuds/hype` aggregations counted ALL comments/replies. A feud whose entire discussion was authored by users the viewer had blocked (or been blocked by) still passed the cc+rc>=1 eligibility gate → rail showed a 'silent' post. FIX (iter114): apply viewer_blocked as `$nin` on both aggregation pipelines. For replies, also exclude those whose PARENT comment author is blocked (parent is hidden → replies wouldn't render either). Anonymous viewers are unaffected because viewer_blocked is only populated when `user` is present. Verified: only-B feud disappears from A's rail after A→B block; mixed feud stays because A's own comment still counts; symmetry (B→A) works; anon rail is unchanged; hype schema intact and no MongoDB _id leaks."
+}
