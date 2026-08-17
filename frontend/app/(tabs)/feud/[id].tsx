@@ -25,6 +25,7 @@ import AdBanner from "@/src/ads/AdBanner";
 import { useUIPrefs } from "@/src/ui/UIPrefs";
 import { useAuth } from "@/src/auth/AuthContext";
 import { blockEvents } from "@/src/utils/blockEvents";
+import { scrollMemory } from "@/src/utils/scrollMemory";
 
 export default function FeudDetail() {
   const { id, comment: commentParam, side: sideParam, from, archiveCat, archiveDate, messagesUserId } =
@@ -159,6 +160,11 @@ export default function FeudDetail() {
     setError(null);
     setGone(false);
     setShowContext(false);
+    // Fresh visit to this feud → wipe any leftover scroll offset from a
+    // previous session so the restore-on-focus effect doesn't yank the
+    // user mid-hero. We only want restoration when they COME BACK from
+    // a child screen inside the SAME session.
+    if (id) scrollMemory.setY(`feud:${id}`, 0);
     scrollRef.current?.scrollTo({ y: 0, animated: false });
   }, [id]);
 
@@ -200,6 +206,35 @@ export default function FeudDetail() {
     // Fire-and-forget engagement signal for the personalized feed.
     if (id) { api.recordView(id); }
   }, [loadAll, id]);
+
+  // Restore scroll position on focus — every time the screen re-focuses
+  // (child screen popped, share sheet dismissed, etc.), if we've stashed
+  // a non-zero offset for this feud in scrollMemory, jump the ScrollView
+  // back to that spot AFTER the content has laid out. Without this, a
+  // trip to /user/[id] and back would silently reset the view to the
+  // top of the article, forcing the user to scroll all the way down to
+  // find the comment they were reading. Handles the exact spec:
+  // "tornando indietro devo essere riportato alla stessa faida,
+  // esattamente nel punto dei commenti che avevo lasciato".
+  const restoredOnceRef = useRef(false);
+  useFocusEffect(
+    useCallback(() => {
+      if (!id) return;
+      const y = scrollMemory.getY(`feud:${id}`);
+      if (y <= 0) return;
+      // Defer the scroll until after the first paint so the ScrollView
+      // has its content measured. Two rAFs cover both native (single
+      // pass) and web (React scheduler + browser paint).
+      const t1 = setTimeout(() => {
+        try { scrollRef.current?.scrollTo({ y, animated: false }); } catch { /* noop */ }
+      }, 0);
+      const t2 = setTimeout(() => {
+        try { scrollRef.current?.scrollTo({ y, animated: false }); } catch { /* noop */ }
+        restoredOnceRef.current = true;
+      }, 120);
+      return () => { clearTimeout(t1); clearTimeout(t2); };
+    }, [id]),
+  );
 
   // Refresh comments whenever the screen re-focuses (e.g. user tapped a
   // commenter's avatar → went to their profile → blocked them → came
@@ -544,6 +579,11 @@ export default function FeudDetail() {
             const y = e.nativeEvent.contentOffset.y;
             const target = commentsYRef.current || 0;
             setShowTopBtn(target > 0 ? y > target + 400 : y > 1400);
+            // Persist the current scroll offset so a subsequent
+            // navigation to a child route (/user/X, /messages/X, share
+            // sheet, etc.) can restore the exact position on return.
+            // Keyed per-feud so distinct posts don't collide.
+            if (id) scrollMemory.setY(`feud:${id}`, y);
           }}
           scrollEventThrottle={120}
         >
@@ -752,6 +792,7 @@ export default function FeudDetail() {
                 placeholderTextColor={colors.muted}
                 value={commentText}
                 onChangeText={setCommentText}
+                feudId={id}
                 multiline
               />
               <Pressable
@@ -1050,6 +1091,7 @@ function CommentItem({
               onChangeText={setReplyText}
               placeholder="Rispondi... usa @ per taggare"
               placeholderTextColor={colors.muted}
+              feudId={c.feud_id}
               multiline
               inputTestID={`reply-input-${c.comment_id}`}
             />

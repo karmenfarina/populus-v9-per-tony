@@ -1,0 +1,54 @@
+{
+  "summary": "Iter 117 backend validated via new pytest suite test_iter117_bugfixes.py (19 tests, 100% pass after 1 fix). All 3 new features work correctly: (A) GET /api/mentions/suggest — proximity ranking (+4 circle, +2 DM, +0.5 recent-DM, +1.5 reply exchange, +1 same-feud, +0.3 substring), self/anon/blocked exclusion, empty-q returns proximity list, empty-match returns [] with no error, display_name substring match works, feud_id boost of +1.0 verified end-to-end. (B) Block filter on @-tagged comments — 3rd-party comment tagging @blocked entirely hidden (not just scrubbed), symmetric case works, reply variant works, reply_count badge decrements correctly to match the visible list. (C) history_counts on GET /api/users/{uid} — {all, majority, minority} present, invariant all=majority+minority holds, all <= total_votes, matches actual /history endpoint length, self profile also carries it, no leak on blocked pair. RCA: found 1 latent bug — get_comments' all_replies projection omitted `text` and `mentions`, so _comment_tags_blocked_user silently no-op'd on replies and reply_count was inflated. FIXED (server.py:2838-2846) by adding those two fields to the projection; re-ran suite → 19/19 pass. IMPORTANT: iter116 has 2 tests failing (TestMentionScrubbing[OnComments|OnReplies]) — this is a DELIBERATE product spec change in iter117: iter116 required 'scrub the @nick to [utente bloccato] but keep the comment visible', iter117 requires 'hide the ENTIRE comment/reply if it tags a blocked user'. Both cannot be true simultaneously. Under iter117 the entire comment is dropped, which is what the current spec asks for. Main agent must update/remove the 2 iter116 tests. Also iter114 hype tests still fail their baseline setup (feud not appearing in hype) — same threshold drift already flagged in iter116 report; unchanged in this iteration.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "GET /api/feuds/{fid}/comments (reply_count aggregation)",
+        "issue": "FIXED. Projection at ~server.py:2838 omitted `text` and `mentions` fields, causing _comment_tags_blocked_user to always return False for replies — inflated the reply_count badge when a reply tagged a blocked user. Added the two fields to the projection; new test test_reply_count_matches_visible_after_tag_filter now passes."
+      },
+      {
+        "endpoint": "iter116 scrub tests",
+        "issue": "The 2 iter116 mention-scrub tests (test_scrub_mention_of_blocked_user_in_own_comment, test_scrub_mention_of_blocked_user_in_reply) now fail because iter117 supersedes scrub-only behaviour: A's own comment/reply that tagged B is now ENTIRELY hidden after A blocks B, not scrubbed. This is by design per iter117 spec but the old assertions still expect a visible-but-scrubbed comment. Ambiguity: iter117 spec says 'tagged by ANY OTHER user' — arguably A's own tag of B should still be scrubbed (visible to A, mention neutralised) while 3rd-party tagging should be dropped. The current implementation drops ALL comments/replies that tag a blocked user, including A's own. Main agent to decide: (a) accept the stricter behaviour and delete/update the iter116 tests, OR (b) refine _comment_tags_blocked_user to skip when the comment is authored by the viewer, in which case the iter116 scrub path applies."
+      },
+      {
+        "endpoint": "iter114 hype tests",
+        "issue": "Pre-existing drift from iter116 threshold change (>=2/>=2 instead of >=1/>=1). Baseline setups seed feuds with too few comments/votes to enter hype. Not an iter117 regression; already documented in iter116 test report."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter117_bugfixes.py",
+    "/app/test_reports/pytest/iter117.xml"
+  ],
+  "action_items": [
+    "DECISION NEEDED: iter117 vs iter116 behaviour conflict on A's OWN comment tagging B. Option A — accept iter117 stricter drop and delete the 2 iter116 scrub tests (TestMentionScrubbingOnComments, TestMentionScrubbingOnReplies). Option B — patch _comment_tags_blocked_user callsite in get_comments/list_replies to skip when comment.user_id == viewer.user_id, so A's own tag is scrubbed (iter116 behaviour) while 3rd-party tags are dropped (iter117 behaviour); the iter116 tests would then pass again and iter117 test_third_party_comment_tagging_blocked_user_hidden still passes. Option B is more nuanced and matches the literal wording of the iter117 spec ('tagged by ANY OTHER user').",
+    "Update the 4 iter114 hype tests to add a 2nd visible comment before asserting HYPE inclusion (previously flagged in iter116 report). Non-blocking; the underlying feature works.",
+    "Optional micro-opt: promote HYPE_MIN_COMMENTS=2 and HYPE_MIN_VOTES=2 to module-level constants in server.py (already noted in iter116)."
+  ],
+  "critical_code_review_comments": [
+    "server.py:2838 (get_comments reply_count aggregation projection) — FIXED. Was missing `text` and `mentions` fields, silently disabling _comment_tags_blocked_user on the reply-count code path. This is exactly the type of bug that arises when a helper's signature depends on doc fields but the projection is narrowed 'for perf'. Consider making _comment_tags_blocked_user validate its inputs (e.g. `mentions` key missing -> log once at debug level) so future projection narrowing surfaces the bug earlier.",
+    "server.py:5866-6069 (suggest_mentions) — logic is correct and fast (bounded scans + one users-batch lookup). Two minor concerns: (1) The +1.0 same-feud boost fires per-row via find() cursor without dedup; if the same commenter has 200 comments on the feud they get +1.0 accumulated 200 times (score inflation). Fix: aggregate distinct user_ids first, OR track a set and only bonus once per uid. (2) When q is present and a candidate qualifies purely via substring but has no proximity, they get 0.3 which is very small — that's fine, but the sort order becomes tie-broken by dict insertion order which is non-deterministic across Python versions. Consider adding a secondary sort key (nickname alpha).",
+    "server.py:1623-1630 (public_user history_counts) — swallowing exceptions with `logger.warning` and defaulting to {0,0,0} silently. If _history_for_user starts throwing, the badge will show 0 while the list still renders items — inverse of the bug we just fixed. Prefer surfacing the error at the API layer OR returning `null` so the frontend can hide the badge.",
+    "server.py:5369-5400 (_comment_tags_blocked_user) — Correct, but iterating over `mentions` list and then compiling a fresh regex per blocked_nick per call is O(N_replies × N_blocked_nicks). At the reply-count aggregation site there can be up to 10000 replies. If a user blocks ~50 people, worst case is 500k regex compiles per pageview. Compile the patterns ONCE in the caller and pass them down, or memoise via functools.lru_cache."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter117_bugfixes.py (new, 19 tests)",
+    "/app/backend/server.py (get_comments all_replies projection: added `text` and `mentions` fields to fix silent no-op on _comment_tags_blocked_user)"
+  ],
+  "success_rate": {
+    "backend": "iter117 suite: 100% (19/19). Regression: iter113 4/4 pass, iter115 6/6 pass. iter116 2/5 failures are DELIBERATE spec supersession — see action items. iter114 4/5 failures are the pre-existing threshold-drift issue from iter116, not iter117-related.",
+    "frontend": "N/A (backend-only per review request)"
+  },
+  "seed_data_creation": "Test suite seeds a fresh 3rd-party email account (iter117_c_<hex>) directly in Mongo with a bcrypt password_hash + email_verified=true + onboarding_completed=true, torn down at module exit. All comments/replies/votes/blocks it creates are also cleaned up. HYPE-boost test seeds a throwaway feud (feud_iter117_<hex>) and tears it down. Uses the shared pre-seeded chat_a/chat_b users and the pre-existing feud_7c6d16e4baee for block-scenario tests. Autouse _reset fixture unblocks A↔B before and after the module.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Re-run: `pytest /app/backend/tests/test_iter117_bugfixes.py -v`. The suite is idempotent. If the main agent goes with Option B (skip _comment_tags_blocked_user when comment.user_id == viewer.user_id), re-run BOTH test_iter117_bugfixes.py AND test_iter116_bugfixes.py — both should be green. If Option A (delete 2 iter116 tests), only test_iter117_bugfixes.py is the new source of truth for tagged-comment behaviour. Note that the iter114 hype baseline setups are still broken due to the >=2/>=2 threshold; those failures pre-date this iteration.",
+  "rca_of_issue": "The reply_count badge inflation bug: `get_comments` computed reply counts by scanning `db.replies` with projection {_id:0, comment_id:1, user_id:1, side:1} and then attempted to drop replies that tag blocked users via `_comment_tags_blocked_user(r, viewer_blocked, viewer_blocked_nicks)`. The helper needs `mentions` (list) and `text` (str) to detect a blocked-user tag, both of which were missing from the projection. Since Python `dict.get('mentions')` returns None → the mentions branch no-ops, and `dict.get('text')` returns None → the raw-nick regex branch no-ops. The filter therefore silently kept ALL replies including tagged ones, and the reply_count returned to the client was inflated by 1 for every reply that tagged a blocked user. Fix: expand the projection to include both fields. Verified: test_reply_count_matches_visible_after_tag_filter now passes."
+}

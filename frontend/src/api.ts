@@ -273,6 +273,17 @@ export const api = {
   shareSuggestions: (limit = 21) => request(`/messages/share-suggestions?limit=${limit}`),
   searchUsers: (q: string, limit = 20) =>
     request(`/search/users?q=${encodeURIComponent(q)}&limit=${limit}`),
+  // Proximity-ranked @mention autocomplete. When `q` is empty (user just
+  // typed `@`) returns the viewer's closest contacts. When `q` is a few
+  // chars, filters by substring while still boosting people they interact
+  // with — Cerchia > DMs > reply exchanges > co-commenters > everyone.
+  mentionSuggest: (q: string, feudId?: string, limit = 8) => {
+    const params = new URLSearchParams();
+    if (q) params.set('q', q);
+    if (feudId) params.set('feud_id', feudId);
+    params.set('limit', String(limit));
+    return request(`/mentions/suggest?${params.toString()}`);
+  },
   // Suggested friends for the Cerchia — union of DM contacts, friends-of-
   // friends and co-commenters, ranked by a weighted score. Returns
   // hydrated user rows with a `reasons` string list ("chat",
@@ -489,6 +500,7 @@ export type MiniUser = {
   nickname: string;
   primary_photo_id?: string | null;
   photo_data?: string | null;
+  display_name?: string | null;
 };
 
 export type SharedFeud = {

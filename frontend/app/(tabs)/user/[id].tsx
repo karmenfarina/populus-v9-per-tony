@@ -725,7 +725,22 @@ export default function UserPublicScreen() {
             >
               <Text style={styles.sectionTitle}>STORICO VOTI</Text>
               <View style={styles.sectionHeadRight}>
-                <Text style={styles.sectionCountBadge}>{profile.total_votes ?? 0}</Text>
+                {/* Badge shows the count that WILL be rendered when the
+                    dropdown opens. If we've already loaded the current
+                    filter's history (all/majority/minority), we use
+                    that length so the badge NEVER lies. Falls back to
+                    the profile-level `total_votes` counter only when
+                    the history hasn't been fetched yet. This closes
+                    the "numeretto sballato" report — orphaned votes
+                    (feud purged, no snapshot) inflate `total_votes`
+                    but never render in the list, causing a mismatch. */}
+                <Text style={styles.sectionCountBadge}>
+                  {historyHidden
+                    ? "—"
+                    : historyLoadedAtRef.current[filter]
+                      ? history.length
+                      : ((profile as any).history_counts?.[filter] ?? profile.total_votes ?? 0)}
+                </Text>
                 <Ionicons name={historyExpanded ? "chevron-up" : "chevron-down"} size={20} color={colors.onSurface} />
               </View>
             </Pressable>

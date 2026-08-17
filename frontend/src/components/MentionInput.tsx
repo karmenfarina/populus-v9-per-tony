@@ -40,6 +40,13 @@ export type MentionInputProps = Omit<TextInputProps, "onChangeText"> & {
   inputTestID?: string;
   /** Custom container style. */
   containerStyle?: TextInputProps["style"];
+  /**
+   * If provided, the mention autocomplete boosts users who have
+   * commented on THIS feud. Passing it turns the popup from a generic
+   * "who's around" list into a context-aware "who's in this thread"
+   * shortlist — huge UX win for replies.
+   */
+  feudId?: string;
 };
 
 export default function MentionInput({
@@ -47,6 +54,7 @@ export default function MentionInput({
   onChangeText,
   inputTestID,
   containerStyle,
+  feudId,
   ...rest
 }: MentionInputProps) {
   const [selection, setSelection] = useState<{ start: number; end: number }>({
@@ -96,14 +104,13 @@ export default function MentionInput({
         /* noop */
       }
       const q = detect.query.trim();
-      // Empty query → show nothing (avoid dumping the whole userbase).
-      if (!q) {
-        setSuggestions([]);
-        setLoading(false);
-        return;
-      }
+      // Empty query is now VALID: the user just typed `@` — show the
+      // top proximity-ranked candidates (Cerchia, DM contacts, reply
+      // partners, thread commenters) so they can pick a friend without
+      // typing anything else. This is the "Instagram-style" default
+      // suggestion list the user asked for.
       try {
-        const res: any = await api.searchUsers(q, 6);
+        const res: any = await api.mentionSuggest(q, feudId, 6);
         // Ignore if the caret has since left the mention token.
         const still = detectMentionQuery(
           stateRef.current.value,
@@ -125,7 +132,7 @@ export default function MentionInput({
       if (searchTimer.current) clearTimeout(searchTimer.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value, selection.end]);
+  }, [value, selection.end, feudId]);
 
   const onSelectionChange = (
     e: NativeSyntheticEvent<TextInputSelectionChangeEventData>,
@@ -175,9 +182,16 @@ export default function MentionInput({
                     </Text>
                   </View>
                 )}
-                <Text style={styles.nick} numberOfLines={1}>
-                  @{u.nickname}
-                </Text>
+                <View style={styles.rowText}>
+                  <Text style={styles.nick} numberOfLines={1}>
+                    @{u.nickname}
+                  </Text>
+                  {u.display_name ? (
+                    <Text style={styles.displayName} numberOfLines={1}>
+                      {u.display_name}
+                    </Text>
+                  ) : null}
+                </View>
               </Pressable>
             ))
           )}
@@ -255,6 +269,11 @@ const styles = StyleSheet.create({
     color: colors.onSurface,
     fontSize: font.sizes.base,
     fontWeight: "600",
-    flex: 1,
+  },
+  rowText: { flex: 1, minWidth: 0 },
+  displayName: {
+    color: colors.muted,
+    fontSize: font.sizes.xs,
+    marginTop: 1,
   },
 });

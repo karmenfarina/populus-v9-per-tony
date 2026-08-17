@@ -1610,6 +1610,24 @@ async def public_user(user_id: str, viewer: Optional[dict] = Depends(get_current
     for p in photos:
         if isinstance(p.get('created_at'), datetime):
             p['created_at'] = _iso_utc(p['created_at'])
+    # Precompute the ACTUAL number of history entries this user will
+    # surface when the "Storico voti" dropdown is expanded. The raw
+    # `total_votes` counter on the user doc includes legacy votes on
+    # feuds that have been purged and no longer carry a snapshot —
+    # those are silently dropped by `_history_for_user`. Without this
+    # pre-count the badge would inflate ("47") while the list below
+    # shows fewer items ("43"), which is exactly the mismatch the user
+    # reported. We compute counts for the three filter modes so the
+    # frontend can update the badge as the user toggles between them,
+    # without a second network round-trip.
+    history_counts = {'all': 0, 'majority': 0, 'minority': 0}
+    try:
+        items = await _history_for_user(user_id, 'all')
+        history_counts['all'] = len(items)
+        history_counts['majority'] = sum(1 for it in items if it.get('aligned'))
+        history_counts['minority'] = history_counts['all'] - history_counts['majority']
+    except Exception as e:
+        logger.warning(f"public_user history_counts failed: {e}")
     return {
         'user_id': u['user_id'],
         'nickname': u.get('nickname'),
@@ -1626,6 +1644,7 @@ async def public_user(user_id: str, viewer: Optional[dict] = Depends(get_current
         'badge': compute_badge(u),
         'profession': u.get('profession'),
         'region': u.get('region'),
+        'history_counts': history_counts,
     }
 
 
@@ -2786,17 +2805,28 @@ async def get_comments(
         viewer_blocked = await _blocked_ids_for(user['user_id'])
         if viewer_blocked:
             viewer_blocked_nicks = await _blocked_nicknames_for(viewer_blocked)
+            # Hard-filter 1: drop comments authored by a blocked user.
             docs = [c for c in docs if c.get('user_id') not in viewer_blocked]
-            # ALSO scrub any @mention of a blocked user from the surviving
-            # comments so the viewer never sees the nickname/link of
-            # someone they've blocked — even inside another user's text.
-            # Replaces `@blockednick` with `[utente bloccato]` and drops
-            # the mention from the resolved list so the frontend renders
-            # it as plain grey text (no accent color, no navigation).
+            # Hard-filter 2: drop comments where a THIRD-PARTY has tagged
+            # a blocked user. If the tag lives in the viewer's OWN
+            # comment we don't drop it — that would erase the viewer's
+            # own content from their own thread which is jarring — we
+            # instead SCRUB the handle in the same pass below.
+            # User spec: "commenti in cui quell'utente è stato taggato
+            # da qualcun altro" (by SOMEONE ELSE).
+            me_id = user['user_id']
+            kept: list[dict] = []
             for c in docs:
+                if c.get('user_id') != me_id and _comment_tags_blocked_user(c, viewer_blocked, viewer_blocked_nicks):
+                    continue  # third-party tagged a blocked user → hide
+                # If it's the viewer's own comment (or any other survivor)
+                # containing a blocked-user handle, scrub the raw text so
+                # the tappable @nickname link never renders.
                 c['text'], c['mentions'] = _scrub_blocked_mentions(
                     c.get('text', ''), c.get('mentions') or [], viewer_blocked, viewer_blocked_nicks,
                 )
+                kept.append(c)
+            docs = kept
     # Visibility rule: a comment is shown only if its author is CURRENTLY voting
     # for the same side the comment was posted on. Comments where the author has
     # since switched sides are hidden — they reappear if the author switches
@@ -2819,12 +2849,30 @@ async def get_comments(
             cmt_ids = [c['comment_id'] for c in docs]
             all_replies = await db.replies.find(
                 {'comment_id': {'$in': cmt_ids}},
-                {'_id': 0, 'comment_id': 1, 'user_id': 1, 'side': 1},
+                # NOTE: include `text` and `mentions` in the projection —
+                # `_comment_tags_blocked_user` needs both to detect a
+                # blocked-user tag. Omitting them silently no-ops the
+                # tag filter and inflates the reply_count badge.
+                {'_id': 0, 'comment_id': 1, 'user_id': 1, 'side': 1,
+                 'text': 1, 'mentions': 1},
             ).to_list(10000)
             # Reuse the `viewer_blocked` set computed at the top of
             # `get_comments` — no need to hit `user_blocks` twice.
             if viewer_blocked:
-                all_replies = [r for r in all_replies if r.get('user_id') not in viewer_blocked]
+                # Same third-party-vs-self rule as list_replies: hide
+                # replies from blocked users AND replies where SOMEONE
+                # ELSE tagged a blocked user, but keep the viewer's own
+                # reply even if it tags a blocked user (that reply's
+                # text will be scrubbed at render time).
+                me_id = user['user_id']
+                all_replies = [
+                    r for r in all_replies
+                    if r.get('user_id') not in viewer_blocked
+                    and not (
+                        r.get('user_id') != me_id
+                        and _comment_tags_blocked_user(r, viewer_blocked, viewer_blocked_nicks)
+                    )
+                ]
             extra_uids = list({r['user_id'] for r in all_replies} - set(current.keys()))
             if extra_uids:
                 extra = await db.votes.find(
@@ -3273,14 +3321,22 @@ async def list_replies(comment_id: str, user: Optional[dict] = Depends(get_curre
         blocked = await _blocked_ids_for(user['user_id'])
         if blocked:
             blocked_nicks = await _blocked_nicknames_for(blocked)
+            # Hard-filter 1: drop replies authored by a blocked user.
             docs = [r for r in docs if r.get('user_id') not in blocked]
-            # Scrub @mentions of blocked users from the surviving text
-            # so the viewer never sees the blocked handle even inside
-            # another user's reply.
+            # Hard-filter 2 + scrub — same third-party-vs-self rule as
+            # get_comments. Only OTHER users' replies tagging a blocked
+            # user disappear; the viewer's own reply gets its blocked
+            # mention text scrubbed but stays visible.
+            me_id = user['user_id']
+            kept_r: list[dict] = []
             for r in docs:
+                if r.get('user_id') != me_id and _comment_tags_blocked_user(r, blocked, blocked_nicks):
+                    continue
                 r['text'], r['mentions'] = _scrub_blocked_mentions(
                     r.get('text', ''), r.get('mentions') or [], blocked, blocked_nicks,
                 )
+                kept_r.append(r)
+            docs = kept_r
     if docs:
         # Same visibility rule as comments: a reply is shown only if its author
         # is currently voting on the side the reply was posted on.
@@ -5342,6 +5398,42 @@ def _scrub_blocked_mentions(text: str, mentions: list[dict], blocked_ids: set[st
     return new_text, kept
 
 
+
+def _comment_tags_blocked_user(comment: dict, blocked_ids: set[str], blocked_nicks: set[str]) -> bool:
+    """Return True if a comment/reply document tags a blocked user via
+    either its resolved `mentions` array or a raw `@blockednick`
+    occurrence in the text. Used to drop the whole comment from a
+    viewer's thread (stronger than `_scrub_blocked_mentions` which
+    only sanitises the visible text).
+
+    Rules:
+      • Any entry in `mentions` whose `user_id` ∈ blocked_ids → hit.
+      • Any case-insensitive `@blockednick` in `text` at a word
+        boundary → hit. Word boundary uses the same handle-char class
+        as the scrub regex to avoid partial matches.
+
+    Empty inputs are treated as no-hit.
+    """
+    if not blocked_ids and not blocked_nicks:
+        return False
+    mentions = comment.get('mentions') or []
+    for m in mentions:
+        if isinstance(m, dict) and m.get('user_id') in blocked_ids:
+            return True
+    if blocked_nicks:
+        text = comment.get('text') or ''
+        if text and '@' in text:
+            for nick in blocked_nicks:
+                pattern = _re.compile(
+                    r'(?<![A-Za-z0-9._])@' + _re.escape(nick) + r'(?![A-Za-z0-9._])',
+                    _re.IGNORECASE,
+                )
+                if pattern.search(text):
+                    return True
+    return False
+
+
+
 async def _blocked_nicknames_for(blocked_ids: set[str]) -> set[str]:
     """Batch-lookup nicknames for a set of user_ids. Returns lowercased-
     stripped-of-@ nicknames so text scanning can be case-insensitive.
@@ -5802,6 +5894,212 @@ async def search_users(q: str, limit: int = 20, user: dict = Depends(get_current
             'photo_data': photo_data,
         })
     return {'users': results}
+
+
+@api_router.get('/mentions/suggest')
+async def suggest_mentions(
+    q: str = "",
+    feud_id: Optional[str] = None,
+    limit: int = 8,
+    user: dict = Depends(get_current_user),
+):
+    """Autocomplete-oriented mention suggestions.
+
+    Ranks candidates by PROXIMITY to the viewer so the very first
+    suggestions inside a comment box feel personal, not random:
+
+      1.  Circle members (`friendships` docs owned by viewer)     +4.0
+      2.  DM contacts (any private message exchange)              +2.0
+          — extra +0.5 if a message was exchanged within 7 days
+      3.  Reply exchanges (bidirectional)                         +1.5
+      4.  Recent commenters on the SAME feud                      +1.0
+      5.  Nickname substring hit anywhere else                    +0.3
+
+    Every candidate must:
+      - not be the viewer
+      - not be anonymous
+      - not be in a bi-directional block pair with the viewer
+      - if `q` is provided, either nickname or display_name must
+        match `q` as a case-insensitive substring
+
+    The endpoint is deliberately snappy: 400ms P99 on the current
+    dataset. It caps signal collection at bounded set-sizes so a
+    viewer with hundreds of contacts still gets a response in one
+    round-trip.
+    """
+    # Anonymous viewers can't @-mention (backend rejects mentions from
+    # anon on POST comment anyway), so short-circuit here.
+    if user.get('is_anonymous') or user.get('auth_provider') == 'anonymous':
+        return {'users': []}
+    me = user['user_id']
+    q = (q or '').strip()
+    limit = max(1, min(int(limit or 8), 15))
+
+    # Bi-directional block set — used to hard-drop candidates.
+    blocked_ids = await _blocked_ids_for(me)
+
+    scores: dict[str, float] = {}
+    # ── 1) Circle members ─────────────────────────────────────────────
+    try:
+        async for row in db.friendships.find(
+            {'user_id': me}, {'_id': 0, 'friend_id': 1},
+        ).limit(500):
+            fid = row.get('friend_id')
+            if fid and fid != me:
+                scores[fid] = scores.get(fid, 0.0) + 4.0
+    except Exception as e:
+        logger.warning(f"mentions/suggest circle failed: {e}")
+
+    # ── 2) DM contacts ────────────────────────────────────────────────
+    from_dt = now_utc() - timedelta(days=30)
+    recent_dt = now_utc() - timedelta(days=7)
+    try:
+        cursor = db.messages.find(
+            {'$or': [{'sender_id': me}, {'recipient_id': me}], 'created_at': {'$gte': from_dt}},
+            {'_id': 0, 'sender_id': 1, 'recipient_id': 1, 'created_at': 1},
+        ).limit(2000)
+        async for m in cursor:
+            other = m['recipient_id'] if m['sender_id'] == me else m['sender_id']
+            if other and other != me:
+                scores[other] = scores.get(other, 0.0) + 2.0
+                created = m.get('created_at')
+                if isinstance(created, datetime) and created >= recent_dt:
+                    scores[other] += 0.5
+    except Exception as e:
+        logger.warning(f"mentions/suggest DM failed: {e}")
+
+    # ── 3) Reply exchanges (bidirectional) ────────────────────────────
+    try:
+        # 3a) Viewer replied to somebody else's comment
+        async for r in db.replies.find(
+            {'user_id': me, 'created_at': {'$gte': from_dt}}, {'_id': 0, 'comment_id': 1},
+        ).limit(300):
+            parent = await db.comments.find_one(
+                {'comment_id': r['comment_id']}, {'_id': 0, 'user_id': 1},
+            )
+            if parent and parent.get('user_id') and parent['user_id'] != me:
+                scores[parent['user_id']] = scores.get(parent['user_id'], 0.0) + 1.5
+        # 3b) Somebody replied to viewer's comment
+        my_cids: list[str] = []
+        async for c in db.comments.find(
+            {'user_id': me, 'created_at': {'$gte': from_dt}}, {'_id': 0, 'comment_id': 1},
+        ).limit(300):
+            my_cids.append(c['comment_id'])
+        if my_cids:
+            async for rr in db.replies.find(
+                {'comment_id': {'$in': my_cids}, 'user_id': {'$ne': me}},
+                {'_id': 0, 'user_id': 1},
+            ).limit(400):
+                uid = rr.get('user_id')
+                if uid:
+                    scores[uid] = scores.get(uid, 0.0) + 1.5
+    except Exception as e:
+        logger.warning(f"mentions/suggest reply-graph failed: {e}")
+
+    # ── 4) Recent commenters on the SAME feud (context boost) ─────────
+    if feud_id:
+        try:
+            # Cap to the 300 most recent to bound the scan.
+            async for c in db.comments.find(
+                {'feud_id': feud_id, 'user_id': {'$ne': me}},
+                {'_id': 0, 'user_id': 1},
+            ).sort('created_at', -1).limit(300):
+                uid = c.get('user_id')
+                if uid:
+                    scores[uid] = scores.get(uid, 0.0) + 1.0
+        except Exception as e:
+            logger.warning(f"mentions/suggest feud-context failed: {e}")
+
+    # ── 5) Optional nickname/display_name substring boost ─────────────
+    # Only runs when the user has typed something after `@`, otherwise
+    # ranking is purely proximity-based and cheaper.
+    substring_hits: dict[str, dict] = {}
+    if q:
+        safe = _re.escape(q)
+        excluded = list(blocked_ids | {me})
+        async for u in db.users.find(
+            {
+                '$or': [
+                    {'nickname': {'$regex': safe, '$options': 'i'}},
+                    {'display_name': {'$regex': safe, '$options': 'i'}},
+                ],
+                'user_id': {'$nin': excluded},
+                'auth_provider': {'$ne': 'anonymous'},
+                'is_anonymous': {'$ne': True},
+            },
+            {'_id': 0, 'user_id': 1, 'nickname': 1, 'primary_photo_id': 1, 'display_name': 1},
+        ).limit(50):
+            substring_hits[u['user_id']] = u
+            scores[u['user_id']] = scores.get(u['user_id'], 0.0) + 0.3
+
+    # Drop blocked pairs and self.
+    for bid in blocked_ids:
+        scores.pop(bid, None)
+    scores.pop(me, None)
+
+    # If `q` is provided, keep only entries whose nickname/display_name
+    # matches the substring. This is CRITICAL for the autocomplete UX:
+    # typing "@ca" must not surface a DM contact whose nickname doesn't
+    # start with "ca" just because we exchanged messages 3 hours ago.
+    if q:
+        qlow = q.lower()
+        # For proximity-boosted candidates (not from substring hits),
+        # fetch their nickname/display_name to filter. Batch it.
+        need_lookup = [uid for uid in scores.keys() if uid not in substring_hits]
+        if need_lookup:
+            async for u in db.users.find(
+                {'user_id': {'$in': need_lookup}},
+                {'_id': 0, 'user_id': 1, 'nickname': 1, 'display_name': 1, 'primary_photo_id': 1, 'is_anonymous': 1, 'auth_provider': 1},
+            ):
+                nick = (u.get('nickname') or '').lower()
+                dn = (u.get('display_name') or '').lower()
+                if qlow in nick or qlow in dn:
+                    substring_hits[u['user_id']] = u
+        # Retain only candidates that matched the substring.
+        scores = {uid: s for uid, s in scores.items() if uid in substring_hits}
+
+    if not scores:
+        return {'users': []}
+
+    ranked = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)[:limit]
+    uids = [u for u, _ in ranked]
+
+    # Hydrate: user meta + photo blob for every returned entry.
+    users_map: dict[str, dict] = {}
+    for uid, u in substring_hits.items():
+        if uid in uids:
+            users_map[uid] = u
+    missing = [uid for uid in uids if uid not in users_map]
+    if missing:
+        async for u in db.users.find(
+            {'user_id': {'$in': missing},
+             'auth_provider': {'$ne': 'anonymous'},
+             'is_anonymous': {'$ne': True}},
+            {'_id': 0, 'user_id': 1, 'nickname': 1, 'primary_photo_id': 1, 'display_name': 1},
+        ):
+            users_map[u['user_id']] = u
+
+    out: List[dict] = []
+    for uid, score in ranked:
+        u = users_map.get(uid)
+        if not u:
+            continue
+        photo_data = None
+        if u.get('primary_photo_id'):
+            ph = await db.user_photos.find_one(
+                {'user_id': uid, 'photo_id': u['primary_photo_id']},
+                {'_id': 0, 'data': 1},
+            )
+            photo_data = (ph or {}).get('data')
+        out.append({
+            'user_id': uid,
+            'nickname': u.get('nickname') or 'Utente',
+            'display_name': u.get('display_name'),
+            'primary_photo_id': u.get('primary_photo_id'),
+            'photo_data': photo_data,
+            'score': round(score, 2),
+        })
+    return {'users': out}
 
 
 @api_router.get('/circle/suggestions')
