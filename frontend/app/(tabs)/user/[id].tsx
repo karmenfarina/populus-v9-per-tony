@@ -70,6 +70,12 @@ export default function UserPublicScreen() {
   const [reportOpen, setReportOpen] = useState(false);
   const [reportText, setReportText] = useState("");
   const [isBlocked, setIsBlocked] = useState(false);
+  // Block confirmation is rendered via a Modal (NOT `Alert.alert`) because
+  // `Alert.alert` is silently a no-op on web and can also race with the
+  // preceding menu-modal dismissal on Android — resulting in the "click
+  // Blocca and nothing happens" bug the user reported.
+  const [blockConfirmOpen, setBlockConfirmOpen] = useState(false);
+  const [blockWorking, setBlockWorking] = useState(false);
   const [inCircle, setInCircle] = useState(false);
   const [circleCount, setCircleCount] = useState(0);
   const [circleWorking, setCircleWorking] = useState(false);
@@ -155,6 +161,7 @@ export default function UserPublicScreen() {
     setMenuOpen(false);
     if (!id) return;
     if (isBlocked) {
+      // Unblock is a one-tap action — no confirmation needed.
       try {
         await api.unblockUser(id);
         setIsBlocked(false);
@@ -163,21 +170,24 @@ export default function UserPublicScreen() {
       }
       return;
     }
-    Alert.alert("Blocca utente", `Vuoi bloccare @${profile?.nickname}? Non riceverai più messaggi.`, [
-      { text: "Annulla", style: "cancel" },
-      {
-        text: "Blocca",
-        style: "destructive",
-        onPress: async () => {
-          try {
-            await api.blockUser(id);
-            setIsBlocked(true);
-          } catch (e: any) {
-            Alert.alert("Errore", e?.detail || "Impossibile bloccare");
-          }
-        },
-      },
-    ]);
+    // Open the in-app confirmation modal. Alert.alert is unreliable
+    // here (no-op on web, race conditions with the menu Modal on
+    // Android) so we roll our own bottom-sheet-style confirmation.
+    setBlockConfirmOpen(true);
+  };
+
+  const confirmBlock = async () => {
+    if (!id || blockWorking) return;
+    setBlockWorking(true);
+    try {
+      await api.blockUser(id);
+      setIsBlocked(true);
+      setBlockConfirmOpen(false);
+    } catch (e: any) {
+      Alert.alert("Errore", e?.detail || "Impossibile bloccare");
+    } finally {
+      setBlockWorking(false);
+    }
   };
 
   const submitReport = async () => {
@@ -524,7 +534,12 @@ export default function UserPublicScreen() {
                 </View>
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.badgeKicker}>SPILLA · TOCCA PER LE ALTRE</Text>
+                <Text
+                  style={[
+                    styles.badgeKicker,
+                    badgeType === "bastian_contrario" ? { color: colors.onBrandPrimary } : { color: colors.onBrandSecondary },
+                  ]}
+                >SPILLA · TOCCA PER LE ALTRE</Text>
                 <Text
                   style={[
                     styles.badgeTitle,
@@ -773,6 +788,51 @@ export default function UserPublicScreen() {
         </Pressable>
       </Modal>
 
+      {/* Block confirmation — bottom-sheet-style Modal used INSTEAD of
+          `Alert.alert` which is silently a no-op on web and racy with
+          the menu Modal dismissal on Android. Same visual language as
+          the report sheet above. */}
+      <Modal
+        visible={blockConfirmOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setBlockConfirmOpen(false)}
+      >
+        <Pressable
+          style={styles.modalBg}
+          onPress={() => (blockWorking ? undefined : setBlockConfirmOpen(false))}
+        >
+          <Pressable style={styles.reportSheet} onPress={() => {}} testID="block-confirm-sheet">
+            <Text style={styles.sheetTitle}>BLOCCA @{profile.nickname}</Text>
+            <Text style={styles.blockConfirmBody}>
+              Se lo blocchi non riceverai più suoi messaggi, non potrà taggarti nei commenti né rispondere ai tuoi. Anche tu non vedrai più i suoi contenuti pubblici.
+            </Text>
+            <View style={{ flexDirection: "row", gap: spacing.sm }}>
+              <Pressable
+                disabled={blockWorking}
+                onPress={() => setBlockConfirmOpen(false)}
+                style={[styles.reportBtn, { backgroundColor: colors.surfaceTertiary }]}
+              >
+                <Text style={{ color: colors.onSurface, letterSpacing: 1 }}>ANNULLA</Text>
+              </Pressable>
+              <Pressable
+                testID="block-confirm-yes"
+                disabled={blockWorking}
+                onPress={confirmBlock}
+                style={[
+                  styles.reportBtn,
+                  { backgroundColor: colors.error, opacity: blockWorking ? 0.6 : 1 },
+                ]}
+              >
+                <Text style={{ color: "#fff", letterSpacing: 1, fontWeight: "500" }}>
+                  {blockWorking ? "..." : "BLOCCA"}
+                </Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
       <PhotoGalleryViewer
         visible={viewerOpen}
         photos={photos}
@@ -872,6 +932,7 @@ const styles = StyleSheet.create({
   },
   menuTxt: { fontSize: font.sizes.base, color: colors.onSurface, letterSpacing: 0.5 },
   sheetTitle: { fontSize: font.sizes.sm, letterSpacing: 2, textAlign: "center", color: colors.onSurface, fontWeight: "500" },
+  blockConfirmBody: { color: colors.onSurface, fontSize: font.sizes.sm, lineHeight: 20, marginVertical: spacing.md },
   reportSheet: {
     backgroundColor: colors.surfaceSecondary,
     padding: spacing.lg,
@@ -946,7 +1007,7 @@ const styles = StyleSheet.create({
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 2,
   },
-  badgeKicker: { fontSize: font.sizes.xs, letterSpacing: 2, opacity: 0.7, color: colors.onBrandPrimary },
+  badgeKicker: { fontSize: font.sizes.xs, letterSpacing: 2, opacity: 0.7 },
   badgeTitle: { fontSize: font.sizes.lg, fontWeight: "500", letterSpacing: 1.5, marginTop: 2 },
   badgeSubtitle: { fontSize: font.sizes.xs, letterSpacing: 1, opacity: 0.8, marginTop: 2 },
   viewBadgesFallback: {
