@@ -167,79 +167,46 @@ export default function Profile() {
       const r = await api.history(f);
       setHistoryCache((prev) => ({ ...prev, [f]: r.history }));
       historyLoadedAtRef.current[f] = Date.now();
+    } catch {
+      // Swallow — auth-drop races during logout must never bubble
+      // out and crash the tree with a red-screen.
     } finally { setRefreshingH(false); }
   }, []);
 
-  // Centralised logout. On web we hard-reload to /auth after clearing
-  // the token — that guarantees every context, component tree and
-  // navigation stack starts from a blank slate on the next login,
-  // avoiding the class of bugs that surface when a tab route stays
-  // mounted through an auth transition (stale providers, "POP_TO_TOP
-  // not handled" warnings from the router, red-screen on re-login,
-  // etc). On native we keep the SPA-style flow because deep-linked
-  // deep-linking + WebBrowser session results only survive if we
-  // don't tear the JS runtime down mid-flight.
+  // Centralised logout — kept intentionally minimal now that the
+  // (tabs) layout has a safety-net redirect that fires the instant
+  // `user` flips to null. We just:
+  //   1. Wipe the token + fire the backend + Firebase signout (all
+  //      inside AuthContext.logout — never throws).
+  //   2. Clear the manual back-stack in the background.
   //
-  // On web we also navigate FIRST (before `logout()` clears `user`)
-  // so no in-tree component re-renders with a null user during the
-  // race window. That was the source of the dev-mode red-screen crash
-  // the user hit: after `logout()` returned, React tried to re-render
-  // detail screens still holding stale `user.xxx` references before
-  // window.location.replace had a chance to actually navigate.
+  // On web we still hard-reload after `logout()` so the whole runtime
+  // starts from a clean slate (avoids stale provider caches when the
+  // user logs BACK IN with a different account in the same tab). On
+  // native we let the (tabs) layout handle the redirect — the moment
+  // `setUser(null)` fires, `TabsLayout` unmounts every child screen
+  // and pushes `/auth`, eliminating the race that used to red-screen.
   const doLogout = useCallback(async () => {
-    // Reset scroll memory so the next user doesn't inherit our offset.
     try { scrollMemory.reset(); } catch { /* noop */ }
+    // Clear manual back-stack up front so nothing else can navigate
+    // through stale entries while we tear down auth.
+    try {
+      const { navStack } = await import("@/src/utils/navStack");
+      navStack.clear();
+    } catch { /* noop */ }
     if (Platform.OS === "web" && typeof window !== "undefined") {
-      // WEB: on the hard-reload path we tell AuthContext to SKIP the
-      // `setUser(null)` call. That call would otherwise re-render every
-      // currently-mounted screen with `user === null` while the browser
-      // is still fetching /auth — and any component that reads
-      // `user.something` directly (there are still a few in the detail
-      // routes) would throw a red-screen. We navigate first, then let
-      // the fresh page start from a clean slate.
-      try { logout({ skipStateUpdates: true }).catch(() => {}); } catch { /* noop */ }
-      try {
-        const { navStack } = await import("@/src/utils/navStack");
-        navStack.clear();
-      } catch { /* noop */ }
-      try {
-        window.location.replace("/auth");
-        return;
-      } catch { /* fall through to router.replace below */ }
+      // WEB: skip the React state update inside logout() so no
+      // still-mounted component re-renders with user===null before
+      // the hard-reload takes over.
+      try { await logout({ skipStateUpdates: true }); } catch { /* noop */ }
+      try { window.location.replace("/auth"); return; } catch { /* fall through */ }
     }
-    // NATIVE path — Belt-and-braces sequence:
-    //   1. Navigate away FIRST so profile.tsx (and any other tab route
-    //      currently mounted that reads `user.foo` directly) is
-    //      immediately replaced by /auth. This unmounts the whole
-    //      (tabs) group.
-    //   2. On the NEXT tick (after router.replace finished its
-    //      internal state transitions), invoke `logout()` which is now
-    //      completely defensive: it wraps every side-effect in
-    //      try/catch, dynamic-imports Firebase inside a self-contained
-    //      IIFE, and finally does `setUser(null)`.
-    //   3. Clear the manual back-stack in the background — must never
-    //      throw.
-    //
-    // We intentionally DO NOT call `router.dismissAll()` here — on
-    // certain Expo Go builds it can throw synchronously when the
-    // current route is not inside a native stack, which was the
-    // source of the "app crashes on every logout" report.
-    try { router.replace("/auth"); } catch { /* noop */ }
-    setTimeout(() => {
-      // Now that we're off (tabs) and profile.tsx has unmounted, it's
-      // safe to clear the auth state. Any remaining consumer of
-      // `useAuth().user` (root providers) already handles null.
-      logout().catch(() => {});
-    }, 60);
-    // Clear the navigation memory in the background — the dynamic
-    // import can time out on a flaky connection but must never throw.
-    (async () => {
-      try {
-        const { navStack } = await import("@/src/utils/navStack");
-        navStack.clear();
-      } catch { /* noop */ }
-    })();
-  }, [logout, router]);
+    // NATIVE: just flip user to null. TabsLayout's redirect effect
+    // handles the navigation atomically. No setTimeout, no explicit
+    // router call here — those introduced the very race conditions
+    // that caused the "app crashes on every logout" report.
+    try { await logout(); } catch { /* noop */ }
+  }, [logout]);
 
   useEffect(() => {
     refreshMe();
@@ -431,11 +398,15 @@ export default function Profile() {
       }
       setPhotoUris(entries);
       setPrimaryPhotoUri(primary ? entries[primary.photo_id] || null : null);
+    } catch {
+      // Swallow — never let an auth-drop race (token cleared while
+      // profile.tsx is still mounted during logout) surface as a
+      // red-screen "Missing bearer token" uncaught error.
     } finally { setLoadingPhotos(false); }
   }, []);
 
   useEffect(() => {
-    loadPhotos();
+    loadPhotos().catch(() => { /* already caught inside loadPhotos, extra belt */ });
   }, [loadPhotos]);
 
   const openProfileEdit = () => {

@@ -1739,58 +1739,98 @@ async def list_hype_feuds(user: Optional[dict] = Depends(get_current_user_option
             viewer_blocked = await _blocked_ids_for(user['user_id'])
         except Exception as e:
             logger.warning(f"hype: blocklist lookup failed: {e}")
-    # Comment + reply counts in ONE aggregation per collection.
+    # ── VISIBLE comment + reply counts ───────────────────────────
+    # We deliberately DO NOT trust the raw DB counts: a comment is
+    # "visible" only if its author's CURRENT vote still matches the
+    # side the comment was posted on (same rule as get_comments /
+    # list_replies). A feud where every commenter has since flipped
+    # side would render as an empty thread from the viewer's POV,
+    # so it has no business in the HYPE rail. We therefore load the
+    # raw docs, cross-reference with the votes collection, and count
+    # only the survivors — plus apply the bi-directional block filter
+    # as before.
     comment_counts: dict = {}
     reply_counts: dict = {}
     try:
-        comment_match: dict = {'feud_id': {'$in': feud_ids}}
+        cmt_query: dict = {'feud_id': {'$in': feud_ids}}
         if viewer_blocked:
-            comment_match['user_id'] = {'$nin': list(viewer_blocked)}
-        async for row in db.comments.aggregate([
-            {'$match': comment_match},
-            {'$group': {'_id': '$feud_id', 'count': {'$sum': 1}}},
-        ]):
-            comment_counts[row['_id']] = int(row.get('count') or 0)
-    except Exception as e:
-        logger.warning(f"hype: comments aggregation failed: {e}")
-    # Replies live under a comment_id. Do a lookup: replies → comment → feud.
-    try:
-        reply_pipeline: list[dict] = [
-            {'$lookup': {
-                'from': 'comments', 'localField': 'comment_id',
-                'foreignField': 'comment_id', 'as': 'c',
-            }},
-            {'$unwind': '$c'},
-            {'$match': {'c.feud_id': {'$in': feud_ids}}},
-        ]
+            cmt_query['user_id'] = {'$nin': list(viewer_blocked)}
+        raw_cmts = await db.comments.find(
+            cmt_query, {'_id': 0, 'comment_id': 1, 'feud_id': 1, 'user_id': 1, 'side': 1},
+        ).to_list(20000)
+        rep_query: dict = {}
+        # Replies collection stores feud_id + comment_id directly, so a
+        # simple find is enough — no aggregation lookup required.
+        # We include the comment_id so we can drop replies whose parent
+        # comment author is in the block list (those parents are hidden
+        # from the viewer, so the replies must be too).
+        rep_query = {'feud_id': {'$in': feud_ids}}
         if viewer_blocked:
-            # Exclude replies from users the viewer can't see AND
-            # replies whose PARENT comment author is blocked (that
-            # parent comment is hidden from the viewer's thread so
-            # its replies never render either).
-            blist = list(viewer_blocked)
-            reply_pipeline.append({'$match': {
-                'user_id': {'$nin': blist},
-                'c.user_id': {'$nin': blist},
-            }})
-        reply_pipeline.append({'$group': {'_id': '$c.feud_id', 'count': {'$sum': 1}}})
-        async for row in db.replies.aggregate(reply_pipeline):
-            reply_counts[row['_id']] = int(row.get('count') or 0)
+            rep_query['user_id'] = {'$nin': list(viewer_blocked)}
+        raw_reps = await db.replies.find(
+            rep_query, {'_id': 0, 'reply_id': 1, 'comment_id': 1, 'feud_id': 1, 'user_id': 1, 'side': 1},
+        ).to_list(30000)
+        # Drop replies whose parent comment is authored by a blocked
+        # user — that whole subtree is invisible to the viewer.
+        if viewer_blocked and raw_reps:
+            blocked_parent_cids: set[str] = set()
+            parent_cids = list({r['comment_id'] for r in raw_reps})
+            async for c in db.comments.find(
+                {'comment_id': {'$in': parent_cids}, 'user_id': {'$in': list(viewer_blocked)}},
+                {'_id': 0, 'comment_id': 1},
+            ):
+                blocked_parent_cids.add(c['comment_id'])
+            if blocked_parent_cids:
+                raw_reps = [r for r in raw_reps if r['comment_id'] not in blocked_parent_cids]
+        # Collect all unique (feud_id, user_id) pairs so we can pull
+        # each author's current vote once.
+        author_pairs: set[tuple[str, str]] = set()
+        for c in raw_cmts:
+            author_pairs.add((c['feud_id'], c['user_id']))
+        for r in raw_reps:
+            author_pairs.add((r['feud_id'], r['user_id']))
+        # Pull current votes in one round-trip per feud (batch by
+        # feud_id). MongoDB doesn't do compound $in easily, so we
+        # group per-feud user lists.
+        by_feud: dict[str, set[str]] = {}
+        for fid, uid in author_pairs:
+            by_feud.setdefault(fid, set()).add(uid)
+        current_vote: dict[tuple[str, str], str] = {}
+        for fid, uids in by_feud.items():
+            async for v in db.votes.find(
+                {'feud_id': fid, 'user_id': {'$in': list(uids)}},
+                {'_id': 0, 'user_id': 1, 'side': 1},
+            ):
+                current_vote[(fid, v['user_id'])] = v['side']
+        # Count only VISIBLE items: author's current vote matches the
+        # side the comment/reply was posted on. Items whose author
+        # never voted (edge case: legacy data) are treated as visible
+        # on their own recorded side.
+        def _visible(item: dict) -> bool:
+            key = (item['feud_id'], item['user_id'])
+            cur = current_vote.get(key)
+            return cur is None or cur == item['side']
+        for c in raw_cmts:
+            if _visible(c):
+                comment_counts[c['feud_id']] = comment_counts.get(c['feud_id'], 0) + 1
+        for r in raw_reps:
+            if _visible(r):
+                reply_counts[r['feud_id']] = reply_counts.get(r['feud_id'], 0) + 1
     except Exception as e:
-        logger.warning(f"hype: replies aggregation failed: {e}")
+        logger.warning(f"hype: visible-count aggregation failed: {e}")
 
     scored: List[dict] = []
     for d in docs:
         votes = int(d.get('votes_a', 0) or 0) + int(d.get('votes_b', 0) or 0)
         cc = comment_counts.get(d['feud_id'], 0)
         rc = reply_counts.get(d['feud_id'], 0)
-        # HYPE must feel alive: a post is eligible ONLY if it has BOTH
-        # at least one real discussion signal (comment or reply) AND at
-        # least one poll vote. This kills the previous edge-case where
-        # a post with 3 votes and 0 comments would render on the rail
-        # as "0 commenti" (votes are hidden pre-vote for privacy),
-        # making it look completely dead to the visitor.
-        if (cc + rc) < 1 or votes < 1:
+        # HYPE must feel actually HOT: only surface posts that show a
+        # meaningful debate. We require BOTH at least one real vote AND
+        # at least one VISIBLE comment/reply — no exceptions. Empty
+        # (0 visible comments) or vote-less posts are excluded even if
+        # the rail ends up empty as a result. Per user spec: "se non ve
+        # ne sono di più frequentate, evita quelle vuote".
+        if cc < 1 or votes < 1:
             continue
         score = votes + 2 * cc + rc
         d['_hype_score'] = score
@@ -3158,6 +3198,7 @@ async def add_comment(feud_id: str, body: CommentBody, user: dict = Depends(get_
                     feud_id=feud_id,
                     comment_id=doc['comment_id'],
                     side=vote['side'],
+                    actor_id=user['user_id'],
                     send_push_too=True,
                 ))
         except Exception as e:
@@ -3283,6 +3324,7 @@ async def add_reply(comment_id: str, body: ReplyBody, user: dict = Depends(get_c
                 feud_id=parent['feud_id'],
                 comment_id=comment_id,
                 side=parent.get('side'),
+                actor_id=user['user_id'],
                 send_push_too=True,
             )
     except Exception as e:
@@ -3307,6 +3349,7 @@ async def add_reply(comment_id: str, body: ReplyBody, user: dict = Depends(get_c
                     feud_id=parent['feud_id'],
                     comment_id=comment_id,
                     side=side,
+                    actor_id=user['user_id'],
                     send_push_too=True,
                 ))
         except Exception as e:
@@ -3323,10 +3366,24 @@ async def _emit_notification(user_id: str, ntype: str, *, title: str, body: str,
                               feud_id: Optional[str] = None,
                               comment_id: Optional[str] = None,
                               side: Optional[str] = None,
+                              actor_id: Optional[str] = None,
                               send_push_too: bool = False) -> None:
     """Write a lightweight in-app notification. Bounded auto-cleanup keeps at
     most 200 notifications per user (oldest pruned). When `send_push_too` is
-    true, also fires a mobile push notification via the Emergent relay."""
+    true, also fires a mobile push notification via the Emergent relay.
+
+    `actor_id` — user_id of whoever triggered the notification (commenter,
+    reply author, mentioner). Used by /notifications to filter out entries
+    from bi-directionally blocked users."""
+    # Bi-directional block guard: never persist a notification that came
+    # from a user in a block pair with the recipient. Short-circuits the
+    # bell icon lighting up for events the recipient can never act on.
+    if actor_id and actor_id != user_id:
+        try:
+            if await _is_blocked_pair(user_id, actor_id):
+                return
+        except Exception:
+            pass  # non-fatal
     doc = {
         'notif_id': new_id('notif'),
         'user_id': user_id,
@@ -3336,6 +3393,7 @@ async def _emit_notification(user_id: str, ntype: str, *, title: str, body: str,
         'feud_id': feud_id,
         'comment_id': comment_id,
         'side': side,
+        'actor_id': actor_id,
         'read': False,
         'created_at': now_utc(),
     }
@@ -3606,10 +3664,28 @@ async def _fanout_hot_news(feud: dict) -> None:
 
 @api_router.get('/notifications')
 async def list_notifications(user: dict = Depends(get_current_user)):
-    """Latest 50 notifications for the current user, newest first."""
-    docs = await db.notifications.find(
-        {'user_id': user['user_id']}, {'_id': 0}
-    ).sort('created_at', -1).to_list(50)
+    """Latest 50 notifications for the current user, newest first.
+
+    Notifications authored by a user in a bi-directional block with the
+    viewer are excluded — otherwise a blocked user's @mention/reply
+    would still light up the bell icon, which contradicts the "no
+    public interaction" invariant enforced everywhere else.
+    """
+    # Compute the block list once so we can filter both the query and
+    # any residual actor_id fields that were saved as top-level
+    # metadata (older notifications).
+    try:
+        blocked = await _blocked_ids_for(user['user_id'])
+    except Exception as e:
+        logger.warning(f"list_notifications block lookup failed: {e}")
+        blocked = set()
+    q: dict = {'user_id': user['user_id']}
+    if blocked:
+        # `actor_id` is set by _emit_notification for every social event.
+        # Any legacy notification without an actor_id is left visible
+        # (nothing sensitive there).
+        q['$or'] = [{'actor_id': {'$exists': False}}, {'actor_id': {'$nin': list(blocked)}}]
+    docs = await db.notifications.find(q, {'_id': 0}).sort('created_at', -1).to_list(50)
     for d in docs:
         if isinstance(d.get('created_at'), datetime):
             d['created_at'] = _iso_utc(d['created_at'])
@@ -3618,9 +3694,17 @@ async def list_notifications(user: dict = Depends(get_current_user)):
 
 @api_router.get('/notifications/unread-count')
 async def unread_count(user: dict = Depends(get_current_user)):
-    n = await db.notifications.count_documents(
-        {'user_id': user['user_id'], 'read': False}
-    )
+    # Match the same filter used by /notifications so the badge and the
+    # visible list stay in sync (otherwise the bell shows "3" but only
+    # 1 notification renders).
+    try:
+        blocked = await _blocked_ids_for(user['user_id'])
+    except Exception:
+        blocked = set()
+    q: dict = {'user_id': user['user_id'], 'read': False}
+    if blocked:
+        q['$or'] = [{'actor_id': {'$exists': False}}, {'actor_id': {'$nin': list(blocked)}}]
+    n = await db.notifications.count_documents(q)
     return {'count': n}
 
 

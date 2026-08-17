@@ -4,7 +4,7 @@ import uuid
 import pytest
 import requests
 
-BASE_URL = "https://voti-scroll-fix.preview.emergentagent.com"
+BASE_URL = "https://vote-ui-polish.preview.emergentagent.com"
 ADMIN_KEY = "populus-admin-42b8f3"
 
 

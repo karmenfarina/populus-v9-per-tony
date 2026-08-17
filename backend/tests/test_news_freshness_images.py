@@ -10,7 +10,7 @@ from datetime import datetime, timezone, timedelta
 import pytest
 import requests
 
-BASE_URL = os.environ.get('EXPO_PUBLIC_BACKEND_URL', 'https://voti-scroll-fix.preview.emergentagent.com').rstrip('/')
+BASE_URL = os.environ.get('EXPO_PUBLIC_BACKEND_URL', 'https://vote-ui-polish.preview.emergentagent.com').rstrip('/')
 API = f"{BASE_URL}/api"
 
 CATEGORIES = ['politica', 'tv', 'musica', 'sport', 'cinema', 'social', 'gossip']

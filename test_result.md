@@ -379,3 +379,32 @@ agent_communication:
           /original returns it; legacy photos fall back to `data`.
         - Frontend: verify recrop button opens cropper with original source, user can zoom back
           out below previous save, and slider drag has no initial jump.
+
+
+  - agent: "main"
+    message: |
+      Iteration 115 — three-bug fix pass:
+      1) HYPE endpoint (`/api/feuds/hype`, server.py ~L1740-L1830): rewrote comment/reply
+         aggregation to count ONLY VISIBLE items (author's current vote must match the side
+         the comment/reply was posted on). Requires BOTH `total_votes >= 1` AND
+         `visible_comments >= 1` — no exceptions. Kills the "post shows up with 0 visible
+         comments because commenters all switched sides" leak.
+      2) Notifications bi-directional block filter: `_emit_notification` now takes `actor_id`
+         and refuses to persist events when actor and recipient are in a block pair.
+         `GET /api/notifications` and `/notifications/unread-count` also filter existing
+         entries via `actor_id NIN <blocklist>`. Mention/reply callers pass `actor_id`.
+      3) Logout crash: multi-layer fix.
+         - `(tabs)/_layout.tsx`: new redirect effect — when `user` becomes null (and auth
+           has finished loading), immediately paint a black view + `router.replace("/auth")`.
+           Prevents child tab routes (profile.tsx, feud/[id], messages) from ever rendering
+           with a stale user reference during the logout transition.
+         - `profile.tsx.loadPhotos` + `loadHistory`: added try/catch so a rejected API call
+           after the token has been cleared never bubbles up as a red-screen "Missing bearer
+           token" uncaught error.
+         - Simplified `doLogout`: no more setTimeout/router.replace race. Just clears the
+           token/context, and the tabs layout handles the redirect atomically.
+      Testing:
+        - Backend regression `test_iter115_bugfixes.py` — 6/6 pass; iter113/114 suites still
+          green (9/9). See test agent report iteration_115.json.
+        - Frontend logout verified manually via impersonation token: profile → ESCI →
+          `/auth` with zero page errors, zero red screens.

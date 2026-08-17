@@ -12,7 +12,7 @@ import requests
 
 BASE_URL = os.environ.get(
     "EXPO_BACKEND_URL",
-    "https://voti-scroll-fix.preview.emergentagent.com",
+    "https://vote-ui-polish.preview.emergentagent.com",
 ).rstrip("/")
 API = f"{BASE_URL}/api"
 

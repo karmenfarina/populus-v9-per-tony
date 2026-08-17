@@ -15,7 +15,7 @@ import time
 import pytest
 import requests
 
-BASE_URL = os.environ.get("EXPO_PUBLIC_BACKEND_URL", "https://voti-scroll-fix.preview.emergentagent.com").rstrip("/")
+BASE_URL = os.environ.get("EXPO_PUBLIC_BACKEND_URL", "https://vote-ui-polish.preview.emergentagent.com").rstrip("/")
 ADMIN_KEY = "populus-admin-42b8f3"
 ADMIN_HEADERS = {"X-Admin-Key": ADMIN_KEY}
 

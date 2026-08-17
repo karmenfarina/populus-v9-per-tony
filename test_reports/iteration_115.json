@@ -1,0 +1,38 @@
+{
+  "summary": "Iteration 115 backend regression — 3 bug fixes validated end-to-end via a new pytest suite (test_iter115_bugfixes.py, 6 tests, 100% pass) plus a re-run of the iter113 + iter114 suites (9/9 pass). No regressions detected. Bug #1 (bi-directional block on comments/replies), Bug #2 (HYPE endpoint only surfaces feuds with total_votes>=1 AND at least one VISIBLE comment/reply, with vote-flip correctly decrementing the visible count), and Bug #3 (bi-directional block filter on /notifications and /notifications/unread-count) are all working as specified. Frontend logout crash (Bug #3 UI side) NOT tested per review request — needs manual visual verification in Expo Go.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter115_bugfixes.py",
+    "/app/test_reports/pytest/iter115.xml"
+  ],
+  "action_items": [
+    "Manual verification of the logout crash fix in Expo Go is still needed (route-guard redirect in (tabs)/_layout.tsx paints a black view when user flips to null). Cannot be automated via backend tests.",
+    "Minor cleanup (non-blocking): test_iter113_reply_count_block_filter.py and test_iter114_hype_block_filter.py both read os.environ[\"EXPO_BACKEND_URL\"] directly at import time — the var is only injected via /app/frontend/.env, which pytest doesn't auto-load. They collect-fail unless env is exported manually. Consider adding `from dotenv import load_dotenv; load_dotenv('/app/frontend/.env')` at the top like iter115 does (pre-existing issue, not caused by this iteration)."
+  ],
+  "critical_code_review_comments": [
+    "server.py:1708-1869 (list_hype_feuds): the visible-count aggregation now loads raw comment/reply docs into memory (up to 20k + 30k) and cross-references the votes collection per-feud. For the current data volume this is fine, but past ~50k comments in the 7-day window this becomes a hot spot. Consider a single $lookup aggregation pipeline (comments → votes) that filters in-DB.",
+    "server.py:3362-3410 (_emit_notification): the bi-directional block check runs BEFORE the insert (good). But it silently swallows exceptions from _is_blocked_pair (`except Exception: pass`) — if the block lookup ever throws, notifications from blocked users would leak. Consider logging the exception for observability.",
+    "server.py:3665-3708 (/notifications & unread-count): the two endpoints re-compute the block list independently. Fine for correctness, but a tiny helper `_notif_query_for(user_id)` would DRY the logic and prevent them from drifting."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter115_bugfixes.py (new)"
+  ],
+  "success_rate": {
+    "backend": "100% (6/6 iter115 tests, plus 9/9 iter113+114 regression re-runs)",
+    "frontend": "N/A (backend-only per review request)"
+  },
+  "seed_data_creation": "Each hype test seeds a throwaway feud (feud_iter115_*) directly in Mongo (there is no user-facing feud-creation endpoint) and tears it down in a finally block. Comment tests reuse the shared feud_7c6d16e4baee and clean up their own comments/replies/notifications by comment_id. Test users chat_a@test.it / chat_b@test.it are used as-is (from /app/memory/test_credentials.md).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "The three bug fixes are backend-verified and stable. Suite test_iter115_bugfixes.py is idempotent — reset fixture unblocks A↔B before and after the module runs, each test cleans up its own seeded data. Uses load_dotenv() so runs cleanly without env exports. To re-run: `pytest /app/backend/tests/test_iter115_bugfixes.py -v`. The frontend logout fix ((tabs)/_layout.tsx safety-net + profile.tsx doLogout simplification) still needs manual QA in Expo Go — a Playwright web-preview test would not exercise the RN-native navigation stack that used to crash.",
+  "rca_of_issue": "N/A — this iteration validated bug fixes shipped by the main agent. All three fixes work correctly: (1) get_comments and list_replies apply bi-directional block filter (A blocks B → B disappears from A's view AND A disappears from B's view). (2) list_hype_feuds now requires BOTH `total_votes >= 1` AND at least one VISIBLE comment/reply (author's current vote matches the side the item was posted on) — verified via three scenarios: zero-vote comment-only feud is hidden; adding a vote surfaces it; flipping the vote hides it again. (3) _emit_notification skips persistence for blocked actor↔recipient pairs and /notifications + /notifications/unread-count apply the same actor_id block filter — verified by having B mention @chat_a while blocked (no notif returned) then unblocking and mentioning again (notif returned)."
+}

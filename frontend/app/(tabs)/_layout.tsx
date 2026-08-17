@@ -1,4 +1,4 @@
-import { Tabs, usePathname } from "expo-router";
+import { Tabs, usePathname, useRouter } from "expo-router";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { View, Text, StyleSheet } from "react-native";
@@ -73,13 +73,27 @@ export default function TabsLayout() {
   const insets = useSafeAreaInsets();
   const bottomPad = Math.max(insets.bottom, 12);
   const pathname = usePathname();
-  const { user } = useAuth();
+  const router = useRouter();
+  const { user, loading: authLoading } = useAuth();
   // The "Cerca amici" (find friends) tab is intentionally gated to
   // NON-anonymous accounts. Anonymous users can't be discovered nor
   // discover others via the search endpoint (backend enforces this),
   // so exposing the tab would be dead UI. Hiding it here keeps the
   // tab bar consistent with the actual capabilities of the account.
   const isAnon = user?.is_anonymous === true || user?.auth_provider === 'anonymous';
+
+  // Logout safety net — if the auth context flips to `user === null`
+  // (e.g. token expired, /auth/me returned 401, or user tapped ESCI)
+  // and we're still mounted inside the (tabs) group, redirect to /auth
+  // immediately. Without this any tab screen still holding a reference
+  // to `user.foo` (profile.tsx, messages, feud/[id]) can throw a
+  // red-screen during the transition. The `authLoading` check keeps
+  // us from bouncing to /auth during a cold-start refreshMe() call.
+  useEffect(() => {
+    if (!authLoading && !user) {
+      try { router.replace("/auth"); } catch { /* noop */ }
+    }
+  }, [user, authLoading, router]);
 
   // Whenever navigation lands on a top-level tab root, wipe the manual
   // back-stack. Without this, stale entries from a previous detail-
@@ -91,6 +105,14 @@ export default function TabsLayout() {
       navStack.clear();
     }
   }, [pathname]);
+
+  // Once logout has cleared the user, don't paint the tabs shell at all
+  // — otherwise the child screens keep rendering and racing against
+  // navigation. A blank black view matches the app's dark background
+  // and is invisible during the fade to /auth.
+  if (!authLoading && !user) {
+    return <View style={{ flex: 1, backgroundColor: "#000000" }} />;
+  }
 
   return (
     <Tabs
