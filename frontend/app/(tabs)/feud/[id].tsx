@@ -24,6 +24,7 @@ import { useNotifications } from "@/src/notifications/NotificationsContext";
 import AdBanner from "@/src/ads/AdBanner";
 import { useUIPrefs } from "@/src/ui/UIPrefs";
 import { useAuth } from "@/src/auth/AuthContext";
+import { blockEvents } from "@/src/utils/blockEvents";
 
 export default function FeudDetail() {
   const { id, comment: commentParam, side: sideParam, from, archiveCat, archiveDate, messagesUserId } =
@@ -242,6 +243,35 @@ export default function FeudDetail() {
       return () => clearTimeout(t);
     }, [id, ownerUid]),
   );
+
+  // Global block/unblock listener — refetch comments + expanded replies
+  // the instant the block list changes anywhere in the app (e.g. user
+  // blocked someone from a chat message screen, or unblocked from the
+  // Profile settings). Without this, staying on the feud detail while
+  // the block happened would leave the stale comments visible.
+  useEffect(() => {
+    return blockEvents.subscribe(() => {
+      if (!id) return;
+      (async () => {
+        try {
+          const c = await api.comments(id, ownerUid);
+          setSideA(c.side_a);
+          setSideB(c.side_b);
+        } catch { /* silent */ }
+      })();
+      setExpanded((prev) => {
+        const openIds = Object.keys(prev);
+        openIds.forEach((cid) => {
+          api.replies(cid)
+            .then((r) => {
+              setExpanded((cur) => (cid in cur ? { ...cur, [cid]: r.replies } : cur));
+            })
+            .catch(() => { /* silent */ });
+        });
+        return prev;
+      });
+    });
+  }, [id, ownerUid]);
 
   // Deep-link from a notification: if a `comment` param is present, activate
   // the correct side tab and auto-expand that comment's reply thread so the

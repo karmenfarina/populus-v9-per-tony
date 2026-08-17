@@ -242,8 +242,22 @@ class TestHypeVisibleCountsFilter:
             _vote(sess, tok, "A", fid, "A")
             # Also add B's vote to be sure votes_a increments in feud doc
             _vote(sess, tok, "B", fid, "B")
+            # Still hidden: iter116 raised threshold to ≥2 visible comments.
+            assert fid not in _hype_ids(sess, tok["A"]), (
+                "iter116: 2 votes + 1 comment should still be below HYPE threshold."
+            )
+            # Add a second comment (from B) so we reach 2 visible comments.
+            cid2 = f"cmt_iter115_{uuid.uuid4().hex[:10]}"
+            mdb.comments.insert_one({
+                "comment_id": cid2,
+                "feud_id": fid,
+                "user_id": B_ID,
+                "text": "iter115 second",
+                "side": "B",
+                "created_at": datetime.now(timezone.utc),
+            })
             assert fid in _hype_ids(sess, tok["A"]), (
-                "HYPE excluded a feud that now has vote+visible comment."
+                "HYPE excluded a feud that now has ≥2 votes AND ≥2 visible comments."
             )
         finally:
             _cleanup_feud(mdb, fid)
@@ -258,24 +272,28 @@ class TestHypeVisibleCountsFilter:
             # A votes A and comments → visible comment
             _vote(sess, tok, "A", fid, "A")
             r = sess.post(f"{API}/feuds/{fid}/comments",
-                          json={"text": f"iter115-flip {uuid.uuid4().hex[:6]}"},
+                          json={"text": f"iter115-flip-a {uuid.uuid4().hex[:6]}"},
                           headers=_h(tok["A"]), timeout=15)
             assert r.status_code == 200, r.text
-            # Also let B vote so total_votes >= 2 (satisfy votes>=1 requirement
-            # even after A flips; we want to isolate the visibility rule).
+            # B votes B and comments so we hit the ≥2 comments threshold
+            # required post-iter116 for HYPE inclusion.
             _vote(sess, tok, "B", fid, "B")
+            r = sess.post(f"{API}/feuds/{fid}/comments",
+                          json={"text": f"iter115-flip-b {uuid.uuid4().hex[:6]}"},
+                          headers=_h(tok["B"]), timeout=15)
+            assert r.status_code == 200, r.text
 
-            # Baseline: appears in HYPE (has votes + visible comment)
+            # Baseline: appears in HYPE (2 votes + 2 visible comments)
             assert fid in _hype_ids(sess, tok["A"]), (
                 "Baseline: seeded feud must appear in HYPE before flip."
             )
 
-            # A flips to side B → their comment (side A) is no longer visible
+            # A flips to side B → their comment (side A) is no longer visible.
+            # B's comment is still visible, so visible_comments drops from
+            # 2 to 1 → below iter116 threshold → feud drops from HYPE.
             _vote(sess, tok, "A", fid, "B")
             time.sleep(0.5)
 
-            # Assert: comment is no longer counted. Since B did not
-            # comment, visible_comments becomes 0 → feud must drop out.
             assert fid not in _hype_ids(sess, tok["A"]), (
                 "BUG: after A flips vote, their comment on the old side "
                 "must not be counted → feud should drop from HYPE."

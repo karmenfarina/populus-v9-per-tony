@@ -1825,12 +1825,13 @@ async def list_hype_feuds(user: Optional[dict] = Depends(get_current_user_option
         cc = comment_counts.get(d['feud_id'], 0)
         rc = reply_counts.get(d['feud_id'], 0)
         # HYPE must feel actually HOT: only surface posts that show a
-        # meaningful debate. We require BOTH at least one real vote AND
-        # at least one VISIBLE comment/reply — no exceptions. Empty
-        # (0 visible comments) or vote-less posts are excluded even if
-        # the rail ends up empty as a result. Per user spec: "se non ve
-        # ne sono di più frequentate, evita quelle vuote".
-        if cc < 1 or votes < 1:
+        # meaningful debate. We require at least 2 real votes AND at
+        # least 2 VISIBLE comments — a single vote / single comment is
+        # too weak a signal to feel "trending". Empty (0 visible comm.)
+        # or under-voted posts are excluded even if the rail ends up
+        # empty as a result. Per user spec: "se non ve ne sono di più
+        # frequentate, evita quelle vuote".
+        if cc < 2 or votes < 2:
             continue
         score = votes + 2 * cc + rc
         d['_hype_score'] = score
@@ -2772,10 +2773,22 @@ async def get_comments(
     # blocked pair never shares a comment thread. Computed once and
     # reused below for the reply_count filter.
     viewer_blocked: set[str] = set()
+    viewer_blocked_nicks: set[str] = set()
     if docs and user:
         viewer_blocked = await _blocked_ids_for(user['user_id'])
         if viewer_blocked:
+            viewer_blocked_nicks = await _blocked_nicknames_for(viewer_blocked)
             docs = [c for c in docs if c.get('user_id') not in viewer_blocked]
+            # ALSO scrub any @mention of a blocked user from the surviving
+            # comments so the viewer never sees the nickname/link of
+            # someone they've blocked — even inside another user's text.
+            # Replaces `@blockednick` with `[utente bloccato]` and drops
+            # the mention from the resolved list so the frontend renders
+            # it as plain grey text (no accent color, no navigation).
+            for c in docs:
+                c['text'], c['mentions'] = _scrub_blocked_mentions(
+                    c.get('text', ''), c.get('mentions') or [], viewer_blocked, viewer_blocked_nicks,
+                )
     # Visibility rule: a comment is shown only if its author is CURRENTLY voting
     # for the same side the comment was posted on. Comments where the author has
     # since switched sides are hidden — they reappear if the author switches
@@ -3251,7 +3264,15 @@ async def list_replies(comment_id: str, user: Optional[dict] = Depends(get_curre
     if docs and user:
         blocked = await _blocked_ids_for(user['user_id'])
         if blocked:
+            blocked_nicks = await _blocked_nicknames_for(blocked)
             docs = [r for r in docs if r.get('user_id') not in blocked]
+            # Scrub @mentions of blocked users from the surviving text
+            # so the viewer never sees the blocked handle even inside
+            # another user's reply.
+            for r in docs:
+                r['text'], r['mentions'] = _scrub_blocked_mentions(
+                    r.get('text', ''), r.get('mentions') or [], blocked, blocked_nicks,
+                )
     if docs:
         # Same visibility rule as comments: a reply is shown only if its author
         # is currently voting on the side the reply was posted on.
@@ -5266,6 +5287,71 @@ async def _is_blocked_pair(a: str, b: str) -> bool:
         ],
     })
     return n > 0
+
+
+def _scrub_blocked_mentions(text: str, mentions: list[dict], blocked_ids: set[str], blocked_nicks: Optional[set[str]] = None) -> tuple[str, list[dict]]:
+    """Scrub any @mention of a blocked user from a comment/reply payload.
+
+    - Drops entries from the `mentions` array whose `user_id` is in
+      `blocked_ids` so the frontend can't turn them into a tappable link.
+    - Replaces the raw `@nickname` token (case-insensitive) in `text`
+      with a neutral placeholder `[utente bloccato]` so the blocked
+      user's handle is never even printed to the viewer.
+    - If `blocked_nicks` is provided (set of nicknames of blocked users),
+      ALSO scrubs raw `@nickname` occurrences in the text even when the
+      comment's `mentions` array is empty (legacy comments predating
+      the mentions field, or mentions that failed server-side
+      resolution). Belt-and-suspenders against text-only leaks.
+
+    Returns `(new_text, new_mentions)`. Safe to call with empty inputs.
+    """
+    if not blocked_ids and not blocked_nicks:
+        return text, mentions
+    resolved_blocked_nicks: list[str] = []
+    kept: list[dict] = []
+    for m in (mentions or []):
+        if not isinstance(m, dict):
+            kept.append(m)
+            continue
+        if m.get('user_id') in blocked_ids and m.get('nickname'):
+            resolved_blocked_nicks.append(m['nickname'])
+        else:
+            kept.append(m)
+    # Union with any additional blocked nicks provided by caller
+    # (covers the legacy/no-resolved-mention edge case).
+    all_scrub_nicks = set(resolved_blocked_nicks)
+    if blocked_nicks:
+        all_scrub_nicks |= blocked_nicks
+    if not all_scrub_nicks:
+        return text, kept if resolved_blocked_nicks else mentions
+    new_text = text or ''
+    for nick in all_scrub_nicks:
+        # Match `@nick` at word boundary, case-insensitive, allow the
+        # exact chars that make up an Instagram-style handle (letters,
+        # digits, dot, underscore). Prevents partial-match false hits.
+        pattern = _re.compile(r'(?<![A-Za-z0-9._])@' + _re.escape(nick) + r'(?![A-Za-z0-9._])', _re.IGNORECASE)
+        new_text = pattern.sub('[utente bloccato]', new_text)
+    return new_text, kept
+
+
+async def _blocked_nicknames_for(blocked_ids: set[str]) -> set[str]:
+    """Batch-lookup nicknames for a set of user_ids. Returns lowercased-
+    stripped-of-@ nicknames so text scanning can be case-insensitive.
+    Empty input → empty output. Failure → empty output (never raises)."""
+    if not blocked_ids:
+        return set()
+    out: set[str] = set()
+    try:
+        async for u in db.users.find(
+            {'user_id': {'$in': list(blocked_ids)}},
+            {'_id': 0, 'nickname': 1},
+        ):
+            nick = (u.get('nickname') or '').strip()
+            if nick:
+                out.add(nick)
+    except Exception as e:
+        logger.warning(f"_blocked_nicknames_for failed: {e}")
+    return out
 
 
 async def _blocked_ids_for(uid: str) -> set[str]:

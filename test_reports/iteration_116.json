@@ -1,0 +1,42 @@
+{
+  "summary": "Iter 116 backend hardening validated end-to-end via a new pytest suite (test_iter116_bugfixes.py, 5 tests, 100% pass). All three behaviours work as specified: (1) HYPE now requires BOTH total_votes>=2 AND >=2 visible comments+replies — step-by-step scenario (1v+1c → hidden, 2v+1c → hidden, 2v+2c → visible) confirmed, and the global invariant holds across all currently-returned feuds. (2) @mention scrubbing on /feuds/{fid}/comments works: A blocks B, then fetches — the raw `@chatUserB` handle in A's own comment is replaced with `[utente bloccato]` and B is dropped from the mentions array; unblock restores both. (3) Same scrubbing works on /comments/{cid}/replies. Regression: bi-directional block still hides authored comments entirely from both viewpoints. The iter115 suite was re-run: 4/6 pass; the 2 hype tests that fail (`test_fresh_feud_with_comment_but_no_vote_is_hidden`, `test_vote_flip_hides_comment_from_hype`) are EXPECTED failures — they were written against the old >=1 threshold and now surface a fresh feud with only 1 comment, which iter116 correctly excludes. NOT a real regression; main agent should update those two tests to add a 2nd comment before asserting HYPE inclusion.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/feuds/hype", "issue": "iter115 hype tests need adjustment: `test_fresh_feud_with_comment_but_no_vote_is_hidden` (expects 1c+2v visible) and `test_vote_flip_hides_comment_from_hype` (baseline expects 1c+2v visible) still assume the old >=1 threshold. Under iter116's >=2/>=2 rule they correctly stay hidden; the tests must add a 2nd visible comment before asserting inclusion. This is a test-fixture drift, not a product bug."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter116_bugfixes.py",
+    "/app/test_reports/pytest/iter116.xml",
+    "/app/test_reports/pytest/iter115_rerun.xml"
+  ],
+  "action_items": [
+    "Update test_iter115_bugfixes.py two hype tests to add a 2nd visible comment before asserting HYPE inclusion (they were written when the threshold was >=1/>=1; now it is >=2/>=2). Non-blocking — the underlying feature works correctly under the new stricter rule.",
+    "Optional: consider hoisting the `_scrub_blocked_mentions` call inside the visibility loop in `get_comments` so it doesn't re-iterate over `docs` twice — micro-optimisation only."
+  ],
+  "critical_code_review_comments": [
+    "server.py:5289-5323 (_scrub_blocked_mentions): early-return path `if not mentions: return text, mentions` means that if a comment's mentions array is empty BUT its text still contains a raw `@blockednick` token (e.g. a legacy comment stored before mention resolution existed, or a comment whose mention was already filtered at write time because the author had blocked the mentioned user), the scrub is skipped and the raw `@handle` leaks through. Real-world impact is low because current code always resolves+persists mentions when a comment is posted, but this asymmetry (mentions filtered on write vs. runtime scrub) is worth documenting. Consider also scanning the text for any raw `@` token whose lowercase form matches a nickname in `blocked_ids` — belt-and-suspenders.",
+    "server.py:5321 regex `(?<![A-Za-z0-9._])@nick(?![A-Za-z0-9._])`: correctly handles trailing punctuation and boundaries. Note that unicode nicknames (if ever allowed) would slip through the ASCII lookaround. Not an issue today since nicknames are lowercase ASCII, but flag it.",
+    "server.py:1834 `if cc < 2 or votes < 2: continue`: threshold is now hardcoded. Suggest promoting to module-level constants HYPE_MIN_COMMENTS=2, HYPE_MIN_VOTES=2 so future tuning doesn't require line-number surgery.",
+    "server.py:2801 visibility filter uses `current.get(c['user_id'], c['side']) == c['side']` — same rule reused in list_hype_feuds and list_replies. That helper duplication (3 places) is ripe for extraction into a `_visible_by_current_vote(item, current_votes)` helper."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter116_bugfixes.py (new)"
+  ],
+  "success_rate": {
+    "backend": "100% for iter116 (5/5). Iter115 re-run: 4/6 pass; 2 failures are expected due to threshold change, not real regressions.",
+    "frontend": "N/A (backend-only per review request)"
+  },
+  "seed_data_creation": "Each hype test seeds one throwaway feud (feud_iter116_*) directly in Mongo (there is no user-facing feud-creation endpoint) and tears it down in a finally block. Comment/reply scrub tests reuse the shared feud_7c6d16e4baee and clean up their own comments/replies by comment_id/reply_id. Uses the pre-seeded users chat_a@test.it / chat_b@test.it. Autouse `_reset` fixture unblocks A↔B before and after the module runs.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Re-run: `pytest /app/backend/tests/test_iter116_bugfixes.py -v`. Suite is idempotent. When testing HYPE, remember the new threshold is >=2 votes AND >=2 visible comments/replies (server.py:1834). Mention scrubbing lives in _scrub_blocked_mentions (server.py:5289-5323); it only fires when the mentions array contains a blocked user_id — so a comment whose mentions array is empty but whose text still contains a raw @handle would slip through (see critical_code_review_comments). To exercise the scrub end-to-end via the API: post the comment BEFORE blocking (so `_resolve_mentions` runs while the pair is unblocked and persists B's id in mentions), then block, then fetch.",
+  "rca_of_issue": "N/A — this was a verification pass over three tightening changes shipped in iter116, all of which behave correctly. The user's original complaint (still seeing blocked users' `@nickname` renders as tappable links + HYPE surfacing feuds with 0 votes/comments) is fully addressed: (a) HYPE threshold raised to >=2/>=2 so under-engaged feuds are excluded, (b) surviving comments/replies have both their text (`@nick` → `[utente bloccato]`) and their mentions array server-side scrubbed of any blocked-user reference before returning to the viewer."
+}

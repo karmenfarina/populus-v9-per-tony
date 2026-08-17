@@ -206,6 +206,10 @@ export default function UserPublicScreen() {
       try {
         await api.unblockUser(id);
         setIsBlocked(false);
+        try {
+          const { blockEvents } = await import("@/src/utils/blockEvents");
+          blockEvents.emit();
+        } catch { /* noop */ }
       } catch (e: any) {
         Alert.alert("Errore", e?.detail || "Impossibile sbloccare");
       }
@@ -224,6 +228,12 @@ export default function UserPublicScreen() {
       await api.blockUser(id);
       setIsBlocked(true);
       setBlockConfirmOpen(false);
+      // Fan-out refresh so any mounted screen (feud detail, notifications,
+      // profile) refetches its data with the fresh block list applied.
+      try {
+        const { blockEvents } = await import("@/src/utils/blockEvents");
+        blockEvents.emit();
+      } catch { /* noop */ }
     } catch (e: any) {
       Alert.alert("Errore", e?.detail || "Impossibile bloccare");
     } finally {
