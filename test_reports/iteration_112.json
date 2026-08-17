@@ -1,0 +1,33 @@
+{
+  "summary": "Re-verified 4 tests from iter 111 after fix to /app/frontend/app/(tabs)/user/[id].tsx useEffect (early-return on me===null, setError(null) before ghost branch) and addition of testID='menu-block' to full-profile menu row. RESULTS: (1) Ghost view on already-blocked profile — PASS: navigating chat_a → /user/user_16f709708760 with block established renders testID `public-blocked`, 'UTENTE BLOCCATO' title, ban icon, @chatUserB nickname, and red 'SBLOCCA' button (testID `unblock-btn`). No photos/badges/history/circle elements present. (2) Unblock from ghost view — PASS: tapping unblock-btn calls DELETE /api/users/user_16f709708760/block (backend returns empty blocked_users), ghost view exits, full public profile mounts showing @chatUserB card with MESSAGGIO / AGGIUNGI actions. (3) Menu block from full profile — PASS: user-menu opens, `menu-block` testID is now present in full-profile menu (label 'Blocca utente'), tapping opens the BLOCCA confirmation modal with `block-confirm-yes`, confirming triggers block and transitions to ghost view end-to-end. (4) Reply-draft regression — PASS: on feud_198672d881cc side B with 2 comments (cmt_e6c95638b7be by chat_a and cmt_318cede6df83 by chatUserB), typing 'test draft A' in reply-input for A then switching to B shows empty B input, and reopening A also shows empty input. Feud page refetch-on-focus was implicitly exercised (comments loaded correctly on tab-b activation). All iter 111 blockers resolved.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/test_reports/iter112_ghost.png",
+    "/app/test_reports/iter112_after_unblock.png",
+    "/app/test_reports/iter112_menu_open.png",
+    "/app/test_reports/iter112_confirm.png",
+    "/app/test_reports/iter112_after_block.png",
+    "/app/test_reports/iter112_side_b.png"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Fix verified: [id].tsx:92 `if (me === null) return;` prevents the me-null race; the effect re-runs when me updates and the block-guard now fires before publicUser(). The setError(null) at line 93 also correctly clears any residual error before the next attempt.",
+    "menu-block testID at [id].tsx:840 is now consistent across ghost view and full-profile menu — automated block/unblock tests can now target either view uniformly."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "n/a (frontend-only)",
+    "frontend": "100% (4 of 4 tests pass)"
+  },
+  "seed_data_creation": "No new seed. Reused feud_198672d881cc with comments cmt_e6c95638b7be (chat_a) and cmt_318cede6df83 (chatUserB) on side B. Block state cycled via API: DELETE → POST before test; final DELETE at end of test 3 to leave state clean (blocked_users empty).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "chat_a token stored at /app/chat_a_token.txt (163 chars). To auth in web preview, set localStorage['faide_token'] = JSON.stringify(token) — storage.secureGet parses via JSON.parse so raw token fails. Ghost view: /user/user_16f709708760 with block established. Reply-draft test: /feud/feud_198672d881cc → click comments-tab-b → 2 reply-btn-* testIDs available.",
+  "rca_of_issue": "n/a — original iter 111 RCA (me-null race causing 403→setError→ghost never mounts) is fully resolved by the two-line fix (early return + setError(null))."
+}

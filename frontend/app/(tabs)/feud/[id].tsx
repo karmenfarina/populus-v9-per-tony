@@ -4,7 +4,7 @@ import {
   KeyboardAvoidingView, Platform, ImageBackground, Linking, Alert, BackHandler,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
@@ -200,6 +200,27 @@ export default function FeudDetail() {
     if (id) { api.recordView(id); }
   }, [loadAll, id]);
 
+  // Refresh comments whenever the screen re-focuses (e.g. user tapped a
+  // commenter's avatar → went to their profile → blocked them → came
+  // back). Without this, the comment list would still show the blocked
+  // user's messages because they were fetched BEFORE the block.
+  // We only refetch comments (not the feud + sponsor) to keep the
+  // return trip snappy — the feud itself doesn't need to reload.
+  useFocusEffect(
+    useCallback(() => {
+      // Skip on the very first focus (the mount-time effect above
+      // already did the initial fetch — running a second fetch would
+      // be wasteful).
+      if (!id) return;
+      const t = setTimeout(() => {
+        api.comments(id, ownerUid)
+          .then((c) => { setSideA(c.side_a); setSideB(c.side_b); })
+          .catch(() => { /* silent — the mount fetch handles hard errors */ });
+      }, 50);
+      return () => clearTimeout(t);
+    }, [id, ownerUid]),
+  );
+
   // Deep-link from a notification: if a `comment` param is present, activate
   // the correct side tab and auto-expand that comment's reply thread so the
   // user sees the reply without any extra taps.
@@ -293,6 +314,19 @@ export default function FeudDetail() {
     }
     const r = await api.replies(commentId);
     setExpanded((prev) => ({ ...prev, [commentId]: r.replies }));
+  };
+
+  /**
+   * Idempotent "expand" — used by the "rispondi" tap so the user can
+   * see existing replies while composing their own. If the thread is
+   * already expanded this is a silent no-op (no extra network call).
+   */
+  const expandReplies = async (commentId: string) => {
+    if (expanded[commentId]) return;
+    try {
+      const r = await api.replies(commentId);
+      setExpanded((prev) => ({ ...prev, [commentId]: r.replies }));
+    } catch { /* silent — the toggle button still works as a fallback */ }
   };
 
   const submitReply = async (commentId: string) => {
@@ -752,6 +786,7 @@ export default function FeudDetail() {
                     meId={user?.user_id || null}
                     expanded={expanded[c.comment_id]}
                     onToggle={() => toggleReplies(c.comment_id)}
+                    onExpand={() => expandReplies(c.comment_id)}
                     replyingTo={replyingTo}
                     setReplyingTo={setReplyingTo}
                     replyText={replyText}
@@ -810,10 +845,14 @@ export default function FeudDetail() {
 }
 
 function CommentItem({
-  c, meId, expanded, onToggle, replyingTo, setReplyingTo, replyText, setReplyText,
+  c, meId, expanded, onToggle, onExpand, replyingTo, setReplyingTo, replyText, setReplyText,
   onSubmitReply, canReply, onDeleteComment, onDeleteReply,
 }: {
   c: Comment; meId: string | null; expanded?: Reply[]; onToggle: () => void;
+  /** Forces the reply thread OPEN (idempotent — no-op if already expanded).
+   * Used when the user taps "rispondi" so they can see the conversation
+   * history before composing their reply. */
+  onExpand: () => void;
   replyingTo: string | null; setReplyingTo: (v: string | null) => void;
   replyText: string; setReplyText: (v: string) => void;
   onSubmitReply: () => void; canReply: boolean;
@@ -884,7 +923,34 @@ function CommentItem({
             </Text>
           </Pressable>
           {canReply && (
-            <Pressable onPress={() => setReplyingTo(isReplying ? null : c.comment_id)} testID={`reply-btn-${c.comment_id}`} hitSlop={6}>
+            <Pressable
+              onPress={() => {
+                // Toggling: closing the currently-open reply box —
+                // discard any unsent draft so opening again starts
+                // clean, AND when switching from one comment to
+                // another the draft never carries over (user-reported
+                // bug: writing a reply to A then tapping "rispondi"
+                // on B leaked the A-draft into B's input).
+                if (isReplying) {
+                  setReplyingTo(null);
+                  setReplyText("");
+                } else {
+                  setReplyingTo(c.comment_id);
+                  setReplyText("");
+                  // Auto-expand the existing reply thread so the user
+                  // can see the conversation history BEFORE composing
+                  // their own reply. Previously, replies stayed
+                  // collapsed until the user tapped "N risposte" or
+                  // submitted their own — the user reported that as
+                  // "I only see other replies after I've replied".
+                  if (!expanded && (c.reply_count ?? 0) > 0) {
+                    onExpand();
+                  }
+                }
+              }}
+              testID={`reply-btn-${c.comment_id}`}
+              hitSlop={6}
+            >
               <Text style={[cs.actionTxt, { color: accent }]}>{isReplying ? "annulla" : "rispondi"}</Text>
             </Pressable>
           )}

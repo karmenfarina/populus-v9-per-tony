@@ -2703,11 +2703,13 @@ async def get_comments(
     docs = await db.comments.find({'feud_id': feud_id}, {'_id': 0}).sort('created_at', -1).to_list(500)
     # Bi-directional block filter: hide comments authored by users who
     # have blocked the viewer (or vice versa). Public-facing rule so a
-    # blocked pair never shares a comment thread.
+    # blocked pair never shares a comment thread. Computed once and
+    # reused below for the reply_count filter.
+    viewer_blocked: set[str] = set()
     if docs and user:
-        blocked = await _blocked_ids_for(user['user_id'])
-        if blocked:
-            docs = [c for c in docs if c.get('user_id') not in blocked]
+        viewer_blocked = await _blocked_ids_for(user['user_id'])
+        if viewer_blocked:
+            docs = [c for c in docs if c.get('user_id') not in viewer_blocked]
     # Visibility rule: a comment is shown only if its author is CURRENTLY voting
     # for the same side the comment was posted on. Comments where the author has
     # since switched sides are hidden — they reappear if the author switches
@@ -2722,11 +2724,20 @@ async def get_comments(
         docs = [c for c in docs if current.get(c['user_id'], c['side']) == c['side']]
         if docs:
             # Batch-count only *visible* replies (author's current vote matches).
+            # Also skip replies from users in a bi-directional block with
+            # the viewer — so a blocked user's replies never contribute to
+            # the "N risposte" counter (which would otherwise display an
+            # inflated number and confuse the UX: user taps "3 risposte"
+            # and only sees 1 because list_replies filters the rest).
             cmt_ids = [c['comment_id'] for c in docs]
             all_replies = await db.replies.find(
                 {'comment_id': {'$in': cmt_ids}},
                 {'_id': 0, 'comment_id': 1, 'user_id': 1, 'side': 1},
             ).to_list(10000)
+            # Reuse the `viewer_blocked` set computed at the top of
+            # `get_comments` — no need to hit `user_blocks` twice.
+            if viewer_blocked:
+                all_replies = [r for r in all_replies if r.get('user_id') not in viewer_blocked]
             extra_uids = list({r['user_id'] for r in all_replies} - set(current.keys()))
             if extra_uids:
                 extra = await db.votes.find(

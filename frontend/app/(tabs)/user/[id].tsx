@@ -85,29 +85,70 @@ export default function UserPublicScreen() {
 
   useEffect(() => {
     if (!id) return;
+    // Wait until `me` (own auth session) is loaded — otherwise we would
+    // fall through to `api.publicUser()` before knowing whether the
+    // target is on our blocklist, and a 403 (blocked pair) would set
+    // `error` permanently, hiding the ghost view.
+    if (me === null) return;
+    setError(null);
     (async () => {
       try {
+        // Fetch my own blocklist FIRST so a 403 from the backend
+        // is disambiguated correctly (self-blocked vs blocked-by-them).
+        // If we're the blocker, we can render our own ghost view with
+        // the target's nickname (already known via mentions/lists) so
+        // the UX is "Sblocca utente" instead of a generic 403 error.
+        if (me && !me.is_anonymous && me.user_id !== id) {
+          try {
+            const r = await api.myBlocks();
+            const list = (r?.blocked_users || []) as any[];
+            const hit = list.find((u) => u.user_id === id);
+            if (hit) {
+              // Pre-populate a minimal profile shell so the ghost
+              // view can render even without the (blocked-403)
+              // profile call. The ghost view only reads .nickname.
+              setError(null);
+              setProfile({
+                user_id: id,
+                nickname: hit.nickname || "utente",
+                is_anonymous: false,
+              } as any);
+              setIsBlocked(true);
+              setLoading(false);
+              return;
+            }
+          } catch { /* silent — fall through to full fetch */ }
+        }
         const r = await api.publicUser(id);
         setProfile(r);
         const photos = r.photos || [];
         const pIdx = photos.findIndex((p: any) => p.photo_id === r.primary_photo_id);
         setIdx(pIdx >= 0 ? pIdx : 0);
-      } catch (e: any) { setError(e?.message || "Errore"); }
+      } catch (e: any) {
+        setError(e?.detail || e?.message || "Errore");
+      }
       finally { setLoading(false); }
     })();
-  }, [id]);
+  }, [id, me]);
 
   // Load block state for the current logged-in registered user.
-  useEffect(() => {
-    if (!id || !me || me.is_anonymous || me.user_id === id) return;
-    (async () => {
-      try {
-        const r = await api.myBlocks();
-        const blocked = (r?.blocked_users || []).some((u: any) => u.user_id === id);
-        setIsBlocked(blocked);
-      } catch { /* silent */ }
-    })();
-  }, [id, me]);
+  // Wrapped in useFocusEffect so returning to this screen after
+  // blocking/unblocking elsewhere (own settings, another profile,
+  // messaging screen) refreshes the ghost-mode banner immediately.
+  useFocusEffect(
+    useCallback(() => {
+      if (!id || !me || me.is_anonymous || me.user_id === id) return;
+      let cancelled = false;
+      (async () => {
+        try {
+          const r = await api.myBlocks();
+          const blocked = (r?.blocked_users || []).some((u: any) => u.user_id === id);
+          if (!cancelled) setIsBlocked(blocked);
+        } catch { /* silent */ }
+      })();
+      return () => { cancelled = true; };
+    }, [id, me]),
+  );
 
   // Circle status — whether target is in MY circle, plus the target's own
   // circle count (shown as a chip whether or not I'm the owner).
@@ -364,6 +405,63 @@ export default function UserPublicScreen() {
   const badge = profile.badge;
   const badgeUnlocked = badge?.unlocked === true;
   const badgeType = badge?.type; // 'buon_senso' | 'bastian_contrario' | undefined
+
+  // ── Blocked-user "ghost" view ───────────────────────────────
+  // Once the viewer has blocked this profile owner, we hide the
+  // entire profile (photos, badges, voting history, cerchia, socials,
+  // stories) and show a minimal "utente bloccato" card with an
+  // unblock action. This mirrors Instagram / X behaviour and prevents
+  // any residual public interaction (viewing history, tapping avatars,
+  // opening the DM sheet through Menu, etc.).
+  if (isBlocked && !!me && !me.is_anonymous && me.user_id !== id) {
+    return (
+      <SafeAreaView style={styles.safe} edges={["top"]} testID="public-user-screen">
+        <View style={styles.topbar}>
+          <Pressable onPress={goBack} testID="user-back" style={styles.backBtn}>
+            <Ionicons name="chevron-back" size={22} color={colors.onSurfaceInverse} />
+            <Text style={styles.backTxt}>INDIETRO</Text>
+          </Pressable>
+          <Text style={styles.topNick}>@{profile.nickname}</Text>
+          <Pressable onPress={() => setMenuOpen(true)} testID="user-menu" style={styles.menuBtn}>
+            <Ionicons name="ellipsis-vertical" size={20} color={colors.onSurfaceInverse} />
+          </Pressable>
+        </View>
+        <View style={styles.blockedBox} testID="public-blocked">
+          <View style={styles.blockedIcon}>
+            <Ionicons name="ban-outline" size={72} color={colors.error} />
+          </View>
+          <Text style={styles.blockedTitle}>UTENTE BLOCCATO</Text>
+          <Text style={styles.blockedNickname}>@{profile.nickname}</Text>
+          <Text style={styles.blockedHint}>
+            Hai bloccato questo utente. Non vedrete più i vostri contenuti pubblici (commenti, storie, spille, storico voti) e non potrete più interagire.
+          </Text>
+          <Pressable
+            onPress={toggleBlock}
+            style={styles.unblockBtn}
+            testID="unblock-btn"
+          >
+            <Text style={styles.unblockBtnTxt}>SBLOCCA</Text>
+          </Pressable>
+        </View>
+        {/* Menu still available — user can also unblock from the ⋮ menu */}
+        <Modal
+          visible={menuOpen}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setMenuOpen(false)}
+        >
+          <Pressable style={styles.modalBg} onPress={() => setMenuOpen(false)}>
+            <Pressable style={styles.menuSheet} onPress={() => {}}>
+              <Pressable onPress={toggleBlock} style={styles.menuItem} testID="menu-block">
+                <Ionicons name="checkmark-circle-outline" size={20} color={colors.error} />
+                <Text style={[styles.menuTxt, { color: colors.error }]}>Sblocca utente</Text>
+              </Pressable>
+            </Pressable>
+          </Pressable>
+        </Modal>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.safe} edges={["top"]} testID="public-user-screen">
@@ -739,7 +837,7 @@ export default function UserPublicScreen() {
               <Ionicons name="chatbubble-ellipses-outline" size={20} color={colors.onSurface} />
               <Text style={styles.menuTxt}>Invia messaggio</Text>
             </Pressable>
-            <Pressable onPress={toggleBlock} style={styles.menuItem}>
+            <Pressable onPress={toggleBlock} style={styles.menuItem} testID="menu-block">
               <Ionicons name={isBlocked ? "checkmark-circle-outline" : "ban-outline"} size={20} color={colors.error} />
               <Text style={[styles.menuTxt, { color: colors.error }]}>
                 {isBlocked ? "Sblocca utente" : "Blocca utente"}
@@ -1033,6 +1131,29 @@ const styles = StyleSheet.create({
   anonTitle: { fontSize: font.sizes.xxl, letterSpacing: 2.5, fontWeight: "500", color: colors.onSurface },
   anonSubtitle: { fontSize: font.sizes.base, color: colors.brandPrimary, letterSpacing: 1 },
   anonHint: { fontSize: font.sizes.sm, color: colors.muted, textAlign: "center", lineHeight: 20, marginTop: spacing.sm, paddingHorizontal: spacing.md },
+  blockedBox: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.xl, gap: spacing.md },
+  blockedIcon: {
+    width: 128,
+    height: 128,
+    borderRadius: 64,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2,
+    borderColor: colors.error,
+    marginBottom: spacing.md,
+  },
+  blockedTitle: { fontSize: font.sizes.md, letterSpacing: 3, color: colors.error, fontWeight: "700" },
+  blockedNickname: { fontSize: font.sizes.lg, color: colors.onSurface, fontWeight: "600", opacity: 0.9 },
+  blockedHint: { fontSize: font.sizes.sm, color: colors.muted, textAlign: "center", lineHeight: 20, marginTop: spacing.sm, paddingHorizontal: spacing.md },
+  unblockBtn: {
+    marginTop: spacing.lg,
+    borderWidth: 2,
+    borderColor: colors.error,
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.md,
+    borderRadius: radius.md,
+  },
+  unblockBtnTxt: { color: colors.error, letterSpacing: 2, fontWeight: "700" },
   stat: { fontSize: font.sizes.sm, color: colors.muted, letterSpacing: 0.5 },
   section: { gap: spacing.xs, marginTop: spacing.md },
   sectionTitle: { fontSize: font.sizes.sm, letterSpacing: 2, color: colors.brandPrimary, fontWeight: "500" },

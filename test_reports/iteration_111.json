@@ -1,0 +1,57 @@
+{
+  "summary": "Tested 4 bug fixes from iteration 111. RESULTS: (1) Reply-draft carryover — PASS: switching from reply-btn A → reply-btn B renders reply-input-B empty; re-opening A also empty; close-and-reopen A also empty. (2) Comment refresh on focus after block — PASS: chat_a blocks chat_b via profile menu → BLOCCA modal → navigates back to feud → chatUserB's comment is gone (useFocusEffect refetch works). (3) Ghost view on already-blocked profile — FAIL: navigating to /(tabs)/user/user_16f709708760 while the block is already established shows the generic 'Profilo non disponibile' error screen instead of the intended ghost view (public-blocked testID never mounts). Root cause: the initial useEffect at [id].tsx:86 runs while `me` is still null on first render, skips the myBlocks guard (guarded by `if (me && ...)`) and calls api.publicUser() directly → backend returns 403 → setError('Profilo non disponibile'). When the effect re-runs after `me` loads and correctly sets profile+isBlocked, the earlier `error` state is never cleared, so the render short-circuit `if (error || !profile)` at line 362 wins over the `if (isBlocked)` ghost branch at line 415. (4) Unblock from ghost view — BLOCKED by test 3: cannot reach ghost view. Regression: block confirmation modal (block-confirm-yes) still works, backend block filter still returns 403 on public-user endpoint, comment tabs still render. NOTE: Test 2 relied on the 'Blocca utente' menu row which has NO testID in the full-profile view — had to click by text; only the ghost-view menu row has testID `menu-block`.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "user/[id].tsx initial fetch race with `me`",
+        "issue": "Ghost view never renders when navigating to an already-blocked user's profile. useEffect at [id].tsx:86 first-runs with me=null, so `if (me && !me.is_anonymous && me.user_id !== id)` is false → skips myBlocks() → calls publicUser() → 403 → setError. On me update the effect re-runs and correctly sets profile+isBlocked, but error state is never cleared, and `if (error || !profile)` (line 362) shorts-circuits before `if (isBlocked)` (line 415). Fixes (pick one): (a) at top of the async IIFE, `if (!me) return;` (and add setLoading(false) is unnecessary because loading stays true and the second run will resolve); (b) in the myBlocks-hit branch call `setError(null);` right before `setProfile({...}); setIsBlocked(true);`; (c) invert the render order — check `isBlocked` before `error`. Recommended: (b) — smallest surface area and preserves current control flow.",
+        "testID": "public-blocked",
+        "priority": "HIGH"
+      },
+      {
+        "component": "user/[id].tsx full-profile menu 'Blocca utente' row",
+        "issue": "The menu Pressable at [id].tsx:839 that toggles block from the FULL profile view has NO testID. Only the ghost-view menu row at [id].tsx:454 has testID='menu-block'. Add testID='menu-block' to the full-profile row too (they can share the same testID since only one is mounted at a time — the ghost view returns early).",
+        "testID": "menu-block",
+        "priority": "MEDIUM"
+      }
+    ],
+    "integration_issues": [
+      {
+        "flow": "Navigate to already-blocked profile → expected ghost view",
+        "issue": "Renders 'Profilo non disponibile' error screen instead of the ghost view because of the me-null race described above. As a consequence, Test 4 (unblock from ghost view) could not be executed.",
+        "affected_testIDs": ["public-blocked", "unblock-btn"]
+      }
+    ],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/test_reports/iter111_ghost.png",
+    "/app/test_reports/iter111_after_unblock.png",
+    "/app/test_reports/iter111_feud_initial.png"
+  ],
+  "action_items": [
+    "In /app/frontend/app/(tabs)/user/[id].tsx line ~102 (inside the `if (hit)` branch of the initial useEffect), add `setError(null);` before `setProfile({...}); setIsBlocked(true);` — this clears the earlier 403 error from the me=null first-run. Alternatively, gate the initial useEffect on me being loaded: at the top of the async IIFE add `if (!me) return;` (then the effect will simply re-run when me updates and the block-check will fire first).",
+    "Add testID='menu-block' to the full-profile menu Pressable at /app/frontend/app/(tabs)/user/[id].tsx:839 (the `<Pressable onPress={toggleBlock} style={styles.menuItem}>` row) so automated tests can target block/unblock from the full profile the same way they can from the ghost view.",
+    "After both fixes, re-run Tests 3 and 4 from this iteration to confirm ghost view mounts and unblock from ghost view exits ghost mode."
+  ],
+  "critical_code_review_comments": [
+    "The publicUser fetch race is subtle but reproducible: with a warm cache + no active session, `me` from useAuth() is null on first render. The block-guard is only inside the if-me-loaded branch, so the first run races into publicUser() and 403s. Recommend a single top-level `if (!me) return;` gate at [id].tsx:88 — reduces the surface area vs. per-branch setError(null) cleanups.",
+    "The full-profile menu item lacks a testID while the ghost-view copy has one — that inconsistency will bite future block-flow tests too. Standardize on `menu-block` (and add `menu-report`, `menu-message` while at it).",
+    "The reply-draft fix is clean and works — resetting replyText both on open-different-comment AND on close-then-reopen correctly prevents the leak in all four sub-cases tested."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "n/a (frontend-only iteration)",
+    "frontend": "50% (2 of 4 tests pass; test 4 blocked by test 3 regression)"
+  },
+  "seed_data_creation": "Reused feud_198672d881cc with the pre-existing chatUserB comment cmt_318cede6df83 on side B, plus one new comment by chat_a on side B (cmt_e6c95638b7be) to exercise the two-comments-from-different-authors reply-draft flow. Blocks reset via DELETE /api/users/user_16f709708760/block before and after the run.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "chat_a token at /app/chat_a_token.txt (163 chars). Feud used: feud_198672d881cc (politica, both chat_a and chatUserB commented on side B). Comment IDs: chat_a=cmt_e6c95638b7be, chatUserB=cmt_318cede6df83. Ghost view test SEQUENCE: 1) DELETE block via curl to reset, 2) POST /api/users/user_16f709708760/block, 3) load /(tabs)/user/user_16f709708760, expect testID public-blocked + unblock-btn + UTENTE BLOCCATO title. If Test 3 still fails after fix, capture the network trace to confirm publicUser() is not being called before myBlocks().",
+  "rca_of_issue": "Reproduction: (1) chat_a is authenticated. (2) POST /api/users/user_16f709708760/block. (3) Navigate to /(tabs)/user/user_16f709708760. Expected: ghost view with public-blocked testID. Actual: 'Profilo non disponibile' error card. Root cause: [id].tsx:86 useEffect runs on mount with `me` still null (useAuth() populates asynchronously). The block-guard `if (me && !me.is_anonymous && me.user_id !== id)` short-circuits, control falls through to `api.publicUser(id)` which correctly 403s (backend enforcement is intact from iter 109). setError sets 'Profilo non disponibile'. When me finishes loading, useEffect re-runs, hits the myBlocks-hit branch, sets profile shell + isBlocked=true — but never clears error. Render at line 362 checks `if (error || !profile)` FIRST and returns the plain error card, never reaching the ghost-view branch at line 415. Mitigation: either clear error inside the block-hit branch (`setError(null)`) or add `if (!me) return;` at the top of the async IIFE so the mount fetch waits for me to be available."
+}

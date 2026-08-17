@@ -1,0 +1,38 @@
+{
+  "summary": "Verified BUG A (backend reply_count block filter) and BUG B (frontend auto-expand on 'rispondi' tap). Backend: created /app/backend/tests/test_iter113_reply_count_block_filter.py with 4 tests — all PASS. Regression: /app/backend/tests/test_mentions_and_blocks.py (13 tests) — all PASS. Frontend: 3 Playwright scenarios executed against feud_198672d881cc side B — all PASS. No new bugs; both fixes are correct and behave exactly as specified.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/test_reports/pytest/iter113_results.xml",
+    "/app/backend/tests/test_iter113_reply_count_block_filter.py",
+    "/app/test_reports/iter113_feud_loaded.png",
+    "/app/test_reports/iter113_after_reply_btn.png"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py:2704-2741 — get_comments now applies `viewer_blocked` to `all_replies` BEFORE `reply_counts` is aggregated. Confirmed the effect: reply_count baseline 1 → 0 after A→B block, /replies list also filtered. Symmetry (B→A) also correct.",
+    "server.py:2737-2739 — computes `_blocked_ids_for(user['user_id'])` again inside the visible-comments branch even when it was already fetched at line 2708. Minor inefficiency (second Mongo round-trip on hot path) — could be hoisted to a single call above line 2707 and reused. Not a correctness issue.",
+    "feud/[id].tsx:324-330 — `expandReplies` is properly idempotent: guards on `expanded[commentId]` and skips the API call. Verified via network trace: 0 GET /replies calls when already expanded.",
+    "feud/[id].tsx:934-949 — the reply-btn onPress handles the toggle correctly: opens input + auto-expand, and when cancelling it clears draft (setReplyingTo(null), setReplyText('')) WITHOUT collapsing the expanded thread (intentional — verified: 'Nascondi risposte' persists after cancel)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter113_reply_count_block_filter.py (new)"
+  ],
+  "success_rate": {
+    "backend": "100% (4/4 new + 13/13 regression)",
+    "frontend": "100% (3/3 BUG B scenarios)"
+  },
+  "seed_data_creation": "Ephemeral: created comment cmt_f4429663f5f4 by chat_a and reply rep_6b02096f02fc by chatUserB on feud_198672d881cc side B for the frontend flow. Backend tests create their own per-test comments/replies. All blocks cleared at end (verified blocked list returns 404/empty for both users).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "For BUG A regressions, use the pattern in test_iter113_reply_count_block_filter.py — always _unblock_all + _ensure_voted on the same side for both users before creating the comment/reply. For frontend feud UI, remember faide_token is stored via storage.secureSet as JSON.stringify(token); on web this maps to localStorage. Use viewport 375x812 and click comments-tab-b to reach the side-B thread on feud_198672d881cc. reply-btn-<cid> triggers auto-expand IF (!expanded && reply_count > 0).",
+  "rca_of_issue": "BUG A root cause: `get_comments` derived `reply_count` from ALL replies matching the parent comments — even when the reply's author was in the viewer's blocked set. Since `list_replies` (the endpoint the UI hits when the user taps 'N risposte') already applied the block filter, the counter and the list diverged: the UI would advertise '3 risposte', but expanding revealed only unblocked ones (often zero). FIX: applied the viewer's `_blocked_ids_for()` set to `all_replies` in get_comments BEFORE building `reply_counts`. Verified: (1) A→B block drops reply_count 1→0 from A's view (test_a_blocks_b_reply_count_zero_from_a_perspective), (2) B→A symmetry (test_b_blocks_a_symmetry), (3) no side-effects when no block (test_reply_count_intact_when_no_block), (4) anonymous viewers unaffected (test_anonymous_viewer_sees_full_reply_count). BUG B RCA: the reply thread stayed collapsed even while the user was composing a reply because the reply-btn's onPress only toggled `replyingTo` and never touched `expanded`. FIX: added `expandReplies(cid)` helper + `onExpand` prop on CommentItem; wired into reply-btn onPress with the guard `!expanded && reply_count > 0`. Verified auto-expand on tap, expanded thread persistence after cancel, and no duplicate GET /replies when the thread is already open."
+}
