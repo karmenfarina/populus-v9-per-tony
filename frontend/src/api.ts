@@ -369,6 +369,50 @@ export const api = {
   adminRestoreFeud: (feudId: string) =>
     request(`/feuds/${feudId}/restore`, { method: 'POST' }),
   adminHiddenFeuds: () => request('/admin/hidden-feuds'),
+  // ─── Founder-admin: bot fleet controls ─────────────────────────
+  // Master switch + numeric slider (0..100) + immediate burst.
+  // Uses X-Admin-Key on the fetch layer (see admin.tsx callers).
+  adminBotState: (adminKey: string) =>
+    fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL}/api/admin/bots/state`, {
+      headers: { 'X-Admin-Key': adminKey },
+    }).then(async (r) => {
+      const t = await r.text();
+      const d = t ? JSON.parse(t) : null;
+      if (!r.ok) throw new ApiError(r.status, d?.detail || `HTTP ${r.status}`);
+      return d;
+    }),
+  adminBotToggle: (adminKey: string, enabled: boolean) =>
+    fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL}/api/admin/bots/toggle`, {
+      method: 'POST',
+      headers: { 'X-Admin-Key': adminKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    }).then(async (r) => {
+      const t = await r.text();
+      const d = t ? JSON.parse(t) : null;
+      if (!r.ok) throw new ApiError(r.status, d?.detail || `HTTP ${r.status}`);
+      return d;
+    }),
+  adminBotSetCount: (adminKey: string, count: number) =>
+    fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL}/api/admin/bots/count`, {
+      method: 'POST',
+      headers: { 'X-Admin-Key': adminKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ count }),
+    }).then(async (r) => {
+      const t = await r.text();
+      const d = t ? JSON.parse(t) : null;
+      if (!r.ok) throw new ApiError(r.status, d?.detail || `HTTP ${r.status}`);
+      return d;
+    }),
+  adminBotBurst: (adminKey: string) =>
+    fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL}/api/admin/bots/burst`, {
+      method: 'POST',
+      headers: { 'X-Admin-Key': adminKey },
+    }).then(async (r) => {
+      const t = await r.text();
+      const d = t ? JSON.parse(t) : null;
+      if (!r.ok) throw new ApiError(r.status, d?.detail || `HTTP ${r.status}`);
+      return d;
+    }),
 };
 
 export type User = {

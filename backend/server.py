@@ -4262,7 +4262,14 @@ async def admin_stats(_: bool = Depends(require_admin)):
     # users have no email, no location consent, and no reason to appear
     # in region/sex/age charts — even if some legacy row happens to have
     # those fields set, we hide them here defensively.
-    user_match: dict = {'auth_provider': {'$ne': 'anonymous'}, 'is_anonymous': {'$ne': True}}
+    # Bots and dev accounts are ALSO excluded so the founder always sees
+    # real-user numbers only.
+    user_match: dict = {
+        'auth_provider': {'$ne': 'anonymous'},
+        'is_anonymous': {'$ne': True},
+        'is_bot': {'$ne': True},
+        'is_dev_account': {'$ne': True},
+    }
     vote_match: dict = {}
     if baseline is not None:
         user_match["created_at"] = {"$gte": baseline}
@@ -4279,10 +4286,13 @@ async def admin_stats(_: bool = Depends(require_admin)):
         {'$lookup': {'from': 'users', 'localField': 'user_id', 'foreignField': 'user_id', 'as': 'u'}},
         {'$unwind': {'path': '$u', 'preserveNullAndEmptyArrays': True}},
         # Drop anonymous voters — they never opt into demographics.
+        # Also drop bots + dev accounts from the demographic aggregates.
         {'$match': {
             '$and': [
                 {'u.auth_provider': {'$ne': 'anonymous'}},
                 {'u.is_anonymous': {'$ne': True}},
+                {'u.is_bot': {'$ne': True}},
+                {'u.is_dev_account': {'$ne': True}},
             ]
         }},
         {'$project': {
@@ -4328,10 +4338,20 @@ async def admin_stats(_: bool = Depends(require_admin)):
     )
 
     # Top feuds by total votes
+    # NOTE: exclude bot/dev-account votes from the ranking so the founder
+    # sees which feuds engage real users, not the bot fleet.
     top_pipe: list = []
     if vote_match:
         top_pipe.append({'$match': vote_match})
     top_pipe.extend([
+        {'$lookup': {'from': 'users', 'localField': 'user_id', 'foreignField': 'user_id', 'as': 'u'}},
+        {'$unwind': {'path': '$u', 'preserveNullAndEmptyArrays': True}},
+        {'$match': {
+            '$and': [
+                {'u.is_bot': {'$ne': True}},
+                {'u.is_dev_account': {'$ne': True}},
+            ]
+        }},
         {'$group': {
             '_id': '$feud_id',
             'total': {'$sum': 1},
@@ -5344,6 +5364,17 @@ async def on_startup():
         logger.info(f"analytics ready: {n} dev-account(s) tagged this boot")
     except Exception as e:
         logger.warning(f"analytics bootstrap warning: {e}")
+
+    # Bot engine bootstrap — seeds 100 bot personas (idempotent) and
+    # starts the 30-min APScheduler tick. Bots are flagged
+    # `is_dev_account: True` so they are invisible to every analytics
+    # query by construction.
+    try:
+        import bot_engine as _bot_engine
+        await _bot_engine.init(db)
+        await _bot_engine.start_scheduler()
+    except Exception as e:
+        logger.warning(f"bot_engine bootstrap warning: {e}")
     # One-shot backfill: users who onboarded BEFORE `cronaca` was introduced
     # can't possibly have it in their favorites (it didn't exist), so the
     # "favorites-only" home filter effectively hides it from them until they
@@ -7796,6 +7827,16 @@ async def _send_dm_internal(sender_id: str, recipient_id: str, text: str,
 
 
 app.include_router(api_router)
+
+# Bot admin routes — /api/admin/bots/*. Uses the same X-Admin-Key guard
+# as the analytics dashboard so the founder can control the bot fleet
+# from the ADMIN panel.
+try:
+    from bot_routes import build_bot_admin_router
+    _bot_admin_router = build_bot_admin_router(require_admin)
+    app.include_router(_bot_admin_router, prefix="/api")
+except Exception as e:
+    logger.warning(f"bot_routes wiring failed: {e}")
 
 # Analytics — mounted on the same /api prefix, gated by X-Admin-Key
 # (analytics dashboard) and by optional user auth (public app-open).

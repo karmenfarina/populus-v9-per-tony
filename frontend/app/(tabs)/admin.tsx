@@ -11,6 +11,7 @@ import * as Sharing from "expo-sharing";
 import { storage } from "@/src/utils/storage";
 import { colors, spacing, font } from "@/src/theme";
 import AnalyticsPanel, { AnalyticsPanelHandle } from "@/src/components/AnalyticsPanel";
+import BotPanel from "@/src/components/BotPanel";
 import { api } from "@/src/api";
 import { useAuth } from "@/src/auth/AuthContext";
 
@@ -54,8 +55,89 @@ export default function AdminScreen() {
   // Two-tab switch — Analytics (KPI + retention + categorie + profili) is
   // the growth-plan dashboard; Demografia is the legacy one (utile per
   // controllare voti per regione/sesso/età al volo).
-  const [tab, setTab] = useState<"analytics" | "demographics" | "hidden">("analytics");
+  const [tab, setTab] = useState<"analytics" | "demographics" | "hidden" | "bots">("analytics");
   const analyticsRef = useRef<AnalyticsPanelHandle | null>(null);
+
+  // ── Bot fleet controls (BOT tab) ─────────────────────────────────
+  // A 100-persona bot roster runs in the background: each bot has a
+  // distinct personality/tone/political-lean/topic taste and can vote,
+  // comment (via Claude Haiku 4.5) and post stories on real feuds. All
+  // bot rows carry `is_bot: true` + `is_dev_account: true` so they are
+  // filtered out of every analytics query. This tab lets the founder
+  // toggle the fleet ON/OFF and pick how many bots are "online"
+  // (0..100). Reducing the count deactivates bots by `bot_index`,
+  // which the backend already builds as a balanced interleaving of
+  // political_lean × topic × activity level.
+  const [botState, setBotState] = useState<{
+    enabled: boolean;
+    active_count: number;
+    reported_active: number;
+    total_bots: number;
+    last_tick_at: string | null;
+    last_burst_at: string | null;
+  } | null>(null);
+  const [botLoading, setBotLoading] = useState(false);
+  const [botBusy, setBotBusy] = useState(false);
+  const [botError, setBotError] = useState<string | null>(null);
+  const [botDraftCount, setBotDraftCount] = useState<number>(0);
+
+  const loadBotState = useCallback(async (k: string) => {
+    if (!k) return;
+    setBotLoading(true);
+    setBotError(null);
+    try {
+      const s = await api.adminBotState(k);
+      setBotState(s);
+      setBotDraftCount(Number(s?.active_count || 0));
+    } catch (e: any) {
+      setBotError(e?.detail || e?.message || "Impossibile caricare");
+      setBotState(null);
+    } finally {
+      setBotLoading(false);
+    }
+  }, []);
+
+  const toggleBots = useCallback(async (k: string, next: boolean) => {
+    setBotBusy(true);
+    setBotError(null);
+    try {
+      const s = await api.adminBotToggle(k, next);
+      setBotState(s);
+      setBotDraftCount(Number(s?.active_count || 0));
+    } catch (e: any) {
+      setBotError(e?.detail || e?.message || "Aggiornamento fallito");
+    } finally {
+      setBotBusy(false);
+    }
+  }, []);
+
+  const commitBotCount = useCallback(async (k: string, n: number) => {
+    setBotBusy(true);
+    setBotError(null);
+    try {
+      const clamped = Math.max(0, Math.min(100, Math.round(n)));
+      const s = await api.adminBotSetCount(k, clamped);
+      setBotState(s);
+      setBotDraftCount(Number(s?.active_count || 0));
+    } catch (e: any) {
+      setBotError(e?.detail || e?.message || "Impossibile salvare");
+    } finally {
+      setBotBusy(false);
+    }
+  }, []);
+
+  const triggerBotBurst = useCallback(async (k: string) => {
+    setBotBusy(true);
+    setBotError(null);
+    try {
+      const s = await api.adminBotBurst(k);
+      setBotState(s);
+    } catch (e: any) {
+      setBotError(e?.detail || e?.message || "Burst fallito");
+    } finally {
+      setBotBusy(false);
+    }
+  }, []);
 
   // Founder-admin: soft-deleted feuds list (loaded lazily when the
   // "NASCOSTE" tab opens). Tap a row → open the feud detail (admin sees
@@ -130,6 +212,10 @@ export default function AdminScreen() {
     if (hydrated && tab === "hidden") loadHiddenFeuds();
   }, [hydrated, tab, loadHiddenFeuds]);
 
+  useEffect(() => {
+    if (hydrated && key && tab === "bots") loadBotState(key);
+  }, [hydrated, key, tab, loadBotState]);
+
   // Auto-refresh the hidden-feuds list every time the admin screen comes
   // into focus (e.g. after the founder soft-hides a feud from the detail
   // view and taps back into /admin). Without this, admins have to hit
@@ -138,7 +224,8 @@ export default function AdminScreen() {
     useCallback(() => {
       if (!hydrated) return;
       if (tab === "hidden") loadHiddenFeuds();
-    }, [hydrated, tab, loadHiddenFeuds])
+      if (tab === "bots" && key) loadBotState(key);
+    }, [hydrated, tab, loadHiddenFeuds, loadBotState, key])
   );
 
   const submitKey = async () => {
@@ -158,10 +245,12 @@ export default function AdminScreen() {
       await analyticsRef.current?.reload();
     } else if (tab === "hidden") {
       await loadHiddenFeuds();
+    } else if (tab === "bots") {
+      if (key) await loadBotState(key);
     } else if (key) {
       await load(key);
     }
-  }, [tab, key, load, loadHiddenFeuds]);
+  }, [tab, key, load, loadHiddenFeuds, loadBotState]);
 
   // Fetch a full snapshot (analytics + legacy demografia) so the
   // report file the user downloads is a complete "before-reset" record.
@@ -559,9 +648,30 @@ export default function AdminScreen() {
         >
           <Text style={[styles.tabTxt, tab === "hidden" && styles.tabTxtActive]}>NASCOSTE</Text>
         </Pressable>
+        <Pressable
+          style={[styles.tabBtn, tab === "bots" && styles.tabBtnActive]}
+          onPress={() => setTab("bots")}
+          testID="admin-tab-bots"
+        >
+          <Text style={[styles.tabTxt, tab === "bots" && styles.tabTxtActive]}>BOT</Text>
+        </Pressable>
       </View>
 
-      {tab === "hidden" ? (
+      {tab === "bots" ? (
+        <BotPanel
+          adminKey={key}
+          state={botState}
+          loading={botLoading}
+          busy={botBusy}
+          error={botError}
+          draftCount={botDraftCount}
+          setDraftCount={setBotDraftCount}
+          onReload={() => loadBotState(key)}
+          onToggle={(next) => toggleBots(key, next)}
+          onCommit={(n) => commitBotCount(key, n)}
+          onBurst={() => triggerBotBurst(key)}
+        />
+      ) : tab === "hidden" ? (
         hiddenLoading ? (
           <View style={styles.centerFill}><ActivityIndicator size="large" color={colors.brandPrimary} /></View>
         ) : hiddenError ? (
