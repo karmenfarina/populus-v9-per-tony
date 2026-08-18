@@ -27,6 +27,7 @@ import { useAuth } from "@/src/auth/AuthContext";
 import { blockEvents } from "@/src/utils/blockEvents";
 import { scrollMemory } from "@/src/utils/scrollMemory";
 import { navStack } from "@/src/utils/navStack";
+import { reviewManager } from "@/src/utils/reviewManager";
 
 export default function FeudDetail() {
   const { id, comment: commentParam, side: sideParam, from, archiveCat, archiveDate, messagesUserId } =
@@ -392,6 +393,13 @@ export default function FeudDetail() {
       // up even if the first refresh races the async task on slow DB.
       setTimeout(() => { refreshUnreadNotifs().catch(() => {}); }, 800);
       setTimeout(() => { refreshUnreadNotifs().catch(() => {}); }, 2500);
+      // Record a meaningful engagement for the store-review gate — a
+      // vote counts as one action. `maybePrompt` will silently no-op
+      // until every gate (sessions ≥3, actions ≥5, days ≥3, cooldown)
+      // is passed, so calling it here is safe.
+      reviewManager.recordAction("vote")
+        .then(() => reviewManager.maybePrompt())
+        .catch(() => { /* noop */ });
     } catch (e: any) { setError(e?.message || "Errore"); }
     finally { setVoting(false); }
   };
@@ -408,6 +416,9 @@ export default function FeudDetail() {
       // Two-shot refresh so the tab badge lights up even under DB load.
       setTimeout(() => { refreshUnreadNotifs().catch(() => {}); }, 800);
       setTimeout(() => { refreshUnreadNotifs().catch(() => {}); }, 2500);
+      reviewManager.recordAction("comment")
+        .then(() => reviewManager.maybePrompt())
+        .catch(() => { /* noop */ });
     } catch (e: any) { setError(e?.message || "Errore"); }
     finally { setPosting(false); }
   };
@@ -466,6 +477,9 @@ export default function FeudDetail() {
         : c);
       setSideA(bump);
       setSideB(bump);
+      reviewManager.recordAction("reply")
+        .then(() => reviewManager.maybePrompt())
+        .catch(() => { /* noop */ });
     } catch (e: any) { setError(e?.message || "Errore"); }
   };
 

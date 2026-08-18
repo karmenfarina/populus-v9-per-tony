@@ -96,7 +96,7 @@ def _unblock_all(sess, tok):
 
 def _hype_body(sess, token=None):
     headers = _h(token) if token else {}
-    r = sess.get(f"{API}/feuds/hype", headers=headers, timeout=30)
+    r = sess.get(f"{API}/feuds/hype?limit=200", headers=headers, timeout=30)
     assert r.status_code == 200, r.text
     return r.json()
 

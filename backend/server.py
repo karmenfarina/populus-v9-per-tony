@@ -1725,7 +1725,10 @@ async def _user_voted_ids(user_id: str, feud_ids: List[str]) -> dict:
 
 
 @api_router.get('/feuds/hype')
-async def list_hype_feuds(user: Optional[dict] = Depends(get_current_user_optional)):
+async def list_hype_feuds(
+    user: Optional[dict] = Depends(get_current_user_optional),
+    limit: int = 8,
+):
     """The always-on 'HYPE' rail.
 
     Returns feuds from the last 7 days ranked by an engagement score
@@ -1735,10 +1738,15 @@ async def list_hype_feuds(user: Optional[dict] = Depends(get_current_user_option
     is supposed to surface what's actually being discussed, not fill
     space with untouched articles.
 
+    `limit` — how many top-ranked entries to return (1..200). Default 8
+    keeps the home rail tight; test suites (and future admin views)
+    can pass a higher value to probe the full ranked set.
+
     This section is deliberately outside `/api/categories` and outside a
     user's favorite_categories filter — it always appears in every user's
     home. See the frontend chip row for the always-mounted HYPE chip.
     """
+    limit = max(1, min(int(limit or 8), 200))
     since = now_utc() - timedelta(days=7)
     docs = await db.feuds.find(
         {'created_at': {'$gte': since}}, {'_id': 0}
@@ -1868,7 +1876,7 @@ async def list_hype_feuds(user: Optional[dict] = Depends(get_current_user_option
         key=lambda d: (d['_hype_score'], d.get('created_at') or datetime.min.replace(tzinfo=timezone.utc)),
         reverse=True,
     )
-    scored = scored[:HYPE_TOP_N]
+    scored = scored[:limit]
     scored.sort(
         key=lambda d: d.get('created_at') or datetime.min.replace(tzinfo=timezone.utc),
         reverse=True,
@@ -4295,6 +4303,42 @@ async def _generate_feud_for_category(cat: dict, LlmChat, UserMessage) -> Option
             "la faida più naturale. Evita come la peste notizie tecniche, burocratiche, "
             "adempimenti, dati economici astratti, dichiarazioni istituzionali generiche, "
             "necrologi, cronaca meteo, o eventi senza reali linee di frattura pubblica.\n\n"
+            "══════════════════════════════════════════════════════════════════\n"
+            "LINEA EDITORIALE — IMPARZIALITÀ E NEUTRALITÀ (VINCOLANTE)\n"
+            "══════════════════════════════════════════════════════════════════\n"
+            "Populus è una piazza pubblica: NON è un giornale di parte. Ogni tuo output DEVE "
+            "rispettare senza eccezioni le seguenti regole editoriali. Se una regola confligge "
+            "con l'engagement, PREVALE la regola editoriale.\n\n"
+            "1. NEUTRALITÀ POLITICA E IDEOLOGICA. Non favorire né penalizzare alcun partito, "
+            "leader, movimento, corrente ideologica (destra, sinistra, centro, populista, "
+            "sovranista, progressista, conservatore, ecc.), religione, orientamento sessuale, "
+            "etnia, nazionalità. Se un tema tocca temi divisivi (immigrazione, aborto, LGBTQ+, "
+            "vaccini, guerra Russia-Ucraina, Israele-Palestina, clima, ecc.), presenta le DUE "
+            "POSIZIONI con LO STESSO peso, LO STESSO tono e LO STESSO livello di dettaglio. "
+            "Un lettore non deve MAI riuscire a capire da che parte stai.\n"
+            "2. SIMMETRIA DELLE PARTI. Le stringhe `party_a` e `party_b` devono avere lunghezza "
+            "comparabile (±20 caratteri), stesso registro linguistico, stesso livello di enfasi. "
+            "Non usare aggettivi valutativi (giusto/sbagliato, saggio/folle, coraggioso/vile) "
+            "su uno solo dei due schieramenti. Se metti un aggettivo forte da un lato, "
+            "mettine uno equivalente e opposto dall'altro.\n"
+            "3. FATTI, NON GIUDIZI. Il `summary` riporta CHI ha fatto/detto COSA, DOVE e QUANDO. "
+            "Zero interpretazioni personali dell'AI, zero commenti tipo 'ovviamente sbagliato', "
+            "'come al solito', 'inevitabile'. Le opinioni le esprime il pubblico nei voti — "
+            "non tu.\n"
+            "4. LINGUAGGIO NON DISCRIMINATORIO. Vietati epiteti, slur, generalizzazioni etniche "
+            "(es. 'gli zingari', 'i mussulmani' come categoria colpevole), attacchi personali "
+            "fondati su tratti immutabili (aspetto fisico, disabilità, età, genere). Le critiche "
+            "sono ammesse SOLO su azioni, dichiarazioni o decisioni pubbliche verificabili.\n"
+            "5. NO NARRATIVE COMPLOTTISTE. Non descrivere teorie del complotto, disinformazione "
+            "scientifica (no-vax, terrapiattismo, negazionismo climatico, scie chimiche, ecc.) "
+            "come se avessero pari dignità della scienza consolidata. Puoi RIPORTARE che esiste "
+            "una controversia pubblica su tali temi, senza mai validare la tesi antiscientifica.\n"
+            "6. FONTI VERIFICABILI. La notizia scelta deve provenire da fonti giornalistiche "
+            "identificabili (già presente come `source` nel pool). Se il titolo è chiaramente "
+            "clickbait, riformula il summary con il dato asciutto verificabile.\n"
+            "7. MINORI E VITTIME. Se la notizia coinvolge minori, vittime di reati o soggetti "
+            "vulnerabili identificabili in modo pregiudizievole, SKIPPA con "
+            '`{\"skip\": true, \"reason\": \"minori/vittime tutelate\"}`.\n\n'
             "REGOLE DI STILE PER IL SUMMARY (non negoziabili):\n"
             "1. Ogni persona citata deve avere NOME E COGNOMI completi (non solo il nome, non "
             "il soprannome soltanto). Es: 'Fabrizio Corona', non 'Corona' o 'Fabri'.\n"
@@ -4708,7 +4752,26 @@ async def _ai_fact_check_feud(candidate: dict, chosen_headline: dict, LlmChat, U
                 "prudente, imparziale. Il tuo compito è impedire che finiscano "
                 "in pubblicazione notizie diffamatorie, inaccurate, distorte o "
                 "non supportate dalla fonte. Non ti fai influenzare dallo stile "
-                "tabloid: filtri i FATTI, non il tono."
+                "tabloid: filtri i FATTI, non il tono.\n\n"
+                "══════════════════════════════════════════════════════════════════\n"
+                "LINEA EDITORIALE — VERIFICA IMPARZIALITÀ (VINCOLANTE)\n"
+                "══════════════════════════════════════════════════════════════════\n"
+                "Oltre all'accuratezza fattuale, rigetta ("
+                "`decision: REJECT` o richiedi CORRECT) ogni bozza che:\n"
+                "• prende una parte politica/ideologica (destra/sinistra, partito X vs Y);\n"
+                "• usa aggettivi valutativi asimmetrici tra `party_a` e `party_b` "
+                "(uno 'coraggioso', l'altro 'folle');\n"
+                "• contiene giudizi dell'IA travestiti da fatti "
+                "('ovviamente sbagliato', 'come sempre');\n"
+                "• generalizza su etnie/religioni/orientamenti come categoria colpevole;\n"
+                "• descrive teorie complottiste/pseudoscienza come tesi legittime pari "
+                "alla scienza consolidata;\n"
+                "• espone minori o vittime di reati in modo pregiudizievole (in tal caso "
+                "sempre REJECT).\n"
+                "Se il tono/framing è parziale ma i fatti sono corretti, usa CORRECT per "
+                "riequilibrare `party_a`/`party_b`/`summary`. Se la parzialità è strutturale "
+                "(argomento intrinsecamente propagandistico, o sbilanciamento non riparabile), "
+                "REJECT con `reason` che cita 'parzialità editoriale'."
             ),
         ).with_model('anthropic', 'claude-sonnet-4-6')
         reply = await chat.send_message(UserMessage(text=prompt))

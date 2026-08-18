@@ -16,6 +16,7 @@ import { UIPrefsProvider } from "@/src/ui/UIPrefs";
 import { NotificationsProvider } from "@/src/notifications/NotificationsContext";
 import { MessagingProvider } from "@/src/messaging/MessagingContext";
 import { StoryUploadProvider } from "@/src/stories/StoryUploadContext";
+import { reviewManager } from "@/src/utils/reviewManager";
 import Constants from "expo-constants";
 
 LogBox.ignoreAllLogs(true);
@@ -87,6 +88,14 @@ export default function RootLayout() {
       SplashScreen.hideAsync();
     }
   }, [loaded, error]);
+
+  // Session tracker for the native store-review request. Records a
+  // debounced "session opened" event at cold start so the review
+  // prompt gate ("≥3 sessions") reflects real usage. Web/Expo Go
+  // are a no-op inside reviewManager itself.
+  useEffect(() => {
+    reviewManager.markSessionOpen().catch(() => { /* noop */ });
+  }, []);
 
   // ── Google Mobile Ads (AdMob) SDK initialisation ──
   // Fires once at app cold start. Skipped on web (no SDK there) and

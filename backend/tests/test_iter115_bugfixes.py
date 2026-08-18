@@ -91,7 +91,9 @@ def _unblock_all(sess, tok):
 
 def _hype_ids(sess, token=None):
     headers = _h(token) if token else {}
-    r = sess.get(f"{API}/feuds/hype", headers=headers, timeout=30)
+    # See iter114 note — bump the limit so freshly-seeded test feuds
+    # (low-ish score) aren't buried under production entries.
+    r = sess.get(f"{API}/feuds/hype?limit=200", headers=headers, timeout=30)
     assert r.status_code == 200, r.text
     return [f["feud_id"] for f in (r.json().get("feuds") or [])]
 
