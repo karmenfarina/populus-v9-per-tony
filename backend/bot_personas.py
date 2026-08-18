@@ -35,7 +35,7 @@ from __future__ import annotations
 
 import hashlib
 import random
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 # Populus categories — same IDs as in server.py.
 CATEGORY_IDS = [
@@ -342,8 +342,69 @@ def build_personas() -> List[Dict[str, Any]]:
     return personas
 
 
+# Openers we do NOT want the bots to overuse. The LLM tends to fall
+# back on the same 5-6 words ("Sinceramente", "Ecco", "Onestamente"…)
+# regardless of prompt tweaks, so we blacklist them explicitly AND
+# post-process the output. Add new ones here if you see repetition.
+BANNED_OPENERS = [
+    "sinceramente", "onestamente", "francamente", "personalmente",
+    "ecco", "dai", "boh", "insomma", "allora",
+    "in verità", "in tutta onestà", "a dire il vero", "a essere sinceri",
+    "diciamocelo", "diciamola tutta", "secondo me",
+    "ok", "va bene", "beh", "vabbè",
+    "guarda", "senti", "ascolta",
+    "il commento", "commento",
+]
+
+# Per-call opening style hints — one of these is injected on every LLM
+# call so consecutive comments diverge naturally. The goal is not to
+# force a specific opener, only to nudge Claude away from its "safe"
+# starter word.
+OPENING_STYLES = [
+    "Inizia direttamente con un verbo all'indicativo (es. «penso che…», «trovo che…»).",
+    "Inizia con un aggettivo che valuta la situazione (es. «ridicolo», «giusto», «assurdo»).",
+    "Inizia con una domanda retorica.",
+    "Inizia con un sostantivo o nome proprio, senza avverbio.",
+    "Inizia con «ma…» o «però…» come contrasto.",
+    "Inizia con un numero, un anno o una cifra.",
+    "Inizia con una constatazione fattuale, senza premesse.",
+    "Inizia con un'esclamazione secca (es. «follia», «bravo», «disastro»).",
+    "Inizia con «se…» o «quando…» come ipotesi.",
+    "Inizia con «io» seguito da un verbo, per portare un'esperienza personale.",
+    "Inizia con «alla fine», «in fondo», o simili.",
+    "Inizia con un verbo all'imperativo (es. «guardiamo», «pensiamo»).",
+    "Inizia con una battuta o un'immagine visiva.",
+    "Inizia con un dato o un paragone concreto.",
+    "Inizia con un dubbio (es. «non sono sicur*», «non capisco perché»).",
+    "Inizia con una negazione forte (es. «non è vero che», «non ci sto»).",
+]
+
+# Extra micro-quirks the LLM can pick from — chosen randomly per call.
+STYLE_QUIRKS = [
+    "Usa una frase spezzata con un punto in mezzo.",
+    "Fai un paragone concreto con la vita quotidiana.",
+    "Cita un dettaglio molto specifico del post.",
+    "Chiudi con una domanda aperta.",
+    "Chiudi con una constatazione tagliente.",
+    "Usa un'espressione dialettale leggera solo se coerente con la regione.",
+    "Evita ogni frase fatta.",
+    "Non usare avverbi in -mente.",
+]
+
+
+def random_style_hint(rng: random.Random) -> Dict[str, str]:
+    """Return a tuple (opening_style, style_quirk) picked randomly.
+    Passed by the engine to `system_prompt_for` on every call."""
+    return {
+        "opening_style": rng.choice(OPENING_STYLES),
+        "style_quirk": rng.choice(STYLE_QUIRKS),
+    }
+
+
 # ─── System prompt builder for the LLM ─────────────────────────────
-def system_prompt_for(persona: Dict[str, Any]) -> str:
+def system_prompt_for(
+    persona: Dict[str, Any], style_hint: Optional[Dict[str, str]] = None
+) -> str:
     """Prompt engineered so Claude Haiku produces short, human-sounding
     Italian comments. The prompt is intentionally strict on style so
     the output doesn't read like a chatbot summary.
@@ -376,21 +437,31 @@ def system_prompt_for(persona: Dict[str, Any]) -> str:
         "destra_radicale": "convinzioni di destra radicale, sovraniste",
     }[persona["political_lean"]]
 
+    opening_hint = (
+        (style_hint or {}).get("opening_style")
+        or "Inizia in modo naturale e vario, mai con avverbi di premessa."
+    )
+    quirk = (style_hint or {}).get("style_quirk") or "Rimani conciso e sincero."
+
+    banned_list = ", ".join(f"«{w.capitalize()}»" for w in BANNED_OPENERS[:14])
+
     return (
         f"Sei {persona['display_name']}, {persona['age']} anni, {persona['profession'].lower()} "
         f"da {persona['city']} ({persona['region']}). "
         f"Su Populus (social italiano di scontri d'opinione) hai queste caratteristiche: "
         f"{tone_hint}; {lean_hint}. Ti appassiona soprattutto {TOPIC_LABELS_IT.get(persona['main_topic'], persona['main_topic'])}. "
         f"Devi scrivere UN commento sotto un post, come faresti su un social. Regole ferree: "
-        f"1) Scrivi in italiano informale, come parleresti in chat. "
+        f"1) Italiano informale, come parleresti in chat. "
         f"2) {verbosity_hint} "
-        f"3) NON iniziare con la parola 'Ecco' o simili. "
-        f"4) NON riassumere il post, esprimi un'opinione personale. "
-        f"5) NON usare hashtag né emoji. "
-        f"6) NON rivelare che sei un'IA. "
-        f"7) Evita insulti personali, razzismo o incitamento all'odio. "
-        f"8) Puoi usare colloquialismi (tipo 'sinceramente', 'boh', 'dai'), refusi minori sono ok. "
-        f"Rispondi SOLO con il commento, senza virgolette."
+        f"3) VIETATISSIMO iniziare il commento con una di queste parole/avverbi di premessa: "
+        f"{banned_list}. Se pensi di dover partire da uno di questi, riformula. "
+        f"4) {opening_hint} "
+        f"5) {quirk} "
+        f"6) NON riassumere il post, esprimi un'opinione personale. "
+        f"7) NON usare hashtag né emoji. NON rivelare che sei un'IA. "
+        f"8) Evita insulti personali, razzismo o incitamento all'odio. "
+        f"9) Refusi minori e colloquialismi vanno bene, ma varia il vocabolario: ogni commento deve suonare diverso dagli altri. "
+        f"Rispondi SOLO con il commento, senza virgolette e senza premesse tipo «Il mio commento:»."
     )
 
 

@@ -37,7 +37,13 @@ import re
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Dict, Any
 
-from bot_personas import build_personas, system_prompt_for, story_prompt_for
+from bot_personas import (
+    build_personas,
+    system_prompt_for,
+    story_prompt_for,
+    random_style_hint,
+    BANNED_OPENERS,
+)
 
 logger = logging.getLogger("bot_engine")
 
@@ -580,7 +586,11 @@ async def _generate_comment(
     except Exception as e:
         logger.warning(f"emergentintegrations unavailable: {e}")
         return None
-    system = system_prompt_for(persona)
+    # Per-call random style hint (opening + micro-quirk) — feeds into
+    # the system prompt so every comment sounds different, even when
+    # the same bot posts several in a row.
+    hint = random_style_hint(random.Random())
+    system = system_prompt_for(persona, hint)
     side_label = feud.get("party_a") if side == "A" else feud.get("party_b")
     other_label = feud.get("party_b") if side == "A" else feud.get("party_a")
     user_prompt = (
@@ -628,11 +638,16 @@ async def _generate_story_caption(persona: Dict[str, Any]) -> Optional[str]:
 
 
 def _clean_comment(text: str) -> str:
-    """Post-process LLM output so it looks like a real user's message."""
+    """Post-process LLM output so it looks like a real user's message.
+
+    Strips filler openers (sinceramente, ecco, boh…) that Claude tends
+    to slip in despite the system-prompt blacklist. This is a safety
+    net, not a replacement for the prompt-level guard.
+    """
     if not text:
         return ""
     t = text.strip().strip('"').strip("'").strip("«»").strip()
-    # Strip prefix hallucinations like "Ecco il commento:" or "Commento:"
+    # Strip explicit LLM prefaces first.
     t = re.sub(
         r"^(ecco (?:il )?(?:commento|mio commento|il mio parere)[:\-\s]*)",
         "",
@@ -640,7 +655,40 @@ def _clean_comment(text: str) -> str:
         flags=re.IGNORECASE,
     )
     t = re.sub(r"^(commento[:\-\s]*)", "", t, flags=re.IGNORECASE)
+
+    # Iteratively strip a banned opener. Sometimes Claude chains two
+    # ("Sinceramente, boh, ...") so we loop up to 3 times.
+    for _ in range(3):
+        stripped = _strip_banned_opener(t)
+        if stripped == t:
+            break
+        t = stripped
+
     # Cap at 400 chars to be well below the DB limit (500)
     if len(t) > 400:
         t = t[:400].rsplit(" ", 1)[0] + "…"
     return t.strip()
+
+
+# Precompile once — the list is short and stable.
+_BANNED_OPENER_RE = re.compile(
+    r"^(?:" + "|".join(re.escape(w) for w in BANNED_OPENERS) + r")\b[\s,;:\-—–]*",
+    re.IGNORECASE,
+)
+
+
+def _strip_banned_opener(text: str) -> str:
+    """Remove one banned opener token from the start of `text`.
+
+    Handles «Sinceramente,», «Sinceramente:», «Sinceramente —», or
+    plain «Sinceramente ». If found, uppercase the next initial so the
+    sentence still reads naturally.
+    """
+    m = _BANNED_OPENER_RE.match(text)
+    if not m:
+        return text
+    rest = text[m.end():].lstrip()
+    if not rest:
+        return text  # avoid nuking the whole comment
+    # Uppercase the first character so the sentence still starts clean.
+    return rest[0].upper() + rest[1:] if rest else text
