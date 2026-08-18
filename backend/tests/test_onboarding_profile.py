@@ -4,7 +4,7 @@ import uuid
 import pytest
 import requests
 
-BASE_URL = "https://populus-bots.preview.emergentagent.com"
+BASE_URL = "https://resilient-app.preview.emergentagent.com"
 
 
 @pytest.fixture

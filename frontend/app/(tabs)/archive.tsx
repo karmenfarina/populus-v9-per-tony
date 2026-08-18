@@ -10,8 +10,10 @@ import { Ionicons } from "@expo/vector-icons";
 import { api, Feud } from "@/src/api";
 import { useAuth } from "@/src/auth/AuthContext";
 import { colors, spacing, font, radius } from "@/src/theme";
+import { cachedGet } from "@/src/utils/clientCache";
 import FeudCard from "@/src/components/FeudCard";
 import { ScrollToTopButton } from "@/src/components/ScrollToTopButton";
+import { FeudListSkeleton } from "@/src/components/Skeleton";
 
 const ALL_CAT = { id: "all", label: "Tutte" };
 
@@ -134,7 +136,14 @@ export default function ArchiveScreen() {
     setFeuds([]);
     const prevSelected = selectedDateRef.current;
     try {
-      const r = await api.archiveDates(cat);
+      // Le date di archivio cambiano solo a rollover giornaliero: 60s
+      // di cache client sono più che sicuri e riducono il tempo di
+      // apertura del tab a zero quando si torna dalla feed.
+      const r = await cachedGet(
+        `archive:dates:${cat}`,
+        60_000,
+        () => api.archiveDates(cat),
+      );
       const list: DateEntry[] = r.dates || [];
       setDates(list);
       if (list.length === 0) {
@@ -273,8 +282,8 @@ export default function ArchiveScreen() {
       {/* Feuds list for selected date */}
       {!emptyDates && (
         loadingFeuds ? (
-          <View style={styles.center} testID="archive-loading">
-            <ActivityIndicator size="large" color={colors.brandPrimary} />
+          <View testID="archive-loading">
+            <FeudListSkeleton count={3} />
           </View>
         ) : (
           <FlashList

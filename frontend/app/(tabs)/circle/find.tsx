@@ -15,6 +15,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { api } from "@/src/api";
 import { useAuth } from "@/src/auth/AuthContext";
 import { navStack } from "@/src/utils/navStack";
+import { cachedGet, invalidateCache } from "@/src/utils/clientCache";
 import { colors, font, spacing, radius } from "@/src/theme";
 
 /**
@@ -102,7 +103,11 @@ export default function CircleFindScreen() {
         try {
           const [c, s]: any[] = await Promise.all([
             api.circleGet(user.user_id),
-            api.circleSuggestions(15),
+            // Cache 60s: suggerimenti Cerchia sono un ranking pesante
+            // lato server. Il refetch avviene comunque a ogni focus
+            // effettivo del tab (useFocusEffect) per l'invalidazione
+            // hard su add/remove.
+            cachedGet('circle:suggestions:15', 60_000, () => api.circleSuggestions(15)),
           ]);
           if (cancelled) return;
           const ids: Set<string> = new Set((c?.members || []).map((m: any) => m.user_id));
@@ -180,6 +185,10 @@ export default function CircleFindScreen() {
     try {
       if (wasIn) await api.circleRemove(row.user_id);
       else await api.circleAdd(row.user_id);
+      // Ranking suggerimenti dipende dai membri Cerchia: invalida la
+      // cache così la prossima aperture non ripropone la persona
+      // appena aggiunta/rimossa.
+      invalidateCache('circle:suggestions');
     } catch {
       // Rollback all three stores on failure.
       setRows((prev) => prev.map((x) => x.user_id === row.user_id ? { ...x, in_my_circle: wasIn } : x));

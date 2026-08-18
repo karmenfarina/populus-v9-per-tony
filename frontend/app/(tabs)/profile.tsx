@@ -42,6 +42,7 @@ import { validateNickname, sanitizeNicknameInput } from "@/src/utils/nickname";
 import { resolvePhotoUri } from "@/src/utils/photoCache";
 import { Socials, EMPTY_SOCIALS } from "@/src/utils/socials";
 import { scrollMemory } from "@/src/utils/scrollMemory";
+import { cachedGet } from "@/src/utils/clientCache";
 
 // Module-level key used to identify this screen's entry in the
 // cross-mount scroll memory. `MY_PROFILE` is a stable string so the
@@ -389,11 +390,13 @@ export default function Profile() {
   useEffect(() => {
     (async () => {
       try {
-        const c = await api.categories();
+        // Categorie e professioni sono statiche server-side: cache 10min
+        // rende l'apertura del profilo istantanea al ri-ingresso.
+        const c = await cachedGet('categories', 600_000, () => api.categories());
         setCats(c.categories);
       } catch {}
       try {
-        const p = await api.professions();
+        const p = await cachedGet('professions', 600_000, () => api.professions());
         setProfessionsList((p as any).professions || []);
       } catch {}
     })();

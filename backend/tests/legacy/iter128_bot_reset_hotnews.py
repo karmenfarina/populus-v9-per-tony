@@ -11,7 +11,7 @@ import pytest
 import requests
 from datetime import datetime, timezone
 
-BASE_URL = "https://populus-bots.preview.emergentagent.com"
+BASE_URL = "https://resilient-app.preview.emergentagent.com"
 ADMIN_KEY = "populus-admin-42b8f3"
 
 # Make backend importable

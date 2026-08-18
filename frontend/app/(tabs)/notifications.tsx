@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  View, Text, StyleSheet, ActivityIndicator, Pressable, RefreshControl,
+  View, Text, StyleSheet, Pressable, RefreshControl,
 } from "react-native";
 import { FlashList, type FlashListRef } from "@shopify/flash-list";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -9,6 +9,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { api } from "@/src/api";
 import { colors, spacing, font, radius } from "@/src/theme";
 import { ScrollToTopButton } from "@/src/components/ScrollToTopButton";
+import { NotificationListSkeleton } from "@/src/components/Skeleton";
 import { useNotifications } from "@/src/notifications/NotificationsContext";
 import { useAuth } from "@/src/auth/AuthContext";
 
@@ -118,7 +119,7 @@ export default function NotificationsScreen() {
       </View>
 
       {loading ? (
-        <View style={styles.center}><ActivityIndicator size="large" color={colors.brandPrimary} /></View>
+        <NotificationListSkeleton count={6} />
       ) : items.length === 0 ? (
         <View style={styles.center} testID="notif-empty">
           <Ionicons name="notifications-off-outline" size={54} color={colors.muted} />

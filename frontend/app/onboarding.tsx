@@ -9,6 +9,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { api } from "@/src/api";
 import { useAuth } from "@/src/auth/AuthContext";
 import { colors, spacing, font } from "@/src/theme";
+import { cachedGet } from "@/src/utils/clientCache";
 import { sanitizeNicknameInput, validateNickname, NICKNAME_HINT, NICKNAME_MAX } from "@/src/utils/nickname";
 
 const REGIONS = [
@@ -73,8 +74,11 @@ export default function Onboarding() {
   useEffect(() => {
     (async () => {
       const [r, p] = await Promise.all([
-        api.categories(),
-        api.professions().catch(() => ({ professions: [] as string[] })),
+        // Categorie e professioni sono contenuti statici server-side:
+        // 10 minuti di cache client evitano roundtrip inutili se l'utente
+        // torna al flusso di onboarding (es. dopo un errore di rete).
+        cachedGet('categories', 600_000, () => api.categories()),
+        cachedGet('professions', 600_000, () => api.professions()).catch(() => ({ professions: [] as string[] })),
       ]);
       setCats(r.categories);
       setProfessions((p as any).professions || []);

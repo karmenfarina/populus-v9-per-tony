@@ -14,6 +14,7 @@ import {
 import { api, MiniUser } from "@/src/api";
 import { colors, spacing, font, radius } from "@/src/theme";
 import { detectMentionQuery } from "@/src/utils/mentions";
+import { cachedGet } from "@/src/utils/clientCache";
 
 /**
  * A drop-in replacement for `<TextInput>` that shows an @mention
@@ -110,7 +111,14 @@ export default function MentionInput({
       // typing anything else. This is the "Instagram-style" default
       // suggestion list the user asked for.
       try {
-        const res: any = await api.mentionSuggest(q, feudId, 6);
+        // Cache client 15s per (feudId, query): typing veloce → risposte
+        // istantanee, e se la rete cade il fallback stale-while-error
+        // mantiene la lista visibile. Chiave include feudId per non
+        // sporcare i suggerimenti tra un feud e l'altro.
+        const cacheKey = `mentions:${feudId || 'global'}:${q}`;
+        const res: any = await cachedGet(cacheKey, 15_000, () =>
+          api.mentionSuggest(q, feudId, 6),
+        );
         // Ignore if the caret has since left the mention token.
         const still = detectMentionQuery(
           stateRef.current.value,

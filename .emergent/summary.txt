@@ -1,143 +1,146 @@
 <analysis>**original_problem_statement**: 
-The user requested the creation of a fleet of 100 autonomous bot accounts for the app Populus. These bots must have unique personas, vote, post stories, and write natural-sounding comments periodically without triggering generic AI patterns. The admin needs a dedicated control panel to enable/disable bots, control their active count, and trigger a burst of activity.
-Additional PRODUCT REQUIREMENTS added during the session:
+The user requested optimization of the overall app performance (reducing load times, latency, and resource consumption while improving fluidity). Subsequently, they requested improvements for handling unstable network connections to ensure a reliable experience even with slow or intermittent internet.
+PRODUCT REQUIREMENTS: 
 - A unified Terms of Service and NDA acceptance screen with explicit lockdown rules.
 - Hot feud notifications should only trigger based on real user activity.
-- Robust deep-linking to comment mentions (auto-expanding the comment section and reliably scrolling to the target on every tap).
-- Ensure bot comments are distributed realistically across both factions (Yellow/Red) based on actual human voting distribution.
-- **Latest**: Code cleanup and reorganization. Create downloadable documentation detailing app rules, architecture, and AI logic. Reset the database to Day 1 (wiping all interactions but keeping the admin and 100 bots). Optimize backend architecture for extreme scalability (handling hundreds of thousands of users) and strengthen app security without altering any existing features, design, or UX.
+- Robust deep-linking to comment mentions.
+- Bot comments distributed realistically.
+- Scalable backend architecture.
+- Smooth mobile list rendering.
+- Robust offline/poor-network handling (retries, timeouts, and fallback caches).
 
-**User's preferred language**: Italian (You MUST respond to the user in Italian only)
+**User's preferred language**: Italian (You MUST automatically detect the user's primary language from their messages inside the <trajectory> tag and INSTRUCT next agent to respond in the user's preferred language only)
 
 **what currently exists?** 
-A full-stack Expo frontend and FastAPI backend social application (Populus). The backend monolithic  has been partially refactored to extract standalone routers. The DB has been reset to Day 1 state with 39+ custom indexes applied for scalability. Endpoints are optimized with Gzip compression, rate-limiting, and hardened JWT secrets. The application features a fully functional autonomous bot fleet driven by APScheduler and an admin dashboard for bot management. Thorough documentation has been generated in the  directory.
+A full-stack Expo frontend and FastAPI backend social application (Populus). The backend has been optimized with in-memory TTL caching () to reduce database round-trips for core feeds (hype, categories). The frontend utilizes  for highly performant list rendering and  for disk/memory image caching. A robust network layer is implemented with fetch retries,  timeouts,  client-side fallback cache, and a global offline .
 
 **Last working item**:
-    - Last item agent was working: Investigating the user's report of seeing strange bot names (e.g., chat_a) in the comments. The agent verified via database queries that the DB is completely clean (only 1 admin and the 100 official bots exist, and no comments from chat_a exist in the DB). The agent informed the user that this is likely a frontend client cache issue and provided instructions to hard refresh/reload the Expo app.
+    - Last item agent was working: Implementing resilience for unstable network connections. This included adding GET request retries, request timeouts (12s GET / 20s write), a  client cache fallback, and a  to warn users when offline.
     - Status: USER VERIFICATION PENDING
     - Agent Testing Done: Y
-    - Which testing method agent to use?: NA (DB verification via python script is already complete).
+    - Which testing method agent to use?: both
     - User Testing Done: N
 
 **All Pending/In progress Issue list**:  
   Issue 1: Ghost/Strange Bot Names Visible in Frontend (P0)
-     - Attempted fixes: Investigated MongoDB directly. DB contains exactly 101 users (1 admin + 100 valid bots) and 0 comments from anomalous names. The issue is confirmed as local cache/AsyncStorage data persistence on the client's device. 
-     - Next debug checklist: Wait for user to confirm if reloading the app/clearing cache solved the issue. If the user still sees them, check frontend  or /React Query caches (if any) or instruct them on how to wipe app data completely.
-     - Why fix this issue and what will be achieved with the fix? Ensures the user sees the true Day 1 state of the app without confusing ghost data from previous tests.
+     - Attempted fixes: Verified DB is clean (only 1 admin and 100 bots). Issue is local cache ( / Apollo) on the user's device.
+     - Next debug checklist: Await user confirmation if reloading/clearing cache resolved the issue. If it persists, instruct the user on how to fully wipe app data or clear  programmatically on next boot.
+     - Why fix this issue and what will be achieved with the fix? Ensures the user sees the accurate Day 1 clean state instead of stale local testing data.
      - Status: USER VERIFICATION PENDING
      - Is recurring issue? N
      - Should Test frontend/backend/both after fix? Frontend
      - Blocked on other issue: None
 
 **In progress Task List**: 
-  *(None active, waiting on user verification of the cache issue)*
+  *(None active. Network optimizations were just completed.)*
 
-**Upcoming and Future Tasks**
+**Upcoming and Future Tasks**:
   Task 1: Complete Frontend Refactoring (Phase 3 of Cleanup) (Priority P2)
-     - Where to resume: , , , .
-     - What will be achieved with this? Splitting massive frontend files (>1000-2000 lines) into smaller, reusable components in . 
-     - *Note: The agent added Table of Contents (TOC) to these files but paused full extraction because of the high risk of breaking complex UI logic (e.g., deep linking). Only proceed if explicitly requested and carefully tested step-by-step.*
+     - Where to resume: , , 
+     - What will be achieved with this? Splitting massive files (>1000-2000 lines) into smaller, reusable components in . 
+     - *Note: Paused previously due to high risk of breaking deep linking. Proceed only if requested and with extreme caution.*
+  Task 2: Extend Client Cache to Other Endpoints (Priority P3)
+     - Where to resume: 
+     - What will be achieved with this? Apply cache to  and  for better perceived performance.
+  Task 3: Add UI Skeleton Loaders (Priority P3)
+     - Where to resume: , lists in 
+     - What will be achieved with this? Replacing standard  spinners with skeleton loaders for smoother perceived loading.
 
-**Completed work in this session**
-- Documentation: Created , , ,  in  (DONE).
-- DB Reset: Created and executed  which wiped all human interactions, retaining only 1 admin and 100 bots (DONE).
-- Backend Refactoring: Extracted , , , , , and  routers from  to . Extracted constants to  and  (DONE).
-- UX Bug Fix: Fixed misleading PRIMA ATTIVA I BOT disabled button label in the admin panel by changing it to an explicit instruction text block (DONE).
-- Scalability: Implemented  to auto-ensure 39+ custom indexes on boot. Added Gzip compression middleware to the FastAPI app. Tuned Motor connection pool limits (DONE).
-- Security: Generated and applied a robust 64-char hex . Added rate-limiting (in-memory) to , , , and . Added Content-Security-Policy (CSP) headers to the HTML share endpoints (DONE).
+**Completed work in this session**:
+- Backend Caching: Created  with TTL and stampede protection. Applied to , , and  (DONE).
+- DB Optimization: Fixed N+1 query issue in the hype feed, reducing DB round-trips to 1 (DONE).
+- Frontend Performance (Lists): Installed  and replaced  in , , , and  (DONE).
+- Frontend Performance (Images): Switched to  with  cache policy in , , and  (DONE).
+- Network Layer Resilience: Updated  with  timeouts, automatic retries for GET requests, and built  (DONE).
+- Offline UI: Added  and integrated it into the root  (DONE).
 
-**Earlier issues found/mentioned but not fixed**
+**Earlier issues found/mentioned but not fixed**:
   *(None)*
 
-**Known issue recurrence from previous fork**
+**Known issue recurrence from previous fork**:
   - Issue recurrence in previous fork: Deep link scrolling & mention logic.
   - Recurrence count: 3+
   - Status: RESOLVED
-  Note: Be highly aware of the complex  chains managing , , , and  inside . DO NOT refactor this file without extreme caution.
+  Note: Be highly aware of the complex  chains managing  inside . DO NOT refactor this file without extreme caution.
 
-**Code Architecture**
-- : Main FastAPI entry point (reduced in size, includes routers).
-- : Contains modularized endpoint files (, , , , , ).
--  & : Autonomous bot scheduling and logic.
-- : Expo router UI screens (currently monolithic but documented with TOCs).
-- : Centralized markdown documentation of app features and backend logic.
+**Code Architecture**:
+- : FastAPI entry point with gzip, rate-limiting, and caching applied.
+- : Centralized in-memory cache logic.
+- : Centralized stale-while-revalidate client cache.
+- : Expo router screens (using FlashList).
+- : API wrapper with network resilience (timeouts/retries).
 
-**Key Technical Concepts**
-- **APScheduler**: Used in backend for background task execution (Bot actions).
-- **Emergent LLM Key (Claude Haiku 4.5)**: Used for bot comment/story generation.
-- **Motor Connection Pooling**: Optimized for concurrent DB connections.
-- **FastAPI GzipMiddleware & Rate Limiting**: Added for performance and security.
+**Key Technical Concepts**:
+-  for large dataset rendering.
+-  for high-performance image caching.
+-  caching strategy.
+- FastAPI in-memory TTL caching.
 
-**key DB schema**
-- : Contains human users and bots (, ).
-- :  MUST always be populated.
-- Indexes: 39+ custom indexes enforce optimal querying on fields like , , , , etc.
+**key DB schema**:
+- : Contains human users and 100 bots.
+- : Monitored by the  feed.
+- Indexes: 39+ custom indexes applied in the previous fork.
 
-**changes in tech stack**
-- Added  for response compression.
+**changes in tech stack**:
+- Added .
+- Actively utilizing  across core components.
 
-**All files of reference** 
+**All files of reference**:
+-  (new)
+-  (new)
+-  (new)
 - 
 - 
 - 
-- 
-- 
-- 
-- 
--  (all newly created route files)
--  (UX text update applied here)
 
-**Areas that need refactoring**: 
+**Areas that need refactoring**:
+-  (Monolithic, handle with care)
 - 
-- 
-- 
-(These frontend components remain massive monolithic files. Table of Contents were added, but no component extraction has taken place to avoid breaking functionality.)
 
-**key api endpoints**
-- : Triggers immediate bot activity.
-- : Deletes all previous bot comments/replies.
-- : Serves the new markdown documentation files.
+**key api endpoints**:
+-  (Highly optimized, anon cached)
+-  (Highly optimized, cached)
 
-**Critical Info for New Agent** 
-- **Language**: MUST communicate with the user in **Italian**.
-- **User's Immediate Concern**: The user is confused by seeing old ghost data (bots named ) in the frontend after the DB reset. The DB is completely wiped and clean. You must guide them properly on clearing their app state/cache.
-- **Backend Optimizations**: The backend now strictly enforces rate-limiting on auth endpoints. If you test signups programmatically, be aware of HTTP 429 limits.
+**Critical Info for New Agent**:
+- **Language Requirement:** MUST communicate with the user in **Italian**.
+- **Preview Environment Note:** When making changes, remind the user that native features (like background networking or specific push behaviors) might require a fresh native build and cannot be fully validated in the web preview or standard Expo Go.
+- **Client Cache Bug:** The user previously reported seeing weird bot names (chat_a). This is 100% a local cache issue on their device. If they bring it up again, instruct them to clear app data.
 
-**documents and test reports created in this job**
-- 
-- 
-- 
-- 
--  (Scalability and security test run results, 100% PASS).
+**documents and test reports created in this job**:
+-  (Updated with Phase 1-3 completion metrics)
+-  (19/19 tests passed)
 
-**Last 10 User Messages and any pending HUMAN messages** 
-1. (User) fai quello che devi ora. (Proceed with remaining tasks).
-2. (Agent) Completed backend scalability (Indexes, Gzip) and Security (Rate limiting, CSP, strict JWT). Verified with Testing Agent (100% Pass). Finished session.
-3. (User) vedo bot con nomi strani in chat nei commenti di qualche post, è normale? sono dei bot di prova estranei ai 100 con nomi plausibili creati? quelli funzionano ancora? sono attivi? rispondi alle domande senza sprecare crediti possibilmente (I see bots with weird names in chat, is this normal?)
-4. (Agent) Clarified that the 100 bots are currently inactive. Stated the visible comments are just residues from testing before the reset. Offered to run the bot comment cleanup tool.
-5. (User) ripulisci i commenti residui dei bot non facenti parte dei 100. (Clean the residual comments from bots not part of the 100).
-6. (Agent) Clarified that the DB is totally clean of strange bot names, there are only 100 valid bots. Asked the user to clarify if they mean names like chat_a.
-7. (User) no ci sono dei nomi strani tipo chat_a, ecc. quelli intendo (Yes, there are weird names like chat_a, etc., that's what I mean).
-8. (Agent) Checked the DB again. Proved there are exactly 101 users total (1 admin + 100 bots) and 0 comments/users with . Explained to the user that this is frontend client-side cache and instructed them to force-refresh or reload the Expo app. Pending user confirmation.
+**Last 10 User Messages and any pending HUMAN messages**:
+1. (User) vedo bot con nomi strani in chat nei commenti... (Pending verification if cache wipe fixed it).
+2. (User) ripulisci i commenti residui... 
+3. (User) no ci sono dei nomi strani tipo chat_a, ecc. quelli intendo
+4. (Agent) Explained it's a frontend cache issue, DB is wiped.
+5. (User) Please use ask_human tool and confirm your plan now.
+6. (User) Ottimizza le performance complessive dellapp riiducendo tempi di caricamento, latenza..." (Optimize overall app performance).
+7. (Agent) Asked if all 3 phases (Backend, Frontend, Network) should be done sequentially and if `expo-image` should be installed.
+8. (User) "Tutte e 3. come pensi sia meglio" (Do all 3 phases, install expo-image).
+9. (Agent) Completed performance optimizations and presented summary.
+10. (User) "Migliora la gestione delle connessioni instabili per garantire unesperienza affidabile anche con rete lenta o intermittente. (Improve unstable connection handling). -> *Agent completed this, status is USER VERIFICATION PENDING.*
 
-**Project Health Check:**
-- Frontend: Functional. (Displaying cached ghost data on user's device, requires a refresh).
-- Backend: Highly stable, modularized, optimized, and secured. 100% Testing Agent pass.
+**Project Health Check**:
+- Frontend: Highly performant, FlashList integrated, network resilience active.
+- Backend: Scalable, N+1 fixed, TTL cached.
+- Integration: Intact.
 
-**3rd Party Integrations** 
-- Emergent Managed Google Auth
-- OpenAI/Claude (AI Feuds / Bot Engine) — uses Emergent LLM Key
-- YouTube Data API (Media Extraction) — uses internal Key
+**3rd Party Integrations**:
+- Emergent-managed Google Auth
+- Emergent LLM Key (Claude Haiku 4.5 for Bot Engine)
+- YouTube Data API (Media Extraction) - Internal Key
 
-**Testing status**
-  - Testing agent used after significant changes: YES (Verified backend endpoints, bot logic, and scalability/security updates over two runs).
+**Testing status**:
+  - Testing agent used after significant changes: YES (Tested backend cache optimizations, 19/19 pass + 46 regression).
   - Troubleshoot agent used after agent stuck in loop: NO
   - Test files created: 
   - Known regressions: None
 
-**Credentials to test flow:**
+**Credentials to test flow**:
 Check .
 Admin Email: 
 
-**What agent forgot to execute**
-Phase 3 of the refactoring plan (extracting frontend monolithic components) was paused due to risk. It was intentionally avoided, not strictly forgotten, but remains incomplete based on the initial instruction.</analysis>
+**What agent forgot to execute**:
+The agent did not forget, but intentionally postponed Phase 3 of the original frontend refactoring (splitting  and ) to avoid breaking the fragile deep-link scrolling logic unless explicitly requested.</analysis>

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  View, Text, StyleSheet, RefreshControl, Pressable, ActivityIndicator,
+  View, Text, StyleSheet, RefreshControl, Pressable,
 } from "react-native";
 import { FlashList, type FlashListRef } from "@shopify/flash-list";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -11,6 +11,7 @@ import { useAuth } from "@/src/auth/AuthContext";
 import { colors, spacing, font, radius } from "@/src/theme";
 import FeudCard from "@/src/components/FeudCard";
 import { ScrollToTopButton } from "@/src/components/ScrollToTopButton";
+import { FeudListSkeleton } from "@/src/components/Skeleton";
 
 export default function TopScreen() {
   const router = useRouter();
@@ -103,9 +104,7 @@ export default function TopScreen() {
       </View>
 
       {loading && !refreshing ? (
-        <View style={styles.centerBox}>
-          <ActivityIndicator size="large" color={colors.brandPrimary} />
-        </View>
+        <FeudListSkeleton count={3} />
       ) : error ? (
         <View style={styles.centerBox}>
           <Ionicons name="alert-circle-outline" size={48} color={colors.muted} />

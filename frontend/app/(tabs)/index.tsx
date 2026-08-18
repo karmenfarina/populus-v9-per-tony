@@ -15,6 +15,7 @@ import { colors, spacing, font, radius } from "@/src/theme";
 import FeudCard from "@/src/components/FeudCard";
 import StoriesBar from "@/src/components/StoriesBar";
 import { ScrollToTopButton } from "@/src/components/ScrollToTopButton";
+import { FeudListSkeleton } from "@/src/components/Skeleton";
 
 const ALL_CAT = { id: "all", label: "Tutte" };
 const HYPE_CAT = { id: "hype", label: "🔥 Hype" };
@@ -335,8 +336,8 @@ export default function HomeFeed() {
       )}
 
       {loading ? (
-        <View style={styles.center} testID="home-loading">
-          <ActivityIndicator size="large" color={colors.brandPrimary} />
+        <View style={{ flex: 1 }} testID="home-loading">
+          <FeudListSkeleton count={3} />
         </View>
       ) : (
         <View style={{ flex: 1 }} {...(isWeb ? webPan.panHandlers : {})}>
