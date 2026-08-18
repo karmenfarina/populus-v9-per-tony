@@ -2685,6 +2685,12 @@ async def vote_feud(feud_id: str, body: VoteBody, user: dict = Depends(get_curre
     await _notify_vote_flip(updated, pre_leader, user['user_id'])
     # Fire-and-forget alignment fanout for other voters (badges + counters).
     asyncio.create_task(_fanout_alignment_recompute(feud_id, pre_leader, user['user_id']))
+    # Hot-news trigger — fires only if the feud has crossed the real
+    # engagement threshold (votes + visible comments). Idempotent thanks
+    # to the `hot_notified` flag on the feud, so it fires at most once
+    # across all vote/comment events. Fire-and-forget so the vote reply
+    # isn't slowed down.
+    asyncio.create_task(_fanout_hot_news(updated))
     # Analytics — first-time vote on this feud
     asyncio.create_task(_log_event(
         db, user['user_id'], EVT_VOTE_CAST,
@@ -3859,33 +3865,84 @@ async def _daily_lock(user_id: str, kind: str) -> bool:
     return res.upserted_id is not None
 
 
+# Real-engagement thresholds for "faida calda" push notifications. The
+# earlier version fired on Claude's SELF-RATED `engagement_score` at
+# creation time — which meant users got pushes on brand-new feuds with
+# zero votes and zero comments. Now we require ACTUAL activity before
+# firing (votes AND/OR visible comments).
+HOT_MIN_VOTES = 10          # a+b combined
+HOT_MIN_COMMENTS = 3        # visible comments (before block/side-flip filter)
+HOT_MIN_COMBINED_SCORE = 15 # votes + 2*comments — fallback for high-vote-no-comments
+
+
 async def _fanout_hot_news(feud: dict) -> None:
-    """When a fresh, high-engagement faida lands in an interesting category,
-    push a mobile notification to users who have that category among their
-    onboarding favorites. Guardrails:
-      - Requires engagement_score >= 7 (Claude's own self-rating).
-      - Requires push_notifications setting to be enabled for the user (default on).
-      - Rate-limited to at most 1 hot-news push per user per day.
+    """Send a mobile push to users who have the feud's category among
+    their onboarding favourites — but ONLY when the feud is genuinely
+    hot.
+
+    Guardrails (all must pass):
+      • Feud NOT already flagged `hot_notified` (fires at most once).
+      • Real engagement threshold: `votes_a + votes_b >= HOT_MIN_VOTES`
+        AND `comments >= HOT_MIN_COMMENTS`, OR
+        the combined score `votes + 2*comments >= HOT_MIN_COMBINED_SCORE`.
+      • Feud NOT hidden.
+      • Category is set.
+      • Recipient has `push_notifications` enabled AND has the category
+        as a favourite.
+      • Recipient has NOT yet received a `hot_news` push today.
     """
-    score = int(feud.get('engagement_score') or 0)
-    if score < 7:
+    if not feud:
         return
-    cat = feud.get('category')
+    if feud.get('is_hidden'):
+        return
+    if feud.get('hot_notified'):
+        return
+    # Fetch the freshest doc so bot votes/comments (which land via direct
+    # DB writes, not the API endpoints) are reflected in the counters.
+    fresh = await db.feuds.find_one({'feud_id': feud.get('feud_id')}, {'_id': 0}) or {}
+    if not fresh or fresh.get('hot_notified') or fresh.get('is_hidden'):
+        return
+    votes = int(fresh.get('votes_a') or 0) + int(fresh.get('votes_b') or 0)
+    # Comments count from the collection — cheap because `feud_id` is
+    # indexed. We count ALL comments (including bot ones) because bots
+    # ARE users on the platform and contribute real activity.
+    try:
+        comments = await db.comments.count_documents({'feud_id': fresh.get('feud_id')})
+    except Exception:
+        comments = 0
+    combined = votes + 2 * comments
+    passes = (
+        (votes >= HOT_MIN_VOTES and comments >= HOT_MIN_COMMENTS)
+        or combined >= HOT_MIN_COMBINED_SCORE
+    )
+    if not passes:
+        return
+    cat = fresh.get('category')
     if not cat:
         return
     users = await db.users.find(
         {
             'favorite_categories': cat,
             'is_anonymous': {'$ne': True},
+            'is_bot': {'$ne': True},
+            'is_dev_account': {'$ne': True},
             '$or': [{'push_notifications': True}, {'push_notifications': {'$exists': False}}],
         },
         {'_id': 0, 'user_id': 1},
     ).to_list(500)
+    # Atomically flag the feud so a concurrent fanout call from a
+    # different endpoint (vote/comment) doesn't double-notify.
+    flag = await db.feuds.update_one(
+        {'feud_id': fresh.get('feud_id'), 'hot_notified': {'$ne': True}},
+        {'$set': {'hot_notified': True, 'hot_notified_at': now_utc()}},
+    )
+    if flag.modified_count == 0:
+        return  # another fanout already claimed this feud
     if not users:
         return
     title = "Nuova faida calda per te"
-    body = (feud.get('title') or '')[:120]
-    fid = feud.get('feud_id')
+    body = (fresh.get('title') or '')[:120]
+    fid = fresh.get('feud_id')
     for u in users:
         uid = u['user_id']
         try:
@@ -5517,14 +5574,14 @@ async def _daily_generation_loop():
                     if feud:
                         await db.feuds.insert_one(feud)
                         logger.info(f"scheduler: inserted feud for {cat['id']}")
-                        # Hot-news trigger: high-engagement faide fan out a push
-                        # to users who have this category among their favorites.
-                        # Rate-limited to 1 push per user per day (across all
-                        # categories), so even multiple hot faide won't spam.
-                        try:
-                            await _fanout_hot_news(feud)
-                        except Exception as e:
-                            logger.warning(f"hot-news fanout failed: {e}")
+                        # Hot-news trigger is NO LONGER fired on creation:
+                        # a brand-new feud has zero votes and zero comments,
+                        # so the notification would say "faida calda" about
+                        # something that hasn't collected any activity yet.
+                        # Instead, the fanout is now called from the vote /
+                        # comment insertion path, once REAL engagement
+                        # crosses the HOT_MIN_* thresholds. See
+                        # `_fanout_hot_news` for the guardrails.
                 except Exception as e:
                     logger.warning(f"scheduler gen failed for {cat['id']}: {e}")
             await db.system_meta.update_one(

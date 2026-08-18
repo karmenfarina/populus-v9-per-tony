@@ -309,29 +309,50 @@ export default function Profile() {
   // Keep the privacy switches in sync with the latest `user` snapshot from
   // AuthContext (e.g. after refreshMe() runs on focus). Anything undefined
   // is treated as True to preserve pre-existing "always public" behaviour.
+  //
+  // Guard: while an optimistic toggle is IN FLIGHT (pending API roundtrip)
+  // we skip the sync — otherwise `refreshMe()` firing between the tap and
+  // the response would snap the Switch back to the STALE server value,
+  // producing the "capriccio" animation the user reported. The effect also
+  // resumes cleanly once the pending counter drops to zero.
+  const histPrivacyPendingRef = useRef(0);
   useEffect(() => {
-    setHistPublicGeneric(user?.history_public_generic !== false);
-    setHistPublicMutual(user?.history_public_mutual !== false);
+    if (histPrivacyPendingRef.current > 0) return;
+    const g = user?.history_public_generic !== false;
+    const m = user?.history_public_mutual !== false;
+    setHistPublicGeneric((cur) => (cur === g ? cur : g));
+    setHistPublicMutual((cur) => (cur === m ? cur : m));
   }, [user?.history_public_generic, user?.history_public_mutual]);
 
   /**
    * Toggle a single history-privacy flag with optimistic UI + rollback.
    * A single PATCH persists both flags on the server side; only the
    * changed one is sent in the payload.
+   *
+   * Rapid-tap safety: we take the functional setter form and increment
+   * a pending counter so the sync-from-user effect above stays parked
+   * until the roundtrip resolves. This kills the double-animation
+   * glitch (Switch flipping twice) reported by the founder when the
+   * button was tapped in quick succession or while the profile
+   * re-focused.
    */
   const updateHistPrivacy = useCallback(async (kind: "generic" | "mutual") => {
-    const prev = kind === "generic" ? histPublicGeneric : histPublicMutual;
-    const next = !prev;
-    // Optimistic swap.
-    if (kind === "generic") setHistPublicGeneric(next); else setHistPublicMutual(next);
+    const setter = kind === "generic" ? setHistPublicGeneric : setHistPublicMutual;
+    // Capture the previous value FROM the setter itself (not from the
+    // outer closure) so rapid taps chain correctly.
+    let prev = true;
+    setter((cur) => { prev = cur; return !cur; });
+    histPrivacyPendingRef.current += 1;
     try {
-      await api.updateHistoryPrivacy({ [kind]: next } as any);
+      await api.updateHistoryPrivacy({ [kind]: !prev } as any);
     } catch {
       // Rollback on failure.
-      if (kind === "generic") setHistPublicGeneric(prev); else setHistPublicMutual(prev);
+      setter(prev);
       Alert.alert("Errore", "Impossibile aggiornare le impostazioni. Riprova.");
+    } finally {
+      histPrivacyPendingRef.current = Math.max(0, histPrivacyPendingRef.current - 1);
     }
-  }, [histPublicGeneric, histPublicMutual]);
+  }, []);
 
   // Note: we previously auto-refreshed the vote history every 30s via
   // setInterval so the MAGGIORANZA/MINORANZA badges could reflect

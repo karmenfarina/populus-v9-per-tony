@@ -1,0 +1,27 @@
+{
+  "summary": "Live end-to-end retest of the 3 UX bugs (chat flash, privacy switch snap-back, mention deep-link) — ALL 3 PASS. Bypassed the previous JWT-injection harness limitation by logging in via POST /api/auth/login inside page.evaluate and seeding localStorage as JSON.stringify(token) (which is what @react-native-async-storage/async-storage's web shim expects). Both chat_a and chat_b already had terms_accepted_version='v1' and nda_accepted_version='v1' in DB, so no DB patching was required.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": ["/app/test_reports/iteration_130.json"],
+  "action_items": [
+    "No action needed — all 3 fixes verified live on the deployed preview.",
+    "For future testing agents: the storage web shim maps directly to window.localStorage with NO key prefix and expects values to be JSON.stringify'd. To bootstrap an authenticated session in Playwright, run `localStorage.setItem('faide_token', JSON.stringify(token))` after POST /api/auth/login. Note also: Switch component from RN Web renders an inner `<input role=\"switch\" type=\"checkbox\">` — read `.checked` (not aria-checked on outer div) to inspect state."
+  ],
+  "critical_code_review_comments": [
+    "BUG 1 fix (messages/[userId].tsx L173-202) works: two-layer defence (render-time gating via visibleMessages + post-commit useEffect reset) eliminates the previous-chat flash. Playwright with 10ms polling from tap→+500ms captured 44 samples, zero of them contained a chat_b msg-bubble testID after tapping the bot conversation.",
+    "BUG 2 fix (profile.tsx histPrivacyPendingRef counter + functional setters) works: 3 rapid taps at 100ms delay produced exactly 3 flips (False→True→False→True), settled at True and stayed True for the full 2s tail window — no snap-back to server value during PATCH round-trips.",
+    "BUG 3 fix (feud/[id].tsx cascade fallback) works: (a) explicit `?comment=cid&side=B&from=notifications` opens comments-list-b with the target visible; (b) `?comment=cidB` alone (no side) correctly refines to side B via cA/cB match; (c) `?comment=cidA` alone opens side A. No case landed on comments-idle."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (frontend only, but /api/auth/login, /api/messages/*, /api/feuds/*/comments, /api/auth/me all 200)", "frontend": "100% (BUG 1, BUG 2, BUG 3 all PASS)"},
+  "seed_data_creation": "Seeded 2nd conversation for chat_a with bot_000 (3 messages via POST /api/messages/send) so BUG 1 could exercise a chat-to-chat switch. Also seeded 2 test comments on feud_83e56ed5b22b: cmt_9bc1cc718b3d (side A, by chat_a) and cmt_db5fd1e238d7 (side B, by chat_b) to exercise BUG 3 deep-link scenarios.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Auth bootstrap for Playwright: POST /api/auth/login inside page.evaluate, then localStorage.setItem('faide_token', JSON.stringify(token)) — no key prefix on web because AsyncStorage web shim uses window.localStorage directly. Switch state on web: read `.checked` on the inner `input[role=\"switch\"]` inside the testID container. Pre-verified test users are user_6e65e19525d5 (chat_a) and user_16f709708760 (chat_b); both have terms_accepted_version='v1' and nda_accepted_version='v1'. Seeded artefacts still in DB: bot_000 conversation for chat_a; feud_83e56ed5b22b comments cmt_9bc1cc718b3d (A) and cmt_db5fd1e238d7 (B).",
+  "rca_of_issue": "No new bugs. All three previously reported fixes validated live:\n1) Chat flash: render-time visibleMessages gating on boundIdRef.current === userId is fully effective (0 stray bubbles observed over a 500ms high-frequency poll during the tap-to-switch).\n2) Privacy switch snap-back: pending counter + functional setters correctly ignore refreshMe() results while a PATCH is in flight; 3 rapid taps produced a clean 3-flip trail and settled with no reverse-flip.\n3) Mention deep-link: cascade cA/cB → sideParam → my_vote → 'A' correctly opens the right faction across all 3 URL shapes tested; never falls back to comments-idle."
+}

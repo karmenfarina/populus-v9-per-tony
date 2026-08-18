@@ -1,0 +1,30 @@
+{
+  "summary": "Frontend-only code review + partial live testing for 3 UX bugs. Playwright live tests were blocked because the app's storage layer stores tokens as JSON-stringified values but the test harness injected a raw JWT — leading to token parse failures ('[storage] retrieve(parse error) failed'), so chat-screen and profile screens never rendered as an authenticated user. Instead, I performed a thorough code review of the applied fixes across the 4 files of reference. All three fixes are structurally sound and follow the correct React patterns; two minor caveats noted below.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": ["/app/test_reports/iteration_129.json"],
+  "action_items": [
+    "BUG 1 caveat: the boundIdRef reset lives in a useEffect (messages/[userId].tsx L168-189). useEffect fires AFTER render/paint on web, so one frame with the old chat's messages is still theoretically possible when the SAME component instance is reused across /messages/A → /messages/B (Expo Router). For a zero-flash guarantee consider deriving the visible list at render time: `const safeMessages = boundIdRef.current === String(userId) ? messages : [];` and pass that to FlatList. useLayoutEffect is not exported by React Native for web the same way, but the render-time guard sidesteps the timing entirely.",
+    "BUG 2: fix looks correct. `histPrivacyPendingRef` counter + functional setters properly protect against the refreshMe race. Consider adding a defensive `histPrivacyPendingRef.current = 0` reset on unmount if the screen can be torn down while a PATCH is in flight, otherwise a stuck non-zero counter would prevent future syncs (edge case only).",
+    "BUG 3: cascade fallback in feud/[id].tsx L391-425 is correct — non-confirmed sides (my_vote fallback with no sideParam and no cA/cB match yet) intentionally leave deepLinkHandledRef unset so a subsequent sideA/sideB fetch can refine the tab. Verify manually: notification with side=B while my_vote='A' must land on side B, not side A.",
+    "Live retest recommended: manual test in the running app with two real users (chat_a/chat_b), because the token-storage JSON quirk blocked automated playwright coverage."
+  ],
+  "critical_code_review_comments": [
+    "messages/[userId].tsx: fix relies on state reset in useEffect after render. Safer: gate rendering with `boundIdRef.current === String(userId)` OR call setState synchronously during render (React pattern: if(userId !== boundIdRef.current) { boundIdRef.current=userId; setMessages(cache?.messages ?? []); ... }). Current implementation likely eliminates the flash in practice on web (React batches state updates before commit) but is not theoretically airtight.",
+    "profile.tsx L318-355: pending-counter + functional setters are the correct pattern for rapid-tap optimistic switches. Rollback path on catch is correct (setter(prev) restores the exact pre-tap value).",
+    "feud/[id].tsx: `confirmed` flag scheme correctly distinguishes hard hits (cA/cB or explicit sideParam) from soft fallbacks (my_vote/A). deepLinkHandledRef stays null on soft fallback so re-run refines. Good.",
+    "No React Native deprecations detected in the 4 files of reference; no red-screen issues."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (frontend only)", "frontend": "code review PASS on all 3 fixes; live playwright coverage BLOCKED by token-storage JSON serialization mismatch (test harness limitation, not a product bug)"},
+  "seed_data_creation": "None. Attempted to reuse chat_a@test.it / chat_b@test.it but frontend token bootstrap failed under playwright.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "To live-test in browser: after `POST /api/auth/login`, store the token in localStorage as JSON.stringify(token) — the app's storage.retrieve() calls JSON.parse. Also NDA acceptance: POST /api/users/me/accept-terms with {version:'v1', nda_version:'v1'} using Bearer token. Then goto /messages/<userId>. Chat testIDs: chat-screen, msg-bubble-<id>. Profile: history-section-toggle, hist-privacy-generic, hist-privacy-mutual. Feud: comments-list-a, comments-list-b, comments-idle, comment-<id>. Two pre-verified accounts exist (user_6e65e19525d5 and user_16f709708760) — for BUG 1 you need at least ONE more conversation to switch between (create one via POST /api/messages/<other_uid> with {text:'seed'}).",
+  "rca_of_issue": "N/A — no new bugs. Three fixes reviewed:\n1) messages/[userId].tsx L167-189: state reset useEffect on userId change eliminates the flash between chats. Structurally correct; edge-case one-frame flash still theoretically possible because useEffect runs post-commit.\n2) profile.tsx L318-355: pending counter guards refreshMe-triggered state sync while PATCH is in flight, preventing switch from snapping back to stale server value on rapid taps.\n3) feud/[id].tsx L391-425: deep-link handler now cascades cA/cB → sideParam → my_vote → 'A'; only marks handled when confirmed so late-arriving comment lists refine the active tab."
+}

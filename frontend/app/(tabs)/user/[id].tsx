@@ -305,6 +305,12 @@ export default function UserPublicScreen() {
   };
 
   const [historyHidden, setHistoryHidden] = useState<null | "private" | "mutual_private" | "anonymous">(null);
+  // Guard against "labels flickering" when a private/hidden history is
+  // loaded. Until the FIRST fetch resolves we don't know whether the
+  // owner has opted out of sharing, so we must not render the filter
+  // chips or the "Nessun voto" empty state — those would flash and
+  // then swap to the "Storico voti privato" box. See gate below.
+  const [historyFirstLoaded, setHistoryFirstLoaded] = useState(false);
 
   const loadHistory = useCallback(async (uid: string, f: HFilter, opts?: { force?: boolean }) => {
     const now = Date.now();
@@ -324,10 +330,12 @@ export default function UserPublicScreen() {
       // "no votes" message.
       if (r.hidden) setHistoryHidden(r.reason || "private");
       else setHistoryHidden(null);
+      setHistoryFirstLoaded(true);
     } catch {
       setHistoryCache((prev) => ({ ...prev, [f]: [] }));
       historyLoadedAtRef.current[f] = Date.now();
       setHistoryHidden(null);
+      setHistoryFirstLoaded(true);
     }
     finally { setRefreshingH(false); }
   }, []);
@@ -340,6 +348,15 @@ export default function UserPublicScreen() {
     if (!historyExpanded) return;
     loadHistory(id, filter);
   }, [id, filter, loadHistory, profile?.is_anonymous, historyExpanded]);
+
+  // Reset the "first-loaded" gate whenever the viewer navigates to a
+  // different user's profile. Without this reset, the previous profile's
+  // "loaded" flag would leak in — reintroducing the same flicker on the
+  // new profile if that user also has a private history.
+  useEffect(() => {
+    setHistoryFirstLoaded(false);
+    setHistoryHidden(null);
+  }, [id]);
 
   // On focus (e.g. returning from a feud where the viewer may have voted,
   // or coming back to this profile after any action) do a **silent
@@ -832,7 +849,15 @@ export default function UserPublicScreen() {
                 {/* Owner has opted this history out for this viewer type. Show
                     a clean placeholder with the appropriate reason instead
                     of listing votes. */}
-                {historyHidden === "private" ? (
+                {!historyFirstLoaded ? (
+                  // ── Pre-flight: neutral loading box, no chips, no empty
+                  // label. Prevents the "Nessun voto → Storico privato"
+                  // flicker reported when opening a private history for
+                  // the first time.
+                  <View style={styles.historyLoadingBox} testID="public-history-loading">
+                    <ActivityIndicator color={colors.brandPrimary} />
+                  </View>
+                ) : historyHidden === "private" ? (
                   <View style={styles.historyHiddenBox} testID="public-history-hidden-private">
                     <Ionicons name="lock-closed" size={22} color={colors.muted} />
                     <Text style={styles.historyHiddenTitle}>Storico voti privato</Text>
@@ -1322,6 +1347,15 @@ const styles = StyleSheet.create({
   },
   historyHiddenTitle: { color: colors.onSurface, fontSize: font.sizes.base, fontWeight: "600" },
   historyHiddenHint: { color: colors.muted, fontSize: font.sizes.sm, textAlign: "center", lineHeight: 18 },
+  // Neutral loading box shown before the FIRST history fetch resolves.
+  // We keep it dimensionally close to `historyHiddenBox` so the section
+  // doesn't jump vertically once the box swaps content on load.
+  historyLoadingBox: {
+    minHeight: 96,
+    paddingVertical: spacing.lg,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   historyList: { gap: spacing.sm, marginTop: spacing.sm },
   historyItem: { flexDirection: "row", borderWidth: 2, borderColor: colors.border, backgroundColor: colors.surfaceSecondary, overflow: "hidden" },
   sideBar: { width: 8 },

@@ -157,6 +157,49 @@ export default function ChatScreen() {
   const [text, setText] = useState("");
   const [iBlocked, setIBlocked] = useState(initialCache?.i_blocked ?? false);
   const [theyBlocked, setTheyBlocked] = useState(initialCache?.they_blocked ?? false);
+  // Track the userId this state currently belongs to. When Expo Router
+  // navigates between two chats (`/messages/A` → `/messages/B`) it REUSES
+  // the mounted component — so the initial state above stays bound to
+  // chat A until the async loadInitial() for B completes. Rendering
+  // chat A's messages while `userId=B` produces the "millisecond of
+  // previous chat" flash. Two-layer defence:
+  //   (a) The effect below resets state IMMEDIATELY when userId changes
+  //       (post-commit).
+  //   (b) At RENDER TIME we also gate the visible list on
+  //       `boundIdRef.current === userId`. This prevents even a single
+  //       paint of the previous chat's messages while the effect is
+  //       waiting to fire, so the fix is bullet-proof even on slow
+  //       devices.
+  const boundIdRef = useRef<string | null>(userId ? String(userId) : null);
+  const boundIsCurrent = boundIdRef.current === (userId ? String(userId) : null);
+  // Render-time views: while the userId is transitioning, all
+  // conversation-scoped fields degrade to a neutral empty state.
+  const visibleMessages = boundIsCurrent ? messages : [];
+  const visibleOtherUser = boundIsCurrent ? otherUser : null;
+  const visibleIBlocked = boundIsCurrent ? iBlocked : false;
+  const visibleTheyBlocked = boundIsCurrent ? theyBlocked : false;
+  useEffect(() => {
+    const uid = userId ? String(userId) : null;
+    if (uid === boundIdRef.current) return;
+    boundIdRef.current = uid;
+    const cache = uid ? chatCache.get(uid) : null;
+    setOtherUser(cache?.other_user ?? null);
+    setMessages(cache?.messages ?? []);
+    setIBlocked(cache?.i_blocked ?? false);
+    setTheyBlocked(cache?.they_blocked ?? false);
+    setLoading(!cache);
+    // Any inline compose / modal state that referenced the previous
+    // chat should be cleared to avoid leaking across chats.
+    setText("");
+    setPendingImage(null);
+    setReactTarget(null);
+    setMenuOpen(false);
+    setReportOpen(false);
+    setReportText("");
+    setConfirmState(null);
+    setViewerUri(null);
+    setViewerKey("empty");
+  }, [userId]);
   const [reactTarget, setReactTarget] = useState<ChatMessage | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
@@ -330,13 +373,14 @@ export default function ChatScreen() {
     scrollToBottom(false);
   }, [messages.length, scrollToBottom]);
 
-  // Reversed copy of the messages array — the FlatList is rendered
-  // with `inverted` so the newest message sits at position 0 (which
-  // is visually the bottom of the screen). Memoized to avoid work on
-  // every render since messages is stable except on WS pushes.
+  // Reversed copy of the visible messages array — the FlatList is
+  // rendered with `inverted` so the newest message sits at position 0
+  // (visually the bottom of the screen). Uses `visibleMessages`
+  // (gated on `boundIsCurrent`) so we NEVER paint the previous
+  // conversation's messages while a chat transition is in progress.
   const inverseMessages = useMemo(
-    () => messages.slice().reverse(),
-    [messages],
+    () => visibleMessages.slice().reverse(),
+    [visibleMessages],
   );
 
   const send = useCallback(async () => {

@@ -38,6 +38,7 @@ type Props = {
   onToggle: (next: boolean) => void;
   onCommit: (n: number) => void;
   onBurst: () => void;
+  onReset: () => void;
 };
 
 function _fmtDate(iso: string | null | undefined): string {
@@ -54,7 +55,7 @@ export default function BotPanel(props: Props) {
   const {
     adminKey, state, loading, busy, error,
     draftCount, setDraftCount,
-    onReload, onToggle, onCommit, onBurst,
+    onReload, onToggle, onCommit, onBurst, onReset,
   } = props;
 
   const dirty = useMemo(() => {
@@ -265,6 +266,25 @@ export default function BotPanel(props: Props) {
         </Text>
       </View>
 
+      {/* RESET — clears bot-authored comments/stories from circulation. */}
+      <View style={[styles.card, styles.dangerCard]}>
+        <Text style={styles.h1}>RESET COMMENTI BOT</Text>
+        <Text style={styles.muted}>
+          Ritira dalla circolazione tutti i commenti e le storie prodotte dai bot fino a questo momento.
+          Utile dopo un rinnovo delle personalità, così puoi riavviare con nomi e testi coerenti.
+          Non tocca gli account bot: puoi riattivarli subito dopo.
+        </Text>
+        <Pressable
+          style={[styles.dangerBtn, busy && styles.stepBtnDisabled]}
+          onPress={onReset}
+          disabled={busy}
+          testID="bots-reset"
+        >
+          <Ionicons name="trash-outline" size={18} color={colors.error} />
+          <Text style={styles.dangerBtnTxt}>RESET COMMENTI E STORIES</Text>
+        </Pressable>
+      </View>
+
       {error ? (
         <View style={[styles.card, { borderColor: "#ef4444" }]}>
           <Text style={styles.err}>{error}</Text>
@@ -450,6 +470,26 @@ const styles = StyleSheet.create({
     color: colors.error,
     fontSize: font.sizes.sm,
     textAlign: "center",
+  },
+  dangerCard: {
+    borderColor: colors.error,
+  },
+  dangerBtn: {
+    marginTop: spacing.sm,
+    height: 44,
+    borderRadius: radius?.pill || 999,
+    borderWidth: 1,
+    borderColor: colors.error,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  dangerBtnTxt: {
+    color: colors.error,
+    fontSize: font.sizes.sm,
+    fontWeight: "800",
+    letterSpacing: 1,
   },
   smallBtn: {
     marginTop: spacing.md,

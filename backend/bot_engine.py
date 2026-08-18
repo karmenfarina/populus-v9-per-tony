@@ -200,6 +200,76 @@ async def bot_tick() -> None:
         logger.exception(f"bot_tick error: {e}")
 
 
+async def reset_content(kinds: List[str]) -> Dict[str, Any]:
+    """Delete existing bot-authored content from the platform.
+
+    `kinds` is any subset of {'comments', 'stories', 'votes'}. Anything
+    else is ignored. The bot USER documents themselves are never
+    touched — this only wipes the artefacts they produced.
+
+    Rationale: after a persona re-seed, old comments still carry the
+    STALE nickname/user_id snapshot. Tapping such a comment opens a
+    profile with a different name → confusing. The admin can now hit
+    "reset" and start fresh with new personas.
+    """
+    result: Dict[str, Any] = {"comments_deleted": 0, "stories_deleted": 0, "votes_deleted": 0}
+    if _db is None:
+        return result
+    bot_ids = [
+        u["user_id"] async for u in _db.users.find(
+            {"is_bot": True}, {"_id": 0, "user_id": 1}
+        )
+    ]
+    if not bot_ids:
+        return result
+    if "comments" in kinds:
+        r = await _db.comments.delete_many({"user_id": {"$in": bot_ids}})
+        result["comments_deleted"] = int(r.deleted_count)
+        # Also drop replies whose parent comment was authored by a bot —
+        # but those disappear naturally when the parent is gone, so we
+        # skip to avoid an expensive lookup. Replies AUTHORED by a bot
+        # are deleted separately:
+        try:
+            r2 = await _db.replies.delete_many({"user_id": {"$in": bot_ids}})
+            result["replies_deleted"] = int(r2.deleted_count)
+        except Exception:
+            pass
+    if "stories" in kinds:
+        r = await _db.stories.delete_many({"user_id": {"$in": bot_ids}})
+        result["stories_deleted"] = int(r.deleted_count)
+    if "votes" in kinds:
+        # Restore feud counters BEFORE deleting so vote totals don't get
+        # out of sync. Group bot votes by (feud_id, side), then $inc the
+        # opposite counter with a negative delta.
+        try:
+            agg = _db.votes.aggregate([
+                {"$match": {"user_id": {"$in": bot_ids}}},
+                {"$group": {
+                    "_id": {"feud_id": "$feud_id", "side": "$side"},
+                    "n": {"$sum": 1},
+                }},
+            ])
+            async for row in agg:
+                fid = row["_id"]["feud_id"]
+                side = row["_id"]["side"]
+                n = int(row["n"])
+                if not fid or n <= 0:
+                    continue
+                field = "votes_a" if side == "A" else "votes_b"
+                await _db.feuds.update_one({"feud_id": fid}, {"$inc": {field: -n}})
+        except Exception as e:
+            logger.warning(f"bot vote counter rollback failed: {e}")
+        r = await _db.votes.delete_many({"user_id": {"$in": bot_ids}})
+        result["votes_deleted"] = int(r.deleted_count)
+        # Zero out per-bot vote tallies on the user documents so counters
+        # match the new (empty) history.
+        await _db.users.update_many(
+            {"is_bot": True},
+            {"$set": {"total_votes": 0, "majority_votes": 0, "minority_votes": 0}},
+        )
+    return result
+
+
 # ═══════════════════════════════════════════════════════════════════
 # Internals
 # ═══════════════════════════════════════════════════════════════════
@@ -360,6 +430,18 @@ async def _act_for_bot(
         # 3) Rare: post a story sharing this feud
         if rng.random() < story_prob:
             await _bot_create_story(bot, feud)
+        # 4) Hot-news trigger — bot engagement DOES count toward the
+        # thresholds (bots are real users of the platform for engagement
+        # purposes). Fire-and-forget; the fanout is idempotent (uses the
+        # `hot_notified` flag on the feud). Delegates to `server._fanout_hot_news`
+        # which we import lazily to avoid a hard dependency cycle.
+        try:
+            fresh_feud = await _db.feuds.find_one({"feud_id": feud["feud_id"]}, {"_id": 0})
+            if fresh_feud and not fresh_feud.get("hot_notified"):
+                import server as _server  # lazy import
+                await _server._fanout_hot_news(fresh_feud)
+        except Exception as e:
+            logger.warning(f"bot hot-news fanout failed: {e}")
 
 
 def _score_feuds_for_bot(

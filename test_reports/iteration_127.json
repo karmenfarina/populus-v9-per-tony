@@ -1,0 +1,28 @@
+{
+  "summary": "Frontend-only regression on two micro-bug fixes. BUG1 (NDA summary text update on /terms) and BUG2 (no flicker of filter chips / empty-state on private STORICO VOTI in public profile) both PASS. BUG2b regression (public user's history still renders chips) also PASS.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "playwright inline script (this iteration)"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "user/[id].tsx exceeds 1300 lines — consider extracting the STORICO VOTI block into its own component for maintainability (not a blocker).",
+    "Console warning noise on web: `Animated: useNativeDriver is not supported` + deprecated `shadow*` / `textShadow*` / `props.pointerEvents` — cleanup would help future testing signal-to-noise."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a", "frontend": "100%"},
+  "seed_data_creation": "DB update via mongo shell: users.chat_a{terms_accepted_version:v1, nda_accepted_version:v1, onboarding_completed:true, email_verified:true}; users.chat_b same + {history_public_generic:false, history_public_mutual:false} to reproduce private-history scenario. bot_000 used as public-history control.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Login via UI form defaults may leave the auth mode ambiguous (login attempt returned 400 initially). Fastest reliable path for authed E2E is: POST /api/auth/login -> inject token into localStorage under key 'faide_token' as JSON.stringify(token) -> reload. Web AsyncStorage maps to localStorage. Private-history repro requires DB set history_public_generic:false AND history_public_mutual:false on the target user; bot_000 is a good public control.",
+  "rca_of_issue": "BUG1 verified via DOM inner_text() of [data-testid=nda-card]. BUG2 verified via a JS polling loop (12ms interval, 4.5s window) started BEFORE clicking [data-testid=public-history-toggle]; captured DOM presence of public-filter-all/majority/minority, public-history-empty, public-history-loading, and public-history-hidden-private on every tick. Result on chat_b (private): loading spinner first appeared at t≈3977ms, hidden-private box at t≈4057ms, and filter chips + empty state were NEVER present in any tick (0/hundreds of samples). This proves the historyFirstLoaded gate correctly suppresses the flicker."
+}

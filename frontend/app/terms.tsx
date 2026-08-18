@@ -130,7 +130,7 @@ export default function TermsScreen() {
         <DocCard
           icon="lock-closed-outline"
           title="Accordo di Riservatezza (NDA)"
-          summary="Impegno a non divulgare contenuti privati di altri utenti al di fuori della piattaforma."
+          summary="Impegno a non parlare di Populus con nessuno al di fuori della piattaforma durante l'alpha test."
           version={nda?.version || "v1"}
           checked={acceptedNda}
           onToggle={() => setAcceptedNda((v) => !v)}

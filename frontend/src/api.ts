@@ -425,6 +425,21 @@ export const api = {
       if (!r.ok) throw new ApiError(r.status, d?.detail || `HTTP ${r.status}`);
       return d;
     }),
+  // Wipe existing bot-authored artefacts. Payload:
+  //   kinds: string[] — subset of ["comments","stories","votes"].
+  // Default (empty payload) wipes comments+stories only, which is what
+  // the founder needs after a persona rename.
+  adminBotReset: (adminKey: string, kinds: string[] = ['comments', 'stories']) =>
+    fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL}/api/admin/bots/reset`, {
+      method: 'POST',
+      headers: { 'X-Admin-Key': adminKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kinds }),
+    }).then(async (r) => {
+      const t = await r.text();
+      const d = t ? JSON.parse(t) : null;
+      if (!r.ok) throw new ApiError(r.status, d?.detail || `HTTP ${r.status}`);
+      return d;
+    }),
 };
 
 export type User = {

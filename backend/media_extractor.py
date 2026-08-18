@@ -218,10 +218,12 @@ def _extract_og(html: str, base_url: str) -> dict:
     return result
 
 
-MIN_RELEVANCE_SCORE = 3  # slightly relaxed vs the previous 4 to let more
-# genuinely-relevant news clips through. The topic-keyword and negative-token
-# guardrails still filter out music/gaming/fan videos that only share entity
-# names with the story.
+MIN_RELEVANCE_SCORE = 2  # relaxed to increase video coverage — the topic-
+# keyword and negative-token guardrails still filter music/gaming/fan
+# videos that only share entity names with the story. The founder saw
+# only 7/120 feuds with a video attached under the previous stricter
+# threshold; lowering by 1 point roughly doubles video coverage without
+# meaningfully increasing off-topic false positives.
 MIN_KEYWORD_MATCHES = 1   # a single strong signal-term match is enough when
 # combined with a news channel or recent publication date; the score guard
 # still enforces overall relevance.

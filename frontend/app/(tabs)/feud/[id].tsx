@@ -376,22 +376,51 @@ export default function FeudDetail() {
   // user sees the reply without any extra taps. Also scrolls the ScrollView
   // to the target comment (measured via onLayout) and briefly flashes its
   // border so the user immediately spots it in a long thread.
-  const deepLinkHandledRef = useRef(false);
+  //
+  // Robustness rules:
+  //   • The `deepLinkHandledRef` is keyed on the current `commentParam`
+  //     value, so tapping a NEW mention notification for the same feud
+  //     opens the new comment (previously the ref stayed true once set,
+  //     silently ignoring subsequent notifications).
+  //   • When we know a commentParam but sideParam is missing AND the
+  //     comment hasn't been fetched yet, we still ACTIVATE a side using
+  //     the viewer's own vote as a fallback so the comments section
+  //     opens immediately — the user's biggest complaint was that the
+  //     screen stayed on the "Tocca una fazione per leggere i commenti"
+  //     placeholder even after tapping a mention notification.
+  const deepLinkHandledRef = useRef<string | null>(null);
   useEffect(() => {
-    if (deepLinkHandledRef.current) return;
     if (!feud || !commentParam) return;
-    // Wait until comments are loaded before deciding which side hosts it.
+    // "handled" means we've already found the target on the RIGHT side.
+    // While the side is still being inferred from a fallback (my_vote), we
+    // keep the effect open so the eventual sideA/sideB arrival can move
+    // the active tab to the correct side.
+    if (deepLinkHandledRef.current === commentParam) return;
     const cA = sideA.find((c) => c.comment_id === commentParam);
     const cB = sideB.find((c) => c.comment_id === commentParam);
-    const target: "A" | "B" | null =
-      (sideParam === "A" || sideParam === "B")
-        ? (sideParam as "A" | "B")
-        : (cA ? "A" : cB ? "B" : null);
-    if (!target) return;
-    deepLinkHandledRef.current = true;
+    let target: "A" | "B" | null = null;
+    let confirmed = false;
+    if (cA) { target = "A"; confirmed = true; }
+    else if (cB) { target = "B"; confirmed = true; }
+    else if (sideParam === "A" || sideParam === "B") {
+      target = sideParam as "A" | "B"; confirmed = true;
+    } else if (feud.my_vote === "A" || feud.my_vote === "B") {
+      // Fallback: no side hint AND the comment hasn't been fetched
+      // yet (e.g. it's a reply). Open the viewer's own side so the
+      // comments panel is visible — but do NOT mark handled: as soon
+      // as sideA/sideB arrive, this effect re-runs and refines the tab.
+      target = feud.my_vote;
+    } else {
+      target = "A";
+    }
     setActiveSide(target);
-    // Auto-expand replies to reveal the notification's context.
-    toggleReplies(commentParam).catch(() => { /* silent */ });
+    if (confirmed) {
+      deepLinkHandledRef.current = commentParam as string;
+      // Auto-expand replies to reveal the notification's context. Silent
+      // failure is fine — the target may be a top-level comment with no
+      // replies yet.
+      toggleReplies(commentParam).catch(() => { /* silent */ });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [feud, sideA, sideB, commentParam, sideParam]);
 

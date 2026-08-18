@@ -1,0 +1,36 @@
+{
+  "summary": "Iteration 128 — Tested (i) POST /api/admin/bots/reset (auth guard + payload variants + counter rollback + bot-account safety), (ii) _fanout_hot_news real-engagement thresholds (below/above/idempotency/combined-score) via direct DB seeding + server function call, (iii) media_extractor.MIN_RELEVANCE_SCORE lowered to 2 + _score_video sanity, (iv) frontend admin BotPanel 'RESET COMMENTI BOT' UI flow via Playwright. FOUND & FIXED one critical bug in bot_engine.reset_content: `if not _db` throws NotImplementedError on Motor Database objects (must use `is None`). After fix, all 15 backend tests pass and the frontend button end-to-end reset succeeds (POST returns 200, 'Rimossi X commenti, Y storie.' toast rendered).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/iter128_bot_reset_hotnews.py",
+    "/app/test_reports/pytest/iter128_bot_reset.xml"
+  ],
+  "action_items": [
+    "None required — reported bug already fixed by testing agent (bot_engine.reset_content truthiness on Motor DB).",
+    "Optional: main agent may audit bot_engine.py for other `if not _db:` / `if _db:` usages (line 216 was the only one, but worth a grep guard)."
+  ],
+  "critical_code_review_comments": [
+    "bot_engine.reset_content had `if not _db:` which raises NotImplementedError for AsyncIOMotorDatabase. Fixed to `if _db is None:` — this was a 100% reproducible 500 on the endpoint, so no previous testing had actually invoked the endpoint code path with a live DB.",
+    "server._fanout_hot_news correctly re-fetches the fresh feud doc so bot writes (which bypass the vote endpoint) contribute to counters, and the atomic $set on `hot_notified` via update_one with `hot_notified: {$ne: True}` guard is race-safe.",
+    "Frontend triggerBotReset unconditionally passes ['comments','stories'] — the UI does not currently allow triggering the 'votes' rollback path; that's fine given the copy of the button, but worth documenting."
+  ],
+  "updated_files": [
+    "/app/backend/bot_engine.py (line 216: `if not _db:` -> `if _db is None:`)",
+    "/app/backend/tests/iter128_bot_reset_hotnews.py (new)"
+  ],
+  "success_rate": {"backend": "100% (15/15)", "frontend": "100% (BotPanel reset flow)"},
+  "seed_data_creation": "Direct motor writes: TEST bot comment+story rows on feud_id=feud_test_none (cleaned in test), 'feud_test_<ts>' feuds for vote-rollback test, 'feud_hot_test_<ts>' feuds seeded with (votes_a, votes_b, comments) tuples for hot-news threshold tests. All test-created docs are cleaned up per test class.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Web AsyncStorage uses localStorage on this build; to inject auth token set localStorage['faide_token'] = JSON.stringify(token). JWT_SECRET is 'faide-gossip-secret-change-me-a71e' (in /app/backend/.env). Admin panel requires BOTH a valid owner JWT (user_13f93cbd1ea9 / carlofarinapayme@gmail.com) AND the X-Admin-Key header entered on the admin gate.",
+  "rca_of_issue": "Bug: reset endpoint returned 500 with NotImplementedError. RCA: pymongo/Motor Database objects explicitly forbid truthiness testing (`if not _db`) because '_db' can be truthy or falsy depending on interpretation; the driver raises NotImplementedError to prevent silent bugs. Fix: compare with `is None` instead. Reproduction: `curl -X POST -H 'X-Admin-Key: populus-admin-42b8f3' $URL/api/admin/bots/reset -d '{}'` returned 500 before fix, 200 after."
+}

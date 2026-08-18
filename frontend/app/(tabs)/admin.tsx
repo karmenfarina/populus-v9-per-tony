@@ -139,6 +139,44 @@ export default function AdminScreen() {
     }
   }, []);
 
+  const triggerBotReset = useCallback(async (k: string) => {
+    // Show a native confirm on web/mobile so a stray tap doesn't nuke
+    // hours of bot content.
+    try {
+      const { Alert, Platform } = await import("react-native");
+      const ok = await new Promise<boolean>((resolve) => {
+        if (Platform.OS === "web") {
+          // window.confirm on web — synchronous, resolve immediately.
+          resolve((globalThis as any).confirm?.("Ritiro tutti i commenti e le storie dei bot dalla piattaforma. Confermi?") ?? false);
+          return;
+        }
+        Alert.alert(
+          "Reset commenti bot?",
+          "Ritiro tutti i commenti e le storie dei bot dalla piattaforma. Confermi?",
+          [
+            { text: "Annulla", style: "cancel", onPress: () => resolve(false) },
+            { text: "Cancella", style: "destructive", onPress: () => resolve(true) },
+          ],
+        );
+      });
+      if (!ok) return;
+    } catch { /* fallback: proceed without confirm */ }
+    setBotBusy(true);
+    setBotError(null);
+    try {
+      const res: any = await api.adminBotReset(k, ["comments", "stories"]);
+      const s = await api.adminBotState(k);
+      setBotState(s);
+      setBotError(
+        `Rimossi ${res?.comments_deleted ?? 0} commenti, ${res?.stories_deleted ?? 0} storie.`
+      );
+    } catch (e: any) {
+      setBotError(e?.detail || e?.message || "Reset fallito");
+    } finally {
+      setBotBusy(false);
+    }
+  }, []);
+
   // Founder-admin: soft-deleted feuds list (loaded lazily when the
   // "NASCOSTE" tab opens). Tap a row → open the feud detail (admin sees
   // the hidden banner + restore button there).
@@ -670,6 +708,7 @@ export default function AdminScreen() {
           onToggle={(next) => toggleBots(key, next)}
           onCommit={(n) => commitBotCount(key, n)}
           onBurst={() => triggerBotBurst(key)}
+          onReset={() => triggerBotReset(key)}
         />
       ) : tab === "hidden" ? (
         hiddenLoading ? (
