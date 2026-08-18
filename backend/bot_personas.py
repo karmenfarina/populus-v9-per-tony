@@ -56,7 +56,35 @@ TONES = [
     "analitico", "giocoso", "serio", "polemico", "conciliante",
 ]
 
-VERBOSITIES = ["breve", "medio", "verboso"]
+VERBOSITIES = ["micro", "breve", "medio", "lungo", "verboso"]
+
+# Emotional micro-reactions bots occasionally pick when their default
+# verbosity or per-call override picks the "micro" bucket. Kept as a
+# curated list so Claude has concrete examples to imitate — DO NOT
+# pass them to the model verbatim, just show them as inspiration in
+# the system prompt.
+MICRO_SAMPLES = [
+    "assurdo",
+    "bravissim*",
+    "che palle",
+    "che schifo",
+    "quoto tutto",
+    "d'accordissimo",
+    "assolutamente no",
+    "vergognoso",
+    "esatto",
+    "esagerato dai",
+    "no vabbè",
+    "punto",
+    "meno male",
+    "finalmente",
+    "cringe",
+    "epico",
+    "no comment",
+    "chapeau",
+    "ridicolo",
+    "questa non ce la potevamo perdere",
+]
 
 # 20 Italian regions — realistic distribution weighted later on.
 REGIONS_CITIES = {
@@ -97,12 +125,31 @@ FIRST_NAMES_F = [
 ]
 
 LAST_NAMES = [
+    # Curated pool of 120+ Italian surnames so we can hand out 100 unique
+    # ones AND still have spare in case names get filtered out (e.g. an
+    # exact collision with a shuffled first-name pair). Ordered
+    # roughly by real-world frequency but expanded for uniqueness.
     "Rossi", "Ferrari", "Russo", "Bianchi", "Romano", "Colombo", "Ricci",
     "Marino", "Greco", "Bruno", "Gallo", "Conti", "De Luca", "Costa",
     "Giordano", "Mancini", "Rizzo", "Lombardi", "Moretti", "Barbieri",
     "Fontana", "Santoro", "Mariani", "Rinaldi", "Caruso", "Ferrara",
     "Galli", "Martini", "Leone", "Longo", "Gentile", "Serra", "Vitale",
     "Marchetti", "Parisi", "Villa", "Guerra", "Battaglia", "Sartori",
+    "Esposito", "Bianco", "Bruni", "Carbone", "Coppola", "De Santis",
+    "De Rosa", "Farina", "Ferri", "Fiore", "Fumagalli", "Gatti",
+    "Grassi", "Grimaldi", "La Rocca", "Longhi", "Marconi", "Marini",
+    "Mazza", "Messina", "Montanari", "Monti", "Morelli", "Neri",
+    "Palumbo", "Pellegrini", "Piras", "Poli", "Riva", "Ruggiero",
+    "Sanna", "Sartor", "Serafini", "Silvestri", "Sorrentino", "Testa",
+    "Valente", "Valentini", "Vinci", "Zanetti", "Basile", "Benedetti",
+    "Bertolini", "Bianchini", "Bonetti", "Borghi", "Bosco", "Cattaneo",
+    "Cavallaro", "Ciccone", "Cirillo", "Colella", "D'Angelo", "D'Amico",
+    "De Angelis", "De Simone", "Donati", "Fabbri", "Ferretti", "Franco",
+    "Guidi", "Iannone", "La Torre", "Lanza", "Lombardo", "Lupo",
+    "Magni", "Marra", "Martino", "Meloni", "Milani", "Molinari",
+    "Napolitano", "Orlando", "Pace", "Pagano", "Parisi", "Perri",
+    "Pesce", "Piccoli", "Pini", "Pirozzi", "Pisano", "Pizzuto",
+    "Poggi", "Proietti", "Puglisi",
 ]
 
 PROFESSIONS = [
@@ -251,6 +298,34 @@ def build_personas() -> List[Dict[str, Any]]:
 
     regions_list = list(REGIONS_CITIES.keys())
 
+    # Deterministic shuffled pools — ensures adjacent bots don't share
+    # the same surname and that every one of the 100 bots gets a UNIQUE
+    # surname (pool >= 100). Bug fix (v3): the earlier version split
+    # the pool by gender, which limited effective uniqueness to ~50.
+    pool_rng = random.Random("populus-name-pool-v4-unique")
+    # Dedup while preserving order — the LAST_NAMES literal has one
+    # accidental duplicate ("Parisi"), which would otherwise leak into
+    # the final pool as a repeat surname.
+    _seen: set = set()
+    last_names_shuffled = []
+    for n in LAST_NAMES:
+        if n not in _seen:
+            _seen.add(n)
+            last_names_shuffled.append(n)
+    pool_rng.shuffle(last_names_shuffled)
+    if len(last_names_shuffled) < 100:
+        raise RuntimeError(
+            f"LAST_NAMES pool has {len(last_names_shuffled)} entries — need at least 100 for unique surnames."
+        )
+    first_pool_f_shuf = FIRST_NAMES_F.copy()
+    first_pool_m_shuf = FIRST_NAMES_M.copy()
+    pool_rng.shuffle(first_pool_f_shuf)
+    pool_rng.shuffle(first_pool_m_shuf)
+    # Track per-gender counter so first-name index advances independently
+    # by gender; surname index advances globally so all 100 are unique.
+    f_counter = 0
+    m_counter = 0
+
     for i in range(100):
         rng = _seeded_rng(f"populus-bot-{i}-v2")
 
@@ -274,9 +349,15 @@ def build_personas() -> List[Dict[str, Any]]:
         city = rng.choice(REGIONS_CITIES[region])
         profession = PROFESSIONS[(i * 11) % len(PROFESSIONS)]
 
-        first_pool = FIRST_NAMES_F if gender == "F" else FIRST_NAMES_M
-        first_name = first_pool[i % len(first_pool)]
-        last_name = LAST_NAMES[(i * 13) % len(LAST_NAMES)]
+        # Pick first name via per-gender rotating pool, surname via a
+        # global rotating pool (unique across 100 bots).
+        last_name = last_names_shuffled[i]
+        if gender == "F":
+            first_name = first_pool_f_shuf[f_counter % len(first_pool_f_shuf)]
+            f_counter += 1
+        else:
+            first_name = first_pool_m_shuf[m_counter % len(first_pool_m_shuf)]
+            m_counter += 1
 
         nickname = _unique_nick(rng, first_name, last_name, used_nicks)
         # Bot email lives on a reserved local domain so it cannot
@@ -288,6 +369,7 @@ def build_personas() -> List[Dict[str, Any]]:
 
         age = _age_for(activity, rng)
         tone = TONES[(i * 5) % len(TONES)]
+        # gcd(17,5)=1 so verbosity now cycles all 5 buckets uniformly.
         verbosity = VERBOSITIES[(i * 17) % len(VERBOSITIES)]
 
         bio = _bio_for(rng, gender, [main_topic, secondary_topic])
@@ -392,13 +474,41 @@ STYLE_QUIRKS = [
 ]
 
 
-def random_style_hint(rng: random.Random) -> Dict[str, str]:
-    """Return a tuple (opening_style, style_quirk) picked randomly.
-    Passed by the engine to `system_prompt_for` on every call."""
-    return {
+def random_style_hint(
+    rng: random.Random, base_verbosity: Optional[str] = None
+) -> Dict[str, str]:
+    """Return per-call style knobs: opening_style, style_quirk, and an
+    OPTIONAL `verbosity_override`. The override is what gives real-user
+    diversity — even a "medio" bot sometimes drops a 3-word reaction
+    or a long rant.
+
+    Sampling:
+      * 65% keep the bot's own verbosity
+      * 12% shift one bucket shorter
+      * 12% shift one bucket longer
+      * 6% jump to `micro` (very short reaction)
+      * 5% jump to `lungo` / `verboso` (longer, articulated)
+    """
+    result = {
         "opening_style": rng.choice(OPENING_STYLES),
         "style_quirk": rng.choice(STYLE_QUIRKS),
     }
+    if base_verbosity and base_verbosity in VERBOSITIES:
+        idx = VERBOSITIES.index(base_verbosity)
+        r = rng.random()
+        if r < 0.65:
+            override = None
+        elif r < 0.77:
+            override = VERBOSITIES[max(0, idx - 1)]
+        elif r < 0.89:
+            override = VERBOSITIES[min(len(VERBOSITIES) - 1, idx + 1)]
+        elif r < 0.95:
+            override = "micro"
+        else:
+            override = rng.choice(["lungo", "verboso"])
+        if override and override != base_verbosity:
+            result["verbosity_override"] = override
+    return result
 
 
 # ─── System prompt builder for the LLM ─────────────────────────────
@@ -409,11 +519,26 @@ def system_prompt_for(
     Italian comments. The prompt is intentionally strict on style so
     the output doesn't read like a chatbot summary.
     """
+    # style_hint may override verbosity for this specific comment so
+    # even a "medio" bot can occasionally write a micro reaction or a
+    # longer rant. See `random_style_hint()` for the sampling logic.
+    effective_verbosity = (
+        (style_hint or {}).get("verbosity_override") or persona.get("verbosity", "breve")
+    )
+    if effective_verbosity not in VERBOSITIES:
+        effective_verbosity = "breve"
+
     verbosity_hint = {
+        "micro": (
+            "1-4 parole in tutto (max 25 caratteri). Una reazione secca, "
+            f"nello stile di: {', '.join(f'«{s}»' for s in MICRO_SAMPLES[:6])}. "
+            "Non spiegare, reagisci e basta."
+        ),
         "breve": "1 sola frase molto breve (max 80 caratteri).",
         "medio": "1-2 frasi (max 160 caratteri totali).",
-        "verboso": "2-3 frasi (max 260 caratteri totali).",
-    }[persona["verbosity"]]
+        "lungo": "2-3 frasi (max 260 caratteri totali).",
+        "verboso": "3-4 frasi articolate (max 420 caratteri totali).",
+    }[effective_verbosity]
 
     tone_hint = {
         "sarcastico": "tono sarcastico e ironico, con battute pungenti",

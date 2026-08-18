@@ -351,8 +351,20 @@ export const api = {
   // Terms & Privacy Policy — displayed on first login and any time the
   // stored `terms_accepted_version` diverges from the server-side one.
   getLegalTerms: () => request('/legal/terms'),
+  // NDA (Accordo di Riservatezza) — separate document sub-signed on the
+  // same onboarding screen as the ToS. `terms_accepted` at /auth/me is
+  // TRUE only when BOTH documents are accepted at their current versions.
+  getLegalNda: () => request('/legal/nda'),
   acceptLegalTerms: (version: string) =>
     request('/users/me/accept-terms', { method: 'POST', body: JSON.stringify({ version }) }),
+  // Combined acceptance — a single round-trip that stamps both docs.
+  acceptLegalBoth: (termsVersion: string, ndaVersion: string) =>
+    request('/users/me/accept-terms', {
+      method: 'POST',
+      body: JSON.stringify({ version: termsVersion, nda_version: ndaVersion }),
+    }),
+  acceptLegalNda: (ndaVersion: string) =>
+    request('/users/me/accept-terms', { method: 'POST', body: JSON.stringify({ nda_version: ndaVersion }) }),
   // AI faction summary — regenerated on every call from the latest
   // visible comments so the synthesis sharpens as more people chime in.
   feudAiSummary: (feudId: string) =>
@@ -435,6 +447,8 @@ export type User = {
   terms_accepted?: boolean;
   terms_accepted_version?: string | null;
   terms_accepted_at?: string | null;
+  nda_accepted_version?: string | null;
+  nda_accepted_at?: string | null;
   onboarding_completed?: boolean;
   bio?: string | null;
   social_links?: { instagram?: string; tiktok?: string; twitter?: string; youtube?: string; website?: string };

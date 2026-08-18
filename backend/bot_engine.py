@@ -586,10 +586,11 @@ async def _generate_comment(
     except Exception as e:
         logger.warning(f"emergentintegrations unavailable: {e}")
         return None
-    # Per-call random style hint (opening + micro-quirk) — feeds into
-    # the system prompt so every comment sounds different, even when
-    # the same bot posts several in a row.
-    hint = random_style_hint(random.Random())
+    # Per-call random style hint (opening + micro-quirk + optional
+    # verbosity override) — feeds into the system prompt so every
+    # comment sounds different, even when the same bot posts several
+    # in a row.
+    hint = random_style_hint(random.Random(), persona.get("verbosity"))
     system = system_prompt_for(persona, hint)
     side_label = feud.get("party_a") if side == "A" else feud.get("party_b")
     other_label = feud.get("party_b") if side == "A" else feud.get("party_a")

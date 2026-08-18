@@ -1,0 +1,28 @@
+{
+  "summary": "Iter 125 — Verified (a) bot surname/display_name uniqueness (100/100 unique across the pool of 126 curated Italian surnames), (b) new /api/legal/nda endpoint + backwards-compat /api/legal/terms, (c) combined POST /api/users/me/accept-terms accepting {version, nda_version} with correct rejection of wrong versions and empty body, and (d) frontend /terms screen — two independent cards, both checkboxes required, modal with HO LETTO — ACCETTO that auto-accepts and closes, primary CTA switches label + enables only when both checked. 11/11 pytest assertions passed. Deprecated packages / SafeAreaView / expo-av issues: none detected in the new terms screen.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_terms_nda_and_bots_iter125.py",
+    "/app/test_reports/pytest/iter125_terms_nda_bots.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py already exceeds 700 lines by a wide margin (>7000) — long-standing observation, not caused by this iteration. Consider incremental extraction of legal / bot / analytics routes in future refactors.",
+    "The `terms.tsx` header does not include a visible language-code hint for the two contract versions being fetched — small UX nit, current shows 'Versione v1' only after loading, which is fine."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_terms_nda_and_bots_iter125.py"
+  ],
+  "success_rate": {"backend": "100% (11/11)", "frontend": "100% of testable UI assertions"},
+  "seed_data_creation": "One ephemeral anonymous user was created per test module (auto-deleted in fixture teardown).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "The frontend UI test in browser used a hand-injected JWT into localStorage. Note that the app's storage layer JSON-parses stored values, so any manual token injection must use JSON.stringify(token) — using the raw JWT triggers 'storage retrieve(parse error)' warnings and leaves AuthContext unauthenticated, which means api.acceptLegalBoth() will silently no-op. When you need an end-to-end UI acceptance flow, either (a) drive login through the real /auth screen or (b) inject JSON.stringify(token) under localStorage key 'faide_token'.",
+  "rca_of_issue": "No new bugs — both requested fixes verified working. The pool of 126 unique surnames + de-dup on 'Parisi' + global rotation yields 100 unique surnames and display_names across the entire bot cohort (previously ~39 unique). The `terms_accepted` boolean on /auth/me correctly requires BOTH versions matching TERMS_VERSION and NDA_VERSION."
+}

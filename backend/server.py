@@ -729,13 +729,18 @@ def _public_user(u: dict) -> dict:
         'profession': u.get('profession'),
         'favorite_categories': u.get('favorite_categories', []),
         'onboarding_completed': bool(u.get('onboarding_completed', False)),
-        # Populus Terms & Privacy Policy acceptance. The `TERMS_VERSION`
-        # constant is bumped whenever the document materially changes; the
-        # client compares this to `terms_accepted_version` and re-prompts
-        # the user if they don't match (so we can force re-acceptance).
-        'terms_accepted': (u.get('terms_accepted_version') == TERMS_VERSION),
+        # Populus Terms & Privacy Policy acceptance. `terms_accepted`
+        # is TRUE only when BOTH the ToS AND the NDA are accepted at
+        # their current versions — either one out of date re-prompts
+        # the user on the onboarding screen.
+        'terms_accepted': (
+            u.get('terms_accepted_version') == TERMS_VERSION
+            and u.get('nda_accepted_version') == NDA_VERSION
+        ),
         'terms_accepted_version': u.get('terms_accepted_version'),
         'terms_accepted_at': _iso_utc(u['terms_accepted_at']) if isinstance(u.get('terms_accepted_at'), datetime) else u.get('terms_accepted_at'),
+        'nda_accepted_version': u.get('nda_accepted_version'),
+        'nda_accepted_at': _iso_utc(u['nda_accepted_at']) if isinstance(u.get('nda_accepted_at'), datetime) else u.get('nda_accepted_at'),
         'bio': u.get('bio'),
         'social_links': u.get('social_links', {}),
         'primary_photo_id': u.get('primary_photo_id'),
@@ -6980,6 +6985,13 @@ TERMS_VERSION = 'v1'
 _TERMS_PATH = ROOT_DIR / 'legal' / f'terms_{TERMS_VERSION}.md'
 _TERMS_CACHE: dict = {'text': None}
 
+# NDA — separate document from the Terms of Service, sub-signed on the
+# same onboarding screen. Keep its own version so it can bump
+# independently of the ToS.
+NDA_VERSION = 'v1'
+_NDA_PATH = ROOT_DIR / 'legal' / f'nda_{NDA_VERSION}.md'
+_NDA_CACHE: dict = {'text': None}
+
 
 def _load_terms_text() -> str:
     """Read and memoise the current terms markdown from disk.
@@ -7000,6 +7012,24 @@ def _load_terms_text() -> str:
     return text
 
 
+def _load_nda_text() -> str:
+    """Read and memoise the current NDA markdown from disk.
+
+    Mirrors `_load_terms_text` — see that function for the caching
+    rationale.
+    """
+    cached = _NDA_CACHE.get('text')
+    if cached:
+        return cached
+    try:
+        text = _NDA_PATH.read_text(encoding='utf-8')
+    except Exception as e:
+        logger.warning(f"nda file not readable at {_NDA_PATH}: {e}")
+        text = "Accordo di Riservatezza non disponibile al momento. Riprova più tardi."
+    _NDA_CACHE['text'] = text
+    return text
+
+
 @api_router.get('/legal/terms')
 async def get_legal_terms():
     """Return the current Terms of Service + Privacy Policy in markdown.
@@ -7014,27 +7044,59 @@ async def get_legal_terms():
     }
 
 
+@api_router.get('/legal/nda')
+async def get_legal_nda():
+    """Return the current NDA in markdown.
+
+    Public endpoint — read from the onboarding screen and from Settings.
+    """
+    return {
+        'version': NDA_VERSION,
+        'text': _load_nda_text(),
+        'updated_at': '2026-02-01',
+    }
+
+
 @api_router.post('/users/me/accept-terms')
 async def accept_legal_terms(body: dict = Body(default_factory=dict), user: dict = Depends(get_current_user)):
     """Record that the current user has accepted the specified terms
-    version. Client sends `{version: "v1"}`; we accept exact match and
-    stamp the acceptance timestamp on the user document.
+    version AND (optionally) the NDA. Client can send either or both:
+       {"version": "v1"}                    → only terms
+       {"version": "v1", "nda_version": "v1"} → both, single round-trip
+
+    Backwards compatible: legacy clients that omit `nda_version` still
+    work (only ToS gets stamped). The `terms_accepted` boolean on the
+    user document is true only when BOTH the ToS and the NDA are
+    accepted at their current versions (checked in `/auth/me`).
     """
     version = (body or {}).get('version') if isinstance(body, dict) else None
-    if version != TERMS_VERSION:
+    nda_version = (body or {}).get('nda_version') if isinstance(body, dict) else None
+    if version is not None and version != TERMS_VERSION:
         raise HTTPException(status_code=400, detail=f'Versione termini non valida (attesa {TERMS_VERSION})')
+    if nda_version is not None and nda_version != NDA_VERSION:
+        raise HTTPException(status_code=400, detail=f'Versione NDA non valida (attesa {NDA_VERSION})')
+    if version is None and nda_version is None:
+        raise HTTPException(status_code=400, detail='Specifica almeno una tra `version` (termini) o `nda_version` (NDA).')
     now = now_utc()
-    await db.users.update_one(
-        {'user_id': user['user_id']},
-        {'$set': {
-            'terms_accepted_version': TERMS_VERSION,
-            'terms_accepted_at': now,
-        }},
-    )
+    update: dict = {}
+    if version is not None:
+        update['terms_accepted_version'] = TERMS_VERSION
+        update['terms_accepted_at'] = now
+    if nda_version is not None:
+        update['nda_accepted_version'] = NDA_VERSION
+        update['nda_accepted_at'] = now
+    await db.users.update_one({'user_id': user['user_id']}, {'$set': update})
+    # Fetch fresh doc so we return the same shape as `/auth/me` for
+    # both fields (useful to the client to short-circuit an extra call).
+    fresh = await db.users.find_one({'user_id': user['user_id']}, {'_id': 0}) or {}
+    terms_ok = (fresh.get('terms_accepted_version') == TERMS_VERSION)
+    nda_ok = (fresh.get('nda_accepted_version') == NDA_VERSION)
     return {
-        'terms_accepted': True,
-        'terms_accepted_version': TERMS_VERSION,
-        'terms_accepted_at': _iso_utc(now),
+        'terms_accepted': terms_ok and nda_ok,
+        'terms_accepted_version': fresh.get('terms_accepted_version'),
+        'terms_accepted_at': _iso_utc(fresh['terms_accepted_at']) if isinstance(fresh.get('terms_accepted_at'), datetime) else fresh.get('terms_accepted_at'),
+        'nda_accepted_version': fresh.get('nda_accepted_version'),
+        'nda_accepted_at': _iso_utc(fresh['nda_accepted_at']) if isinstance(fresh.get('nda_accepted_at'), datetime) else fresh.get('nda_accepted_at'),
     }
 
 
