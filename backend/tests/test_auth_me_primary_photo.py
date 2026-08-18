@@ -20,7 +20,7 @@ import requests
 
 BASE_URL = os.environ.get(
     "EXPO_PUBLIC_BACKEND_URL",
-    "https://feud-admin-panel.preview.emergentagent.com",
+    "https://populus-bot-fleet.preview.emergentagent.com",
 ).rstrip("/")
 
 USER_A = {"email": "chat_a@test.it", "password": "test123"}

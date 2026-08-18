@@ -1,118 +1,117 @@
 <analysis>**original_problem_statement**: 
-The user requested setting the device's status bar and navigation bar to be consistently dark (black background or transparent over black background, with white icons) regardless of the system's light/dark mode settings. Later, the user reported three bugs: 
-1. The app crashes when logging out of a Google account in Expo Go.
-2. The scroll-to-top arrow pill in the Storico voti (Voting History) section behaves erratically (disappears/reappears incorrectly and doesn't scroll to the exact right spot).
-3. The red border indicating an unread notification doesn't disappear immediately upon tapping the notification; it only disappears after navigating away and returning.
-PRODUCT REQUIREMENTS: 
-- Native-like dark theme enforcement for Status/Nav bars.
-- Instant UI feedback for read notifications.
-- Flawless scroll-to-top navigation inside the profile's voting history.
-- Stable authentication/logout flow without React state-unmount crashes.
+The user requested the creation of a fleet of 100 autonomous bot accounts for the app Populus. These bots must have unique personas, vote, post stories, and write natural-sounding comments periodically without triggering generic AI patterns. The admin needs a dedicated control panel to enable/disable bots, control their active count, and trigger a burst of activity.
+Additional PRODUCT REQUIREMENTS added during the session:
+- A unified Terms of Service and NDA acceptance screen with explicit lockdown rules.
+- Hot feud notifications should only trigger based on real user activity.
+- Robust deep-linking to comment mentions (auto-expanding the comment section and reliably scrolling to the target on every tap).
+- **Latest**: Ensure bot comments are distributed realistically across both factions (Yellow/Red) based on actual human voting distribution, rather than stacking on one side due to persona biases. Reduce the duration of the yellow highlight for deep-linked comments.
 
-**User's preferred language**: **Italian** (You MUST respond to the user in Italian only).
+**User's preferred language**: Italian (You MUST automatically detect the user's primary language from their messages inside the <trajectory> tag and INSTRUCT next agent to respond in the user's preferred language only)
 
 **what currently exists?** 
-A fully functional Expo frontend and FastAPI backend. The app has a forced dark theme. Status and Navigation bars have been configured to force light-content (white icons) over a dark background via  and . The backend now supports marking single notifications as read (), providing instant UI feedback. The profile voting history has dynamic scroll-to-top logic that perfectly jumps to the section header. 
+A full-stack Expo frontend and FastAPI backend social application (Populus). It features real-time feuds, voting mechanics, nested comments, smart mentions, user profiles, an admin dashboard, a unified NDA/ToS onboarding flow, and an autonomous, AI-driven bot fleet powered by APScheduler and Claude Haiku. 
 
 **Last working item**:
-    - Last item agent was working: Fixing the scroll-to-top pill (Bug A) inside the Storico voti section of the Profile page. The agent updated the visibility threshold to be dynamic () and set the scroll destination exactly to the section header ().
-    - Status: USER VERIFICATION PENDING (Verified perfectly by the testing agent, waiting for final user confirmation).
+    - Last item agent was working: Proposed an incremental strategy for refactoring the massive monolithic files (, ), after successfully fixing the deep-link comment highlight duration. The user explicitly requested to stop (lascia stare per ora. fermati).
+    - Status: NONE
     - Agent Testing Done: Y
-    - Which testing method agent to use? testing agent
+    - Which testing method agent to use?: NA (testing already done by main agent via manual code inspection).
     - User Testing Done: N
 
 **All Pending/In progress Issue list**:  
-  None currently pending. Wait for the user's feedback on the final scroll-to-top fix.
+  *(None. All active bugs requested by the user have been fixed and validated.)*
 
 **In progress Task List**: 
-  None
+  *(None)*
 
 **Upcoming and Future Tasks**
   Task 1: Complete Backend & Frontend Refactoring (Priority P2)
-     - Where to resume:  (>6800 lines),  (>1800 lines), and .
+     - Where to resume:  (>7900 lines), , and  (>2000 lines).
      - What will be achieved with this? Improve code maintainability by splitting massive monolithic files into smaller components/routers. 
-     - *Note: Wait for explicit user approval before beginning this massive task, as it requires high credit consumption.*
+     - *CRITICAL NOTE: The user explicitly commanded lascia stare per ora. fermati (leave it for now. stop). DO NOT initiate this task without prompting the user first and receiving explicit approval.*
 
 **Completed work in this session**
-- Status & Navigation Bar Theme Enforcement: Added , configured  (, ) to force a dark OS shell. (DONE)
-- Google Logout Crash Fix: Updated  and  to handle React state teardown safely during logout, especially under unstable network conditions. (DONE)
-- Instant Notification Read UI: Added backend endpoint . Updated  to call it on press, instantly removing the unread red border. (DONE)
-- Notification Navigation Fix: Ensuring the back button from a feud opened via notifications returns the user to the notifications tab instead of the home feed (). (DONE)
-- Archive Scroll-to-Top Pill: Fixed flickering in  using . (DONE)
-- Profile Storico voti Scroll-to-Top Pill: Fixed erratic behavior and incorrect scroll targets by introducing a dynamic visibility threshold (). (DONE)
+- Bug Fix (Bot Engine): **Bot Comment Distribution**: Added  in  to balance bot comments across sides based on the actual voting distribution of the feud, smoothing it with Laplace, instead of strictly following the bot's ideological bias (DONE).
+- UI/UX Polish: **Deep-Link Highlight Duration**: Reduced the duration of the yellow highlight on a deep-linked comment in  from 5.4s to a total of 2.2s (1.2s hold + 1s fade) (DONE).
+- Feature: **100 Bot Fleet & Engine** (DONE in previous sessions).
+- UI/Feature: **Unified NDA/ToS Flow** (DONE in previous sessions).
 
 **Earlier issues found/mentioned but not fixed**
-  None
+  *(None)*
 
 **Known issue recurrence from previous fork**
-  - Issue recurrence in previous fork: The scroll-to-top pill was tricky and required multiple iterations to identify the correct file ( instead of ) and the correct coordinate math. Do not alter the scroll logic in  without extreme caution.
-  - Recurrence count: 3
-  - Status: RESOLVED
+  - Issue recurrence in previous fork: Deep link scrolling & mention logic. 
+  - Recurrence count: 3+
+  - Status: RESOLVED (User verified that  fix accurately triggers scrolling on repeated taps).
+  Note: Be highly aware of the complex  chains managing , , , and  inside .
 
 **Code Architecture**
 - : Monolithic FastAPI backend.
+-  & : Autonomous bot scheduling and persona generation.
 - : Expo router UI screens.
-- : Contains auth, messaging, and reusable UI components.
+- : Reusable components.
 
 **Key Technical Concepts**
-- Frontend: Expo Router, React Native UI components, , React  for precise scroll coordinate mapping.
-- Backend: FastAPI, MongoDB.
+- **APScheduler**: Used in backend for background task execution (Bot actions).
+- **Emergent LLM Key (Claude Haiku 4.5)**: Used exclusively for bot comment/story generation.
+- **navNonce**: A URL parameter used in Expo Router to force a  re-trigger when tapping the same notification twice.
+- **React Native Animated**: Used for the highlight fading effect on deep-linked comments.
 
 **key DB schema**
-- Unchanged.
+- : Contains human users and bots. Bots are identifiable via .
+- :  MUST always be populated to prevent frontend crashes.
 
 **changes in tech stack**
-- Added  v5.0.10.
+- Added  and  via pip for background bot operations (from previous sessions).
 
 **All files of reference** 
--  &  (Status/Nav bar config)
--  (Logout crash fix)
--  (Voting history scroll-to-top fix)
--  (Instant notification read UI)
--  (Back button navigation logic)
--  (New single-notification read endpoint)
+-  (Updated to handle realistic bot comment side distribution)
+-  (Updated to reduce highlight animation duration)
+-  (Monolithic backend file)
 
 **Areas that need refactoring**: 
--  (>6800 lines)
--  (>1880 lines)
--  (>1400 lines)
+- 
+- 
+- 
 
 **key api endpoints**
-- NEW:  (Marks a single notification as read).
+- : Triggers immediate bot activity.
+- : Deletes all previous bot comments/replies.
 
 **Critical Info for New Agent** 
-- **Language Requirements**: MUST communicate with the user in **Italian**.
-- **Expo Go Limitations**: The user previously noted that the Android Navigation Bar didn't look perfectly transparent/dark inside Expo Go. The agent correctly explained that  requires a native build () to take effect. If the user brings this up again, gently remind them to test via a native APK build.
-- **Scroll-to-top fragility**: The user is highly sensitive to the exact behavior of the scroll-to-top arrow in the profile's voting history. It currently works perfectly (verified via Playwright end-to-end tests).
+- **Language**: MUST communicate with the user in **Italian**.
+- **User Instruction**: The user explicitly halted work (lascia stare per ora. fermati). **AWAIT USER INSTRUCTIONS before making any changes.** Do not start the refactoring process automatically.
+- **Bot Logic**: The bot engine dynamically fetches the current vote split on a feud and distributes comments to simulate realistic user engagement, heavily utilizing the Emergent LLM key. 
 
 **documents and test reports created in this job**
--  (Pytest for single notification read)
--  through  (Extensive testing records).
+-  (from previous run)
 
 **Last 10 User Messages and any pending HUMAN messages** 
-1. (Feedback) The notification red border doesnt disappear when I click it..." -> Agent added single mark-read API.
-2. (Feedback) "The app crashes when logout on unstable connection..." -> Agent fortified logout flow.
-3. (Feedback) "Bug A (Scroll to top) still present, try harder." -> Agent realized the bug was in `profile.tsx`, not `archive.tsx`.
-4. (Feedback) "You went too far up, you need to scroll to exactly where the voting history text starts." -> Agent adjusted coordinate to `historyYRef.current - 8` and added a scroll lock.
-5. (Feedback) "Almost there. First time it scrolls perfectly, but when I scroll back down, the arrow doesnt reappear... -> Agent removed the lock and made the visibility threshold dynamic (). Agent verified fix and finished.
+1. (User) Confirmed the deep-link scroll fix works. Requested to start refactoring, but FIRST fix the bot comment distribution (bots were commenting heavily on one side instead of matching real vote distribution).
+2. (Agent) Implemented  in  to balance the distribution and tested it with a python script.
+3. (User) Approved the fix. Requested to reduce the duration of the yellow highlight on focused comments, and then proceed with refactoring.
+4. (Agent) Modified  to reduce the highlight duration (5.4s -> 2.2s). Asked the user for confirmation on the refactoring strategy since it's massive/high risk.
+5. (User) lascia stare per ora. fermati (leave it for now. stop).
+6. (Agent) Stopped Expo, acknowledged user, and finished the session.
 
 **Project Health Check:**
-- Frontend: Functional and stable. Layout and navigation bugs resolved.
-- Backend: Stable. Added a new endpoint for optimized notification UX.
+- Frontend: Functional. Highlight and scrolling logic stabilized.
+- Backend: Stable. APScheduler background bot activity running securely.
 
 **3rd Party Integrations** 
-- Google Auth — Emergent Managed
-- Firebase Auth — requires User Firebase Config & Admin Service Account
-- Claude Sonnet 4.6 — uses Emergent LLM Key
+- Emergent Managed Google Auth 
+- OpenAI/Claude (AI Feuds / Bot Engine) — uses Emergent LLM Key
+- YouTube Data API (Media Extraction) — uses internal Key
 
 **Testing status**
-  - Testing agent used after significant changes: YES (Tested backend endpoint, frontend scroll coordinate behaviors, and notification UX).
+  - Testing agent used after significant changes: NO (not required for these specific small logic/UI tweaks).
   - Troubleshoot agent used after agent stuck in loop: NO
-  - Test files created: 
-  - Known regressions: None.
+  - Test files created: None this session.
+  - Known regressions: None currently known.
 
 **Credentials to test flow:**
-Check . Primary test account:  or .
+Check . 
+Admin Email: 
 
 **What agent forgot to execute**
-Everything requested was systematically addressed and heavily verified by the testing agent. No critical tasks were forgotten.</analysis>
+Nothing. The agent successfully fixed all requested bugs and explicitly stopped exactly when the user issued the stop command.</analysis>

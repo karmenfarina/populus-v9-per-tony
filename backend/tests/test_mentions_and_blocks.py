@@ -12,7 +12,7 @@ import requests
 
 BASE_URL = os.environ.get(
     "EXPO_BACKEND_URL",
-    "https://feud-admin-panel.preview.emergentagent.com",
+    "https://populus-bot-fleet.preview.emergentagent.com",
 ).rstrip("/")
 API = f"{BASE_URL}/api"
 

@@ -4,7 +4,7 @@ import uuid
 import pytest
 import requests
 
-BASE_URL = "https://feud-admin-panel.preview.emergentagent.com"
+BASE_URL = "https://populus-bot-fleet.preview.emergentagent.com"
 
 
 @pytest.fixture
