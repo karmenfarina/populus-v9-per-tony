@@ -61,7 +61,13 @@ export default function FeudCard({ feud, onPress, showArchivedBadge = false }: {
           </View>
         ) : null}
         <View style={styles.cardImageContent}>
-          <Text style={styles.cardCat}>{feud.category_label.toUpperCase()}</Text>
+          {/* `category_label` should always be set by the backend but we
+              guard defensively: if any older / manually-inserted feud
+              is missing the label, we fall back to the raw `category`
+              id upper-cased instead of crashing the entire feed. */}
+          <Text style={styles.cardCat}>
+            {(feud.category_label || feud.category || "").toString().toUpperCase()}
+          </Text>
           <Text style={styles.cardTitle} numberOfLines={3}>{feud.title}</Text>
         </View>
       </ImageBackground>

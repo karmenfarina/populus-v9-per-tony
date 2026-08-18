@@ -861,7 +861,7 @@ export default function FeudDetail() {
               )}
             </>
           )}
-          <Text style={styles.topCat}>{feud.category_label.toUpperCase()}</Text>
+          <Text style={styles.topCat}>{(feud.category_label || feud.category || "").toString().toUpperCase()}</Text>
           <Pressable onPress={onShare} testID="share-button" style={styles.shareBtn}>
             <Ionicons name="share-outline" size={18} color={colors.brandSecondary} />
           </Pressable>
@@ -1013,7 +1013,7 @@ export default function FeudDetail() {
                       onPress={() => Linking.openURL(s.link)}
                       testID={`source-${i}`}
                     >
-                      <Text style={styles.sourceName}>{s.source.toUpperCase()}</Text>
+                      <Text style={styles.sourceName}>{(s.source || "").toString().toUpperCase()}</Text>
                       <Text style={styles.sourceTitle} numberOfLines={2}>{s.title}</Text>
                       <Text style={styles.sourceLink}>{s.link.replace(/^https?:\/\//, '').slice(0, 45)}...  ›</Text>
                     </Pressable>
@@ -1141,7 +1141,7 @@ export default function FeudDetail() {
                 <Text style={styles.commentsTabCount}>{sideA.length}</Text>
               )}
               <Text style={styles.commentsTabLabel} numberOfLines={1}>
-                PRO {feud.party_a.toUpperCase()}
+                PRO {(feud.party_a || "").toString().toUpperCase()}
               </Text>
             </Pressable>
             <Pressable
@@ -1157,7 +1157,7 @@ export default function FeudDetail() {
                 <Text style={[styles.commentsTabCount, { color: colors.onBrandSecondary }]}>{sideB.length}</Text>
               )}
               <Text style={[styles.commentsTabLabel, { color: colors.onBrandSecondary }]} numberOfLines={1}>
-                PRO {feud.party_b.toUpperCase()}
+                PRO {(feud.party_b || "").toString().toUpperCase()}
               </Text>
             </Pressable>
           </View>

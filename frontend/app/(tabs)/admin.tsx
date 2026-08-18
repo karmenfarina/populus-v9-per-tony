@@ -739,7 +739,7 @@ export default function AdminScreen() {
                   style={{ flex: 1 }}
                   testID={`hidden-open-${f.feud_id}`}
                 >
-                  <Text style={styles.topCat}>{(f.category_label || "").toUpperCase()}</Text>
+                  <Text style={styles.topCat}>{(f.category_label || f.category || "").toString().toUpperCase()}</Text>
                   <Text style={styles.topTitle} numberOfLines={2}>{f.title}</Text>
                   <Text style={{ color: colors.muted, fontSize: font.sizes.xs, marginTop: 2 }}>
                     {f.party_a} vs {f.party_b}
@@ -818,7 +818,7 @@ export default function AdminScreen() {
           <SectionBlock title="TOP 5 FAIDE" empty={stats.top_feuds.length === 0}>
             {stats.top_feuds.map((f) => (
               <View key={f.feud_id} style={styles.topFeud} testID={`top-${f.feud_id}`}>
-                <Text style={styles.topCat}>{f.category_label.toUpperCase()} · {f.total} VOTI</Text>
+                <Text style={styles.topCat}>{(f.category_label || "").toString().toUpperCase()} · {f.total} VOTI</Text>
                 <Text style={styles.topTitle} numberOfLines={2}>{f.title}</Text>
                 <View style={styles.topSplit}>
                   <View style={[styles.topHalf, { backgroundColor: colors.brandPrimary, flex: Math.max(f.pct_a, 5) }]}>

@@ -191,7 +191,7 @@ export default function StoryComposerModal({ visible, feud, onClose, onPublished
                   <View style={styles.previewBody}>
                     {feud.category_label ? (
                       <Text style={styles.previewCat} numberOfLines={1}>
-                        {feud.category_label.toUpperCase()}
+                        {(feud.category_label || feud.category || "").toString().toUpperCase()}
                       </Text>
                     ) : null}
                     <Text style={styles.previewTitle} numberOfLines={3}>

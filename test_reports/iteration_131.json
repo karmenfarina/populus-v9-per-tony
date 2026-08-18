@@ -1,0 +1,34 @@
+{
+  "summary": "Frontend-only regression per il fix del crash 'Cannot read properties of undefined (reading toUpperCase)' in FeudCard.tsx e sui punti collegati. Tutti i 4 sotto-scenari (1, 1b, 1c, 1d) passano. La home feed di chat_a carica 19 feud senza red-screen e senza page errors. Iniettato in DB un feud fittizio 'feud_frontend_smoke' privo di category_label: la home lo mostra correttamente con fallback 'CRONACA' (upper di feud.category), senza crash. Il feud dettaglio del feud malformato rende CRONACA + 'PRO {party_a upper}' e 'PRO {party_b upper}' regolarmente. Nessun 'Cannot read properties of undefined' nel body di alcuna pagina testata. Il feud di test è stato eliminato dopo la verifica. Smoke test rapido su /messages/{userId} e /profile: entrambe le schermate caricano senza crash. Il feud residuo 'feud_test_1787034218' non è più presente e nessun feud in DB (127) risulta privo di category_label. Il pannello /admin non è stato caricato via UI perché il JWT owner pre-baked in test_credentials.md è scaduto; ho comunque verificato via API che l'endpoint /api/admin/analytics/top-feuds-24h ritorna category_label per tutti i feud e, per il feud malformato iniettato, ritorna stringa vuota (che il codice difensivo in admin.tsx:821 gestisce senza crash producendo semplicemente label vuota).",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/test_reports/iter100_home.png",
+    "/app/test_reports/iter100_bad_feud.png",
+    "/app/test_reports/iter100_feuddetail_bad.png"
+  ],
+  "action_items": [
+    "Il JWT owner (carlofarinapayme@gmail.com) in /app/memory/test_credentials.md è scaduto (exp 1785855709). Rigenerare il JWT con TTL >=7d e aggiornare il file, così i prossimi testing agent possano validare la /admin UI end-to-end.",
+    "In admin.tsx:821 e admin.tsx:742 usare il pattern completo `(f.category_label || f.category || '').toString().toUpperCase()` (attualmente solo `(f.category_label || '').toUpperCase()`): coerenza con gli altri 6 call-site e maggiore robustezza se il backend un giorno omettesse category_label ma includesse category."
+  ],
+  "critical_code_review_comments": [
+    "Pattern difensivo applicato in modo consistente in 7 file/riferimenti (FeudCard.tsx:69, StoryComposerModal.tsx:194, messages/[userId].tsx:703, admin.tsx:821, feud/[id].tsx:864/1016/1144/1160, user/[id].tsx:935, profile.tsx:1289).",
+    "admin.tsx:742 e admin.tsx:821 non hanno il fallback su category e non chiamano .toString(): pattern leggermente sotto-difensivo rispetto al resto della codebase.",
+    "Il fix è puramente frontend più il backfill DB (127/127 feud in DB hanno category_label popolato). Nessun feud di test residuo."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "N/A (frontend-only)",
+    "frontend": "100% (4/4 sotto-scenari)"
+  },
+  "seed_data_creation": "Inserito temporaneamente il feud 'feud_frontend_smoke' senza category_label (category='cronaca', created_at=datetime.utcnow()) copiando la struttura di un feud reale. Dopo i test è stato eliminato — verificato con follow-up query che ritorna None.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Per iniettare stati di test sui feud in DB usare pymongo con MONGO_URL/DB_NAME da /app/backend/.env. Attenzione: created_at DEVE essere datetime (non int epoch) altrimenti il feud non appare in /api/feuds. Il JWT owner in test_credentials.md è scaduto — per gli endpoint /api/admin/* usare header X-Admin-Key.",
+  "rca_of_issue": "Ripro originale: alcuni feud in DB (in particolare 'feud_test_1787034218') non avevano category_label popolato. FeudCard.tsx chiamava `feud.category_label.toUpperCase()` senza guard → TypeError → l'intero feed non renderizzava (red-screen). Fix: 1) rimozione feud di test da DB, 2) backfill category_label per ogni feud che ne fosse privo, 3) hardening frontend con pattern `(feud.category_label || feud.category || '').toString().toUpperCase()` applicato a tutti i punti dove si chiamava .toUpperCase() su campi feud potenzialmente undefined (category_label, party_a, party_b, source). Verifica: iniettando manualmente in DB un feud senza category_label la home carica comunque e mostra il fallback 'CRONACA' — comportamento previsto."
+}

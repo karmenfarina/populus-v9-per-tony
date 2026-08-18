@@ -700,7 +700,7 @@ export default function ChatScreen() {
                       <View style={styles.sharedFeudBody}>
                         {item.shared_feud.category_label ? (
                           <Text selectable={false} style={styles.sharedFeudCat} numberOfLines={1}>
-                            {item.shared_feud.category_label.toUpperCase()}
+                            {(item.shared_feud.category_label || item.shared_feud.category || "").toString().toUpperCase()}
                           </Text>
                         ) : null}
                         <Text selectable={false} style={styles.sharedFeudTitle} numberOfLines={3}>

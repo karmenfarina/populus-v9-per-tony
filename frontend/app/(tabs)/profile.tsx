@@ -1286,7 +1286,7 @@ export default function Profile() {
                       >
                         <View style={[styles.sideBar, { backgroundColor: sideColor(h.side_voted) }]} />
                         <View style={{ flex: 1, padding: spacing.sm }}>
-                          <Text style={styles.hCat}>{h.category_label.toUpperCase()}</Text>
+                          <Text style={styles.hCat}>{(h.category_label || h.category || "").toString().toUpperCase()}</Text>
                           <Text style={styles.hTitle} numberOfLines={2}>{h.title}</Text>
                           <View style={styles.hMetaRow}>
                             <Text
