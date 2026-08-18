@@ -23,7 +23,7 @@ load_dotenv('/app/backend/.env')
 BASE_URL = (
     os.environ.get('EXPO_PUBLIC_BACKEND_URL')
     or os.environ.get('EXPO_BACKEND_URL')
-    or 'https://vote-ui-polish.preview.emergentagent.com'
+    or 'https://feud-admin-panel.preview.emergentagent.com'
 ).rstrip('/')
 JWT_SECRET = os.environ['JWT_SECRET']
 API = f'{BASE_URL}/api'

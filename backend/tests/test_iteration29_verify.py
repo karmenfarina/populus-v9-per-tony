@@ -9,7 +9,7 @@ import os
 import time
 import requests
 
-BASE_URL = os.environ.get("EXPO_PUBLIC_BACKEND_URL", "https://vote-ui-polish.preview.emergentagent.com").rstrip("/")
+BASE_URL = os.environ.get("EXPO_PUBLIC_BACKEND_URL", "https://feud-admin-panel.preview.emergentagent.com").rstrip("/")
 
 CHAT_A = {"email": "chat_a@test.it", "password": "test123"}
 CHAT_B_ID = "user_16f709708760"

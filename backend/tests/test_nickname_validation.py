@@ -8,7 +8,7 @@ import uuid
 import pytest
 import requests
 
-BASE_URL = os.environ.get("EXPO_PUBLIC_BACKEND_URL", "https://vote-ui-polish.preview.emergentagent.com").rstrip("/")
+BASE_URL = os.environ.get("EXPO_PUBLIC_BACKEND_URL", "https://feud-admin-panel.preview.emergentagent.com").rstrip("/")
 
 EXPECTED_MSG = "solo lettere, numeri, punti e underscore"
 

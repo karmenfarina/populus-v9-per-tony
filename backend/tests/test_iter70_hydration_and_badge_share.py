@@ -21,7 +21,7 @@ from pymongo import MongoClient
 
 BASE_URL = os.environ.get(
     "EXPO_PUBLIC_BACKEND_URL",
-    "https://vote-ui-polish.preview.emergentagent.com",
+    "https://feud-admin-panel.preview.emergentagent.com",
 ).rstrip("/")
 
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
