@@ -48,7 +48,12 @@ MODULI ESTRATTI (già fuori da questo file):
   - `bot_personas.py`       → 100 personas + prompt builders
   - `bot_routes.py`         → admin bot endpoints
   - `legal_content.py`      → TERMS/NDA versioning + loaders
-  - `routes/legal_routes.py`→ /api/legal/*, /api/docs/*
+  - `routes/legal_routes.py`     → /api/legal/*, /api/docs/*
+  - `routes/sponsors_routes.py`  → /api/sponsors (+ seed)
+  - `routes/favorites_routes.py` → /api/favorites, /api/feuds/{id}/favorite
+  - `routes/support_routes.py`   → /api/support/submit
+  - `routes/blocks_routes.py`    → /api/users/{id}/block, /report
+  - `routes/notifications_routes.py` → /api/notifications/*
 
 DOCS DEV:
   - /app/docs/POPULUS_REGOLE_APP.md       — regole di business
@@ -130,6 +135,9 @@ JWT_ALG = 'HS256'
 JWT_TTL_DAYS = 7
 EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY')
 ADMIN_TOKEN = os.environ.get('ADMIN_TOKEN', '')
+# Email delivery (Resend) — usato sia per verification email che per ticket support.
+RESEND_API_KEY = os.environ.get('RESEND_API_KEY', '')
+SUPPORT_EMAIL = os.environ.get('SUPPORT_EMAIL', '')
 
 # Founder/moderator email — the ONLY account allowed to edit/hide/restore any
 # feud via the admin control APIs below (`PATCH /feuds/{id}`,
@@ -2039,6 +2047,10 @@ async def record_view(feud_id: str, user: dict = Depends(get_current_user)):
 
 
 # --- Favorites -----------------------------------------------------------------
+# Endpoint (`POST/DELETE /feuds/{id}/favorite`, `GET /favorites`) sono estratti
+# in `routes/favorites_routes.py`. Restano qui gli helper condivisi con altri
+# endpoint (feed hype, dettaglio faida).
+
 
 async def _is_favorited(user_id: str, feud_id: str) -> bool:
     doc = await db.favorites.find_one(
@@ -2056,70 +2068,6 @@ async def _favorite_ids_for(user_id: str, feud_ids: List[str]) -> set:
     )
     docs = await cur.to_list(len(feud_ids))
     return {d['feud_id'] for d in docs}
-
-
-@api_router.post('/feuds/{feud_id}/favorite')
-async def add_favorite(feud_id: str, user: dict = Depends(get_current_user)):
-    """Add the feud to the user's favorites. Idempotent — if it already exists
-    the `created_at` is REFRESHED so re-favoriting bumps it to the top of the
-    favorites list (chronological order = most-recently-added first)."""
-    f = await db.feuds.find_one({'feud_id': feud_id}, {'_id': 0, 'feud_id': 1})
-    if not f:
-        raise HTTPException(status_code=404, detail='Faida non trovata')
-    await db.favorites.update_one(
-        {'user_id': user['user_id'], 'feud_id': feud_id},
-        {
-            '$setOnInsert': {
-                'user_id': user['user_id'],
-                'feud_id': feud_id,
-            },
-            '$set': {'created_at': now_utc()},
-        },
-        upsert=True,
-    )
-    asyncio.create_task(_log_event(
-        db, user['user_id'], EVT_FAVORITE_ADDED, feud_id=feud_id,
-    ))
-    return {'ok': True, 'is_favorite': True}
-
-
-@api_router.delete('/feuds/{feud_id}/favorite')
-async def remove_favorite(feud_id: str, user: dict = Depends(get_current_user)):
-    """Remove the feud from the user's favorites. No-op if not present."""
-    await db.favorites.delete_one(
-        {'user_id': user['user_id'], 'feud_id': feud_id}
-    )
-    return {'ok': True, 'is_favorite': False}
-
-
-@api_router.get('/favorites')
-async def list_favorites(user: dict = Depends(get_current_user)):
-    """List the user's favorited feuds, most-recently-added first.
-
-    If a favorited feud has been purged from Mongo (14-day retention) the entry
-    is skipped silently — the client never sees dangling references.
-    """
-    fav_docs = await db.favorites.find(
-        {'user_id': user['user_id']}, {'_id': 0}
-    ).sort('created_at', -1).to_list(500)
-    if not fav_docs:
-        return {'feuds': []}
-    order = {d['feud_id']: i for i, d in enumerate(fav_docs)}
-    feud_ids = list(order.keys())
-    feuds = await db.feuds.find(
-        {'feud_id': {'$in': feud_ids}, 'is_hidden': {'$ne': True}}, {'_id': 0}
-    ).to_list(len(feud_ids))
-    # Restore favorites order (most-recently-added first)
-    feuds.sort(key=lambda f: order.get(f['feud_id'], 10**9))
-    voted_map = await _user_voted_ids(user['user_id'], [f['feud_id'] for f in feuds])
-    for d in feuds:
-        my_vote = voted_map.get(d['feud_id'])
-        _attach_percentages(d, revealed=bool(my_vote))
-        d['my_vote'] = my_vote
-        d['is_favorite'] = True
-        if isinstance(d.get('created_at'), datetime):
-            d['created_at'] = _iso_utc(d['created_at'])
-    return {'feuds': feuds}
 
 
 ARCHIVE_MAX_DAYS = 7
@@ -2803,36 +2751,14 @@ async def _notify_vote_flip(feud: dict, pre_leader: Optional[str], acting_user_i
 
 
 # ----------------------- Sponsors -----------------------
-
-SEED_SPONSORS = [
-    {'category': 'politica', 'sponsor': 'IlPost', 'headline': 'Approfondimenti quotidiani sulla politica.', 'cta': 'ABBONATI', 'image_url': 'https://images.unsplash.com/photo-1541872703-74c5e44368f6?w=800'},
-    {'category': 'tv', 'sponsor': 'Infinity+', 'headline': 'Rivedi ogni puntata del reality del momento.', 'cta': 'GUARDA ORA', 'image_url': 'https://images.unsplash.com/photo-1585951237318-9ea5e175b891?w=800'},
-    {'category': 'musica', 'sponsor': 'Spotify', 'headline': 'La playlist ufficiale della faida.', 'cta': 'ASCOLTA', 'image_url': 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=800'},
-    {'category': 'sport', 'sponsor': 'DAZN', 'headline': 'Rivedi il derby integrale con moviola.', 'cta': 'REPLAY', 'image_url': 'https://images.unsplash.com/photo-1508098682722-e99c43a406b2?w=800'},
-    {'category': 'cinema', 'sponsor': 'Netflix', 'headline': 'Il film della polemica: guardalo stasera.', 'cta': 'GUARDA', 'image_url': 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=800'},
-    {'category': 'social', 'sponsor': 'TrendReport', 'headline': 'Analisi virali ogni 24 ore.', 'cta': 'ISCRIVITI', 'image_url': 'https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?w=800'},
-    {'category': 'gossip', 'sponsor': 'Chi Magazine', 'headline': 'Tutti i retroscena in edicola.', 'cta': 'SFOGLIA', 'image_url': 'https://images.unsplash.com/photo-1561890244-e880c1e6d54e?w=800'},
-    {'category': 'tech', 'sponsor': 'Amazon Prime Day', 'headline': 'Le offerte tech del giorno, prima di tutti.', 'cta': 'SCOPRI', 'image_url': 'https://images.unsplash.com/photo-1518770660439-4636190af475?w=800'},
-    {'category': 'cronaca', 'sponsor': 'Cronache Italia', 'headline': 'Cronaca nera e casi mai risolti: inchieste in edicola.', 'cta': 'LEGGI', 'image_url': 'https://images.unsplash.com/photo-1495556650867-99590cea3657?w=800'},
-]
-
-
-@api_router.get('/sponsors')
-async def get_sponsors(category: Optional[str] = None):
-    q = {}
-    if category and category != 'all':
-        q['category'] = category
-    docs = await db.sponsors.find(q, {'_id': 0}).to_list(50)
-    return {'sponsors': docs}
+# SEED_SPONSORS + seed_sponsors_if_empty + GET /sponsors sono in
+# `routes/sponsors_routes.py`. Importiamo la seed function per usarla al boot.
+from routes.sponsors_routes import seed_sponsors_if_empty as _seed_sponsors_module  # noqa: E402
 
 
 async def seed_sponsors_if_empty():
-    # Upsert one seed sponsor per category (idempotent, safe to run at every startup).
-    for s in SEED_SPONSORS:
-        existing = await db.sponsors.find_one({'category': s['category']})
-        if not existing:
-            await db.sponsors.insert_one({'sponsor_id': new_id('spo'), **s, 'created_at': now_utc()})
-            logger.info(f"Seeded sponsor for category {s['category']}")
+    """Wrapper thin — mantiene la firma senza args per non toccare il chiamante."""
+    await _seed_sponsors_module(db)
 
 
 # ----------------------- Voting History -----------------------
@@ -3751,108 +3677,9 @@ async def toggle_push(body: PushToggleBody, user: dict = Depends(get_current_use
 
 
 # --- Support / assistenza -----------------------------------------------------
-
-RESEND_API_KEY = os.environ.get('RESEND_API_KEY', '')
-SUPPORT_EMAIL = os.environ.get('SUPPORT_EMAIL', '')
-
-
-# SupportBody moved to backend/models.py
-
-
-@api_router.post('/support/submit')
-async def support_submit(body: SupportBody, user: dict = Depends(get_current_user)):
-    """Multi-field support form. Fires an email to the developer via Resend.
-    Reply-To is set to the user's registered email (or their optional contact
-    field) so the developer can reply directly from their inbox.
-
-    Anonymous accounts cannot submit tickets: we require a real account so we
-    can actually reach the user back and to avoid spam from throwaway sessions.
-    """
-    is_anon = bool(user.get('is_anonymous')) or (user.get('auth_provider') == 'anonymous')
-    if is_anon:
-        raise HTTPException(
-            status_code=403,
-            detail='Devi registrarti con un account per inviare una richiesta di assistenza.',
-        )
-
-    if not RESEND_API_KEY or not SUPPORT_EMAIL:
-        raise HTTPException(status_code=500, detail='Servizio email non configurato. Riprova più tardi.')
-
-    reply_to = (user.get('email') or (body.contact_email or '').strip()) or None
-    provider = user.get('auth_provider') or ('anonymous' if user.get('is_anonymous') else 'unknown')
-
-    def esc(v: str) -> str:
-        return html_lib.escape(str(v or ''))
-
-    reply_note = ("(Reply-To impostato su " + reply_to + ")") if reply_to else (
-        "— nessun contatto disponibile, l" + chr(0x2019) + " utente è anonimo senza email opzionale"
-    )
-    html_body = f"""
-    <div style="font-family:-apple-system,sans-serif;max-width:640px;line-height:1.5">
-      <h2 style="color:#F01A1A;border-bottom:2px solid #F01A1A;padding-bottom:6px">
-        Populus — Nuova richiesta di assistenza
-      </h2>
-      <p><b>Categoria:</b> {esc(body.category)}<br>
-         <b>Frequenza:</b> {esc(body.frequency)}<br>
-         <b>Sezione app:</b> {esc(body.section)}</p>
-      <h3>Descrizione</h3>
-      <blockquote style="border-left:3px solid #ccc;padding-left:12px;color:#333;white-space:pre-wrap">{esc(body.description)}</blockquote>
-      <hr>
-      <h3>Identificativo utente</h3>
-      <p><b>Nickname:</b> {esc(user.get('nickname', '-'))}<br>
-         <b>User ID:</b> <code>{esc(user.get('user_id', '-'))}</code><br>
-         <b>Auth provider:</b> {esc(provider)}<br>
-         <b>Email registrata:</b> {esc(user.get('email') or '(nessuna)')}<br>
-         <b>Email contatto (opzionale):</b> {esc(body.contact_email or '(non fornita)')}</p>
-      <p style="font-size:12px;color:#888">
-        Rispondi direttamente a questa email per contattare l&rsquo;utente
-        {esc(reply_note)}.
-      </p>
-    </div>
-    """.strip()
-
-    payload: dict = {
-        'from': 'Populus Support <onboarding@resend.dev>',
-        'to': [SUPPORT_EMAIL],
-        'subject': f"[Populus] {body.category} — {user.get('nickname', 'utente')}",
-        'html': html_body,
-    }
-    if reply_to:
-        payload['reply_to'] = reply_to
-
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            r = await client.post(
-                'https://api.resend.com/emails',
-                headers={
-                    'Authorization': f'Bearer {RESEND_API_KEY}',
-                    'Content-Type': 'application/json',
-                },
-                json=payload,
-            )
-            if r.status_code >= 400:
-                logger.warning(f"Resend error {r.status_code}: {r.text[:200]}")
-                raise HTTPException(
-                    status_code=502,
-                    detail="Impossibile inviare la richiesta ora. Riprova tra qualche minuto.",
-                )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.warning(f"support email error: {e}")
-        raise HTTPException(status_code=502, detail='Servizio email non raggiungibile.')
-
-    # Also archive the ticket in Mongo for the admin to browse.
-    await db.support_tickets.insert_one({
-        'ticket_id': new_id('tkt'),
-        'user_id': user.get('user_id'),
-        'nickname': user.get('nickname'),
-        'category': body.category, 'frequency': body.frequency,
-        'section': body.section, 'description': body.description,
-        'contact_email': body.contact_email,
-        'created_at': now_utc(),
-    })
-    return {'sent': True}
+# Endpoint estratto in `routes/support_routes.py` (POST /support/submit).
+# Nota: RESEND_API_KEY viene già letto in cima al file per l'email di
+# verification, non lo re-importiamo qui.
 
 
 async def send_push(recipients: List[str], data: dict, idempotency_key: Optional[str] = None) -> None:
@@ -3983,76 +3810,7 @@ async def _fanout_hot_news(feud: dict) -> None:
             logger.warning(f"hot-news notify failed for {uid}: {e}")
 
 
-@api_router.get('/notifications')
-async def list_notifications(user: dict = Depends(get_current_user)):
-    """Latest 50 notifications for the current user, newest first.
-
-    Notifications authored by a user in a bi-directional block with the
-    viewer are excluded — otherwise a blocked user's @mention/reply
-    would still light up the bell icon, which contradicts the "no
-    public interaction" invariant enforced everywhere else.
-    """
-    # Compute the block list once so we can filter both the query and
-    # any residual actor_id fields that were saved as top-level
-    # metadata (older notifications).
-    try:
-        blocked = await _blocked_ids_for(user['user_id'])
-    except Exception as e:
-        logger.warning(f"list_notifications block lookup failed: {e}")
-        blocked = set()
-    q: dict = {'user_id': user['user_id']}
-    if blocked:
-        # `actor_id` is set by _emit_notification for every social event.
-        # Any legacy notification without an actor_id is left visible
-        # (nothing sensitive there).
-        q['$or'] = [{'actor_id': {'$exists': False}}, {'actor_id': {'$nin': list(blocked)}}]
-    docs = await db.notifications.find(q, {'_id': 0}).sort('created_at', -1).to_list(50)
-    for d in docs:
-        if isinstance(d.get('created_at'), datetime):
-            d['created_at'] = _iso_utc(d['created_at'])
-    return {'notifications': docs}
-
-
-@api_router.get('/notifications/unread-count')
-async def unread_count(user: dict = Depends(get_current_user)):
-    # Match the same filter used by /notifications so the badge and the
-    # visible list stay in sync (otherwise the bell shows "3" but only
-    # 1 notification renders).
-    try:
-        blocked = await _blocked_ids_for(user['user_id'])
-    except Exception:
-        blocked = set()
-    q: dict = {'user_id': user['user_id'], 'read': False}
-    if blocked:
-        q['$or'] = [{'actor_id': {'$exists': False}}, {'actor_id': {'$nin': list(blocked)}}]
-    n = await db.notifications.count_documents(q)
-    return {'count': n}
-
-
-@api_router.post('/notifications/mark-read')
-async def mark_read(user: dict = Depends(get_current_user)):
-    """Mark ALL notifications for the current user as read."""
-    r = await db.notifications.update_many(
-        {'user_id': user['user_id'], 'read': False},
-        {'$set': {'read': True, 'read_at': now_utc()}},
-    )
-    return {'updated': r.modified_count}
-
-
-@api_router.post('/notifications/{notif_id}/read')
-async def mark_one_read(notif_id: str, user: dict = Depends(get_current_user)):
-    """Mark a SINGLE notification as read.
-
-    Called by the /notifications screen when the user taps a specific row.
-    The frontend already updates the item's `read` flag optimistically in
-    local state so the red-border indicator disappears immediately — this
-    endpoint just makes the change durable so the same notification does
-    not come back highlighted after a full refresh."""
-    r = await db.notifications.update_one(
-        {'notif_id': notif_id, 'user_id': user['user_id']},
-        {'$set': {'read': True, 'read_at': now_utc()}},
-    )
-    return {'updated': r.modified_count}
+# Endpoint notifiche estratti in `routes/notifications_routes.py`.
 
 
 def _image_for_category(cat_id: str, seed: Optional[str] = None) -> str:
@@ -6939,75 +6697,7 @@ async def delete_message(message_id: str, user: dict = Depends(get_current_user)
 
 
 # --- Block / Report -----------------------------------------------------------
-@api_router.post('/users/{user_id}/block')
-async def block_user(user_id: str, user: dict = Depends(get_current_user)):
-    if user_id == user['user_id']:
-        raise HTTPException(status_code=400, detail='Non puoi bloccare te stesso')
-    target = await db.users.find_one({'user_id': user_id}, {'_id': 0, 'user_id': 1})
-    if not target:
-        raise HTTPException(status_code=404, detail='Utente non trovato')
-    await db.user_blocks.update_one(
-        {'blocker_id': user['user_id'], 'blocked_id': user_id},
-        {'$setOnInsert': {'blocker_id': user['user_id'], 'blocked_id': user_id, 'created_at': now_utc()}},
-        upsert=True,
-    )
-    # Cascade: sever any Cerchia friendship in either direction so
-    # neither party sees the other in their circle, story feed or
-    # circle-based ranking. This mirrors the "no public interaction"
-    # invariant enforced by comments, replies and mentions elsewhere.
-    try:
-        await db.friendships.delete_many({
-            '$or': [
-                {'user_id': user['user_id'], 'friend_id': user_id},
-                {'user_id': user_id, 'friend_id': user['user_id']},
-            ],
-        })
-    except Exception as e:
-        logger.warning(f"block_user: friendship cascade delete failed: {e}")
-    # Also drop any pending story-hidden entries — they become moot
-    # once friendships are gone and it keeps the collection tidy.
-    try:
-        await db.users.update_one(
-            {'user_id': user['user_id']},
-            {'$pull': {'story_hidden_viewers': user_id}},
-        )
-    except Exception:
-        pass
-    return {'ok': True, 'blocked': True}
-
-
-@api_router.delete('/users/{user_id}/block')
-async def unblock_user(user_id: str, user: dict = Depends(get_current_user)):
-    await db.user_blocks.delete_one({'blocker_id': user['user_id'], 'blocked_id': user_id})
-    return {'ok': True, 'blocked': False}
-
-
-@api_router.get('/users/me/blocks')
-async def my_blocks(user: dict = Depends(get_current_user)):
-    docs = await db.user_blocks.find({'blocker_id': user['user_id']}, {'_id': 0}).to_list(500)
-    users = []
-    for d in docs:
-        mini = await _mini_user(d['blocked_id'])
-        users.append({**mini, 'blocked_at': _iso_utc(d['created_at']) if d.get('created_at') else None})
-    return {'blocked_users': users}
-
-
-@api_router.post('/users/{user_id}/report')
-async def report_user(user_id: str, body: ReportUserBody, user: dict = Depends(get_current_user)):
-    if user_id == user['user_id']:
-        raise HTTPException(status_code=400, detail='Non puoi segnalare te stesso')
-    target = await db.users.find_one({'user_id': user_id}, {'_id': 0, 'user_id': 1})
-    if not target:
-        raise HTTPException(status_code=404, detail='Utente non trovato')
-    await db.user_reports.insert_one({
-        'report_id': new_id('rep'),
-        'reporter_id': user['user_id'],
-        'reported_id': user_id,
-        'reason': body.reason[:500],
-        'message_id': body.message_id,
-        'created_at': now_utc(),
-    })
-    return {'ok': True}
+# Endpoint estratti in `routes/blocks_routes.py`.
 
 
 # --- WebSocket endpoint -------------------------------------------------------
@@ -7910,6 +7600,69 @@ try:
     app.include_router(build_legal_router(), prefix="/api")
 except Exception as e:
     logger.warning(f"legal_routes wiring failed: {e}")
+
+# Sponsors — /api/sponsors. Public read-only, filtro opzionale ?category=.
+try:
+    from routes.sponsors_routes import build_sponsors_router
+    app.include_router(build_sponsors_router(db), prefix="/api")
+except Exception as e:
+    logger.warning(f"sponsors_routes wiring failed: {e}")
+
+# Favorites — /api/feuds/{id}/favorite + /api/favorites. Auth-only.
+try:
+    from routes.favorites_routes import build_favorites_router
+    app.include_router(
+        build_favorites_router(
+            db=db,
+            get_current_user=get_current_user,
+            log_event=_log_event,
+            evt_favorite_added=EVT_FAVORITE_ADDED,
+            user_voted_ids=_user_voted_ids,
+            attach_percentages=_attach_percentages,
+        ),
+        prefix="/api",
+    )
+except Exception as e:
+    logger.warning(f"favorites_routes wiring failed: {e}")
+
+# Support — /api/support/submit. Invia ticket via Resend + archivio Mongo.
+try:
+    from routes.support_routes import build_support_router
+    app.include_router(
+        build_support_router(db=db, get_current_user=get_current_user),
+        prefix="/api",
+    )
+except Exception as e:
+    logger.warning(f"support_routes wiring failed: {e}")
+
+# Blocks & Reports — /api/users/{id}/block, /api/users/me/blocks, /api/users/{id}/report.
+try:
+    from routes.blocks_routes import build_blocks_router
+    app.include_router(
+        build_blocks_router(
+            db=db,
+            get_current_user=get_current_user,
+            mini_user=_mini_user,
+        ),
+        prefix="/api",
+    )
+except Exception as e:
+    logger.warning(f"blocks_routes wiring failed: {e}")
+
+# Notifications inbox — /api/notifications, /api/notifications/unread-count,
+# /api/notifications/mark-read, /api/notifications/{id}/read.
+try:
+    from routes.notifications_routes import build_notifications_router
+    app.include_router(
+        build_notifications_router(
+            db=db,
+            get_current_user=get_current_user,
+            blocked_ids_for=_blocked_ids_for,
+        ),
+        prefix="/api",
+    )
+except Exception as e:
+    logger.warning(f"notifications_routes wiring failed: {e}")
 
 # Bot admin routes — /api/admin/bots/*. Uses the same X-Admin-Key guard
 # as the analytics dashboard so the founder can control the bot fleet

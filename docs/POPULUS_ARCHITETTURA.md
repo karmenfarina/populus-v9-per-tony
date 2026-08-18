@@ -25,6 +25,7 @@
 /app
 ├── backend/                    FastAPI backend
 │   ├── server.py               Router principale (monolitico, in refactoring)
+│   ├── constants.py            CATEGORIES, PROFESSIONS
 │   ├── models.py               Pydantic request/response bodies
 │   ├── helpers.py              Utility: hashing, id gen, timestamp, nickname
 │   ├── moderation.py           Filtro parole vietate + moderazione IA
@@ -33,6 +34,15 @@
 │   ├── bot_engine.py           Scheduler + logica azioni bot fleet
 │   ├── bot_personas.py         Costruzione 100 personas + prompt bot
 │   ├── bot_routes.py           Endpoint admin per gestire i bot
+│   ├── legal_content.py        Versioning + loader ToS/NDA
+│   ├── routes/                 Router modulari estratti da server.py
+│   │   ├── __init__.py
+│   │   ├── legal_routes.py     /api/legal/*, /api/docs/*
+│   │   ├── sponsors_routes.py  /api/sponsors (+ seed)
+│   │   ├── favorites_routes.py /api/favorites, /api/feuds/{id}/favorite
+│   │   ├── support_routes.py   /api/support/submit (Resend)
+│   │   ├── blocks_routes.py    /api/users/{id}/block, /api/users/{id}/report
+│   │   └── notifications_routes.py /api/notifications/*
 │   ├── hot_topics.md           Config hot-reload boost tematici AI
 │   ├── legal/                  ToS + NDA in markdown
 │   │   ├── terms_v1.md
@@ -40,7 +50,7 @@
 │   ├── scripts/                Script utility (reset DB, migrazioni)
 │   │   └── reset_to_day_one.py
 │   ├── tests/                  Test pytest
-│   │   └── legacy/             Test iterativi storici
+│   │   └── legacy/             Test iterativi storici (30 file)
 │   ├── .env                    Vars ambiente (MONGO_URL, JWT_SECRET, ...)
 │   └── requirements.txt        Dipendenze Python (gestito via pip freeze)
 │
