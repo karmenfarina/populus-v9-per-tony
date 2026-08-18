@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   View, Text, StyleSheet, ScrollView, Pressable, TextInput, ActivityIndicator,
   KeyboardAvoidingView, Platform, ImageBackground, Linking, Alert, BackHandler,
-  Modal,
+  Modal, Animated, Easing,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useRouter, useFocusEffect, usePathname } from "expo-router";
@@ -156,7 +156,11 @@ export default function FeudDetail() {
   // Deep-link target: the specific comment we should scroll to + flash.
   // Keyed by comment_id → the actual View ref (used by measureLayout).
   const commentRefsRef = useRef<Record<string, View | null>>({});
+  // The `highlightCommentId` tells the child which row currently owns the
+  // fade animation; the `highlightAnim` (0..1) is what actually drives the
+  // border/bg opacity so it eases out smoothly instead of blinking off.
   const [highlightCommentId, setHighlightCommentId] = useState<string | null>(null);
+  const highlightAnim = useRef(new Animated.Value(0)).current;
   const scrolledToCommentRef = useRef<string | null>(null);
   // Floating "back to top" pill: appears once the user scrolls past the hero
   // + poll and is deep into comments. Threshold raised so the button doesn't
@@ -422,10 +426,27 @@ export default function FeudDetail() {
                 // -24px so the target isn't glued to the very top edge.
                 scrollRef.current?.scrollTo({ y: Math.max(0, y - 24), animated: true });
               } catch { /* noop */ }
+              // Kick off the fade animation: instantly bump the tint to
+              // full brightness, hold briefly, then ease it back to 0 so
+              // the border/background dissolve smoothly.
               setHighlightCommentId(commentParam as string);
-              setTimeout(() => {
-                setHighlightCommentId((cur) => (cur === commentParam ? null : cur));
-              }, 2500);
+              highlightAnim.setValue(1);
+              Animated.sequence([
+                Animated.delay(900),
+                Animated.timing(highlightAnim, {
+                  toValue: 0,
+                  duration: 1400,
+                  easing: Easing.out(Easing.cubic),
+                  // border colors + backgroundColor aren't supported by the
+                  // native driver — keep JS-driven so the interpolation
+                  // works everywhere (web + native).
+                  useNativeDriver: false,
+                }),
+              ]).start(({ finished }) => {
+                if (finished) {
+                  setHighlightCommentId((cur) => (cur === commentParam ? null : cur));
+                }
+              });
             },
             () => {
               // measureLayout failed — retry a couple of times before giving up.
@@ -1155,6 +1176,7 @@ export default function FeudDetail() {
                       else delete commentRefsRef.current[c.comment_id];
                     }}
                     highlighted={highlightCommentId === c.comment_id}
+                    highlightAnim={highlightCommentId === c.comment_id ? highlightAnim : null}
                   />
                 ))
               )}
@@ -1340,7 +1362,7 @@ export default function FeudDetail() {
 
 function CommentItem({
   c, meId, expanded, onToggle, onExpand, replyingTo, setReplyingTo, replyText, setReplyText,
-  onSubmitReply, canReply, onDeleteComment, onDeleteReply, onRegisterRef, highlighted,
+  onSubmitReply, canReply, onDeleteComment, onDeleteReply, onRegisterRef, highlighted, highlightAnim,
 }: {
   c: Comment; meId: string | null; expanded?: Reply[]; onToggle: () => void;
   /** Forces the reply thread OPEN (idempotent — no-op if already expanded).
@@ -1355,9 +1377,11 @@ function CommentItem({
   /** Registers/unregisters this row's outer View so the parent's deep-link
    *  effect can measure and scroll to it. */
   onRegisterRef?: (node: View | null) => void;
-  /** When true, apply a temporary highlight border (used to draw the
-   *  user's eye to the comment they were deep-linked to). */
+  /** When true, apply a highlight border (used to draw the user's eye to
+   *  the comment they were deep-linked to). The actual opacity is driven
+   *  by `highlightAnim` (0..1) so the effect fades out smoothly. */
   highlighted?: boolean;
+  highlightAnim?: Animated.Value | null;
 }) {
   const router = useRouter();
   const isReplying = replyingTo === c.comment_id;
@@ -1383,9 +1407,27 @@ function CommentItem({
   return (
     <View
       ref={onRegisterRef}
-      style={[cs.item, highlighted && cs.itemHighlighted]}
+      style={cs.item}
       testID={`comment-${c.comment_id}`}
     >
+      {/* Deep-link highlight overlay — a full-cover Animated.View that
+          eases its border + tint from 1 → 0 so the yellow accent
+          dissolves smoothly instead of blinking off. */}
+      {highlighted && highlightAnim && (
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            cs.highlightOverlay,
+            {
+              opacity: highlightAnim,
+              backgroundColor: highlightAnim.interpolate({
+                inputRange: [0, 1],
+                outputRange: ["rgba(255,216,20,0)", "rgba(255,216,20,0.14)"],
+              }),
+            },
+          ]}
+        />
+      )}
       <View style={[cs.sideBar, { backgroundColor: accent }]} />
       <View style={cs.body}>
         <View style={cs.headRow}>
@@ -1564,12 +1606,22 @@ const cs = StyleSheet.create({
     borderColor: colors.border,
   },
   itemHighlighted: {
-    // Bright brand-secondary border + soft-tinted background: quickly
-    // draws the user's eye to the comment they were deep-linked to
-    // from a notification. Auto-clears after ~2.5s.
+    // Deprecated (kept as fallback). Actual highlight is now an animated
+    // overlay child (see `highlightOverlay`) so the yellow accent can
+    // ease out gracefully instead of snapping off.
     borderWidth: 2,
     borderColor: colors.brandSecondary,
     backgroundColor: "rgba(255, 216, 20, 0.10)",
+  },
+  highlightOverlay: {
+    // Absolute-positioned tint that sits above the base comment card and
+    // is faded via the parent's Animated.Value. `borderRadius` matches
+    // the card so the fade tint clips cleanly at the rounded corners.
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: radius.md,
+    borderWidth: 2,
+    borderColor: colors.brandSecondary,
+    zIndex: 5,
   },
   sideBar: { width: 4 },
   body: { flex: 1, padding: spacing.md, gap: 4 },

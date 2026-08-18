@@ -3,7 +3,7 @@ import {
   View, Text, StyleSheet, ScrollView, Pressable, TextInput, ActivityIndicator,
   KeyboardAvoidingView, Platform, Modal,
 } from "react-native";
-import { useRouter } from "expo-router";
+import { useRouter, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as FileSystem from "expo-file-system/legacy";
@@ -129,6 +129,17 @@ export default function AdminScreen() {
   useEffect(() => {
     if (hydrated && tab === "hidden") loadHiddenFeuds();
   }, [hydrated, tab, loadHiddenFeuds]);
+
+  // Auto-refresh the hidden-feuds list every time the admin screen comes
+  // into focus (e.g. after the founder soft-hides a feud from the detail
+  // view and taps back into /admin). Without this, admins have to hit
+  // the "aggiorna" button manually — a stale-list UX gap.
+  useFocusEffect(
+    useCallback(() => {
+      if (!hydrated) return;
+      if (tab === "hidden") loadHiddenFeuds();
+    }, [hydrated, tab, loadHiddenFeuds])
+  );
 
   const submitKey = async () => {
     if (!keyInput.trim()) return;
