@@ -1,3 +1,61 @@
+"""
+Populus — FastAPI backend (monolitico, in refactoring incrementale).
+==================================================================
+
+Questo file è in fase di split verso `/app/backend/routes/*.py`. Il
+processo è incrementale: nuovi endpoint dovrebbero essere aggiunti in un
+modulo `routes/*.py` piuttosto che qui.
+
+INDICE (linee approssimative — usa "Cerca" con questi anchor):
+──────────────────────────────────────────────────────────────────
+  §01 Bootstrap             (import, env, JWT, admin gate)         ~1
+  §02 Auth & session utils  (get_current_user, migrate_anon)       ~90
+  §03 Nickname & validation                                        ~260
+  §04 Badges & profile helpers                                     ~290
+  §05 Email verification + Resend push                             ~600
+  §06 Signup / Login / Google / Firebase / anonymous               ~890
+  §07 Profile GET/PATCH + photos                                   ~1240
+  §08 Categories & lookups                                         ~1590
+  §09 Feeds (live, hype, favorites, archive, search, share)        ~1620
+  §10 Feud detail / edit / hide / restore                          ~2200
+  §11 Hashtags                                                     ~2380
+  §12 Voting                                                       ~2500
+  §13 Sponsors                                                     ~2690
+  §14 History (user vote archive)                                  ~2780
+  §15 Comments & replies (+ AI summary + moderation)               ~2870
+  §16 Push notifications (register / preferences)                  ~3580
+  §17 Support tickets                                              ~3630
+  §18 Hot-news fanout (real-engagement triggered)                  ~3760
+  §19 Notifications feed (in-app inbox)                            ~3855
+  §20 Admin: generate-daily, backfill, cleanup, stats              ~4010
+  §21 AI: generation loop, fact-checker, RSS ingest                ~4200
+  §22 WebSocket messaging (DM + reactions)                         ~5480
+  §23 Direct messages REST endpoints                               ~5860
+  §24 Blocks & reports                                             ~6800
+  §25 Legal (loaders imported from legal_content.py)               ~7000
+  §26 Circle (friendships)                                         ~7100
+  §27 Stories (24h)                                                ~7220
+  §28 App bootstrap: include_router, CORS, shutdown                ~7800
+
+MODULI ESTRATTI (già fuori da questo file):
+  - `constants.py`         → CATEGORIES, PROFESSIONS
+  - `helpers.py`            → hashing, id gen, timestamps, nickname
+  - `models.py`             → Pydantic request bodies
+  - `moderation.py`         → BLOCKED_WORDS + AI moderation
+  - `media_extractor.py`    → og:image, YouTube
+  - `analytics.py`          → event logging + analytics endpoints
+  - `bot_engine.py`         → scheduler + logica azioni bot
+  - `bot_personas.py`       → 100 personas + prompt builders
+  - `bot_routes.py`         → admin bot endpoints
+  - `legal_content.py`      → TERMS/NDA versioning + loaders
+  - `routes/legal_routes.py`→ /api/legal/*, /api/docs/*
+
+DOCS DEV:
+  - /app/docs/POPULUS_REGOLE_APP.md       — regole di business
+  - /app/docs/POPULUS_ALGORITMO_AI.md     — algoritmi AI + bot
+  - /app/docs/POPULUS_ARCHITETTURA.md     — architettura + schema DB
+==================================================================
+"""
 from fastapi import FastAPI, APIRouter, Header, HTTPException, Depends, Request, WebSocket, WebSocketDisconnect, Query, Body
 from fastapi.responses import HTMLResponse
 from dotenv import load_dotenv
@@ -1283,34 +1341,9 @@ ITALIAN_REGIONS = {
 # Classic profession/occupation categories offered during onboarding.
 # Broad enough to cover most working-age Italians without becoming a job title
 # taxonomy — the exact string is stored on the user document as-is.
-PROFESSIONS = [
-    'Studente/Studentessa',
-    'Impiegato/a',
-    'Operaio/a',
-    'Insegnante',
-    'Dirigente / Manager',
-    'Libero professionista',
-    'Imprenditore/Imprenditrice',
-    'Artigiano/a',
-    'Commerciante',
-    'Agricoltore/Agricoltrice',
-    'Medico / Personale sanitario',
-    'Avvocato / Notaio',
-    'Ingegnere / Architetto',
-    'Ricercatore/Ricercatrice',
-    'Militare / Forze dell\'ordine',
-    'Artista / Creativo',
-    'Giornalista / Comunicazione',
-    'Informatico / Tecnologia',
-    'Trasporti / Logistica',
-    'Ristorazione / Turismo',
-    'Casalingo/a',
-    'In cerca di occupazione',
-    'Pensionato/a',
-    'Altro',
-    'Preferisco non dirlo',
-]
-VALID_PROFESSIONS = set(PROFESSIONS)
+PROFESSIONS_UNUSED_MARKER = None
+# PROFESSIONS / VALID_PROFESSIONS / CATEGORIES vivono in `constants.py`
+from constants import PROFESSIONS, VALID_PROFESSIONS  # noqa: E402
 
 
 @api_router.get('/professions')
@@ -1700,17 +1733,8 @@ async def user_category_badges(user_id: str):
     return {'user_id': user_id, 'badges': _build_category_badge_payload(counts, granted)}
 
 
-CATEGORIES = [
-    {'id': 'politica', 'label': 'Politica'},
-    {'id': 'tv', 'label': 'Programmi TV'},
-    {'id': 'musica', 'label': 'Musica'},
-    {'id': 'sport', 'label': 'Sport'},
-    {'id': 'cinema', 'label': 'Cinema'},
-    {'id': 'social', 'label': 'Social'},
-    {'id': 'gossip', 'label': 'Gossip'},
-    {'id': 'cronaca', 'label': 'Cronaca'},
-    {'id': 'tech', 'label': 'Tech'},
-]
+# CATEGORIES vive in `constants.py`.
+from constants import CATEGORIES  # noqa: E402
 
 
 @api_router.get('/categories')
@@ -7035,83 +7059,15 @@ async def ws_messages(ws: WebSocket, token: str = Query(default="")):
 MAX_CIRCLE_MEMBERS = 45
 
 # ────────── Terms & Privacy Policy ──────────
-# Bump `TERMS_VERSION` whenever the document materially changes; users
-# whose stored acceptance version doesn't match will be prompted to
-# re-accept the new copy.
-TERMS_VERSION = 'v1'
-_TERMS_PATH = ROOT_DIR / 'legal' / f'terms_{TERMS_VERSION}.md'
-_TERMS_CACHE: dict = {'text': None}
-
-# NDA — separate document from the Terms of Service, sub-signed on the
-# same onboarding screen. Keep its own version so it can bump
-# independently of the ToS.
-NDA_VERSION = 'v1'
-_NDA_PATH = ROOT_DIR / 'legal' / f'nda_{NDA_VERSION}.md'
-_NDA_CACHE: dict = {'text': None}
-
-
-def _load_terms_text() -> str:
-    """Read and memoise the current terms markdown from disk.
-
-    A miss cache re-reads the file on next call so a fresh deployment
-    picks up new content without a server restart if the version key
-    was left unchanged.
-    """
-    cached = _TERMS_CACHE.get('text')
-    if cached:
-        return cached
-    try:
-        text = _TERMS_PATH.read_text(encoding='utf-8')
-    except Exception as e:
-        logger.warning(f"terms file not readable at {_TERMS_PATH}: {e}")
-        text = "Termini di Servizio non disponibili al momento. Riprova più tardi."
-    _TERMS_CACHE['text'] = text
-    return text
-
-
-def _load_nda_text() -> str:
-    """Read and memoise the current NDA markdown from disk.
-
-    Mirrors `_load_terms_text` — see that function for the caching
-    rationale.
-    """
-    cached = _NDA_CACHE.get('text')
-    if cached:
-        return cached
-    try:
-        text = _NDA_PATH.read_text(encoding='utf-8')
-    except Exception as e:
-        logger.warning(f"nda file not readable at {_NDA_PATH}: {e}")
-        text = "Accordo di Riservatezza non disponibile al momento. Riprova più tardi."
-    _NDA_CACHE['text'] = text
-    return text
-
-
-@api_router.get('/legal/terms')
-async def get_legal_terms():
-    """Return the current Terms of Service + Privacy Policy in markdown.
-
-    Public endpoint: usable both during onboarding (the mandatory
-    acceptance screen) and later from Settings.
-    """
-    return {
-        'version': TERMS_VERSION,
-        'text': _load_terms_text(),
-        'updated_at': '2026-06-01',
-    }
-
-
-@api_router.get('/legal/nda')
-async def get_legal_nda():
-    """Return the current NDA in markdown.
-
-    Public endpoint — read from the onboarding screen and from Settings.
-    """
-    return {
-        'version': NDA_VERSION,
-        'text': _load_nda_text(),
-        'updated_at': '2026-02-01',
-    }
+# Costanti di versione e loader dei documenti legali sono ora in
+# `legal_content.py`. Bump della versione lì per invalidare le
+# accettazioni utente. Gli endpoint pubblici sono in `routes/legal_routes.py`.
+from legal_content import (  # noqa: E402
+    TERMS_VERSION,
+    NDA_VERSION,
+    load_terms_text as _load_terms_text,
+    load_nda_text as _load_nda_text,
+)
 
 
 @api_router.post('/users/me/accept-terms')
@@ -7946,6 +7902,14 @@ async def _send_dm_internal(sender_id: str, recipient_id: str, text: str,
 
 
 app.include_router(api_router)
+
+# Legal & Docs — /api/legal/* + /api/docs/*. Endpoint read-only che leggono
+# file Markdown da disco. Nessuna dep dal DB.
+try:
+    from routes.legal_routes import build_legal_router
+    app.include_router(build_legal_router(), prefix="/api")
+except Exception as e:
+    logger.warning(f"legal_routes wiring failed: {e}")
 
 # Bot admin routes — /api/admin/bots/*. Uses the same X-Admin-Key guard
 # as the analytics dashboard so the founder can control the bot fleet

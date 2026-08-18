@@ -1,3 +1,34 @@
+/**
+ * Populus — Schermata dettaglio faida (`/feud/[id]`).
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * File corposo perché concentra molte responsabilità legate al ciclo
+ * di vita di una faida: caricamento dati, voto, commenti nested,
+ * risposte, share, admin edit, deep-link a commento specifico.
+ *
+ * INDICE INTERNO (cerca in file con questi tag):
+ * ─────────────────────────────────────────────────────────────────
+ *   §1 Parametri route + refs                            (~L33)
+ *   §2 Bootstrap effect + focus lifecycle                (~L108)
+ *   §3 loadAll (fetch feud + comments + user vote)       (~L209)
+ *   §4 Deep-link → scroll & highlight commento           (~L283, §5, §6)
+ *      Nota: il flow deep-link è fragile — vedi navNonce +
+ *      scrolledToCommentRef + highlightAnim. Non toccare senza
+ *      testare tap ripetuti su notifica mention/reply.
+ *   §5 Voto (submit, cambio lato)                        (~L402)
+ *   §6 Comment submit / reply / delete                   (~L452)
+ *   §7 UI: header, ImageBackground, PartyChips           (~L800)
+ *   §8 Commenti list + `CommentItem`                     (~L1417)
+ *   §9 Styles                                            (~L1721)
+ *
+ * Comportamento deep-link (dettaglio):
+ *   - Se la route ha `?comment=<id>&t=<nonce>`:
+ *     • Aprire automaticamente la sezione commenti.
+ *     • Scroll animato al commento con highlight giallo (1.2s hold + 1s fade).
+ *     • `t` è un nonce che cambia ad ogni tap sulla notifica → forza
+ *       il ri-trigger dell'effect anche se l'utente è già sulla pagina.
+ * ══════════════════════════════════════════════════════════════════
+ */
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   View, Text, StyleSheet, ScrollView, Pressable, TextInput, ActivityIndicator,

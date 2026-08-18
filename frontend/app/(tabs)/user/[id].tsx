@@ -1,3 +1,23 @@
+/**
+ * Populus — Profilo pubblico altrui (`/(tabs)/user/[id]`).
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * Schermata visualizzata quando l'utente tappa su un nickname/avatar
+ * per aprire il profilo pubblico di qualcun altro.
+ *
+ * CONTIENE:
+ *   • Header con foto (galleria multi-photo tap-to-zoom).
+ *   • Bio, città, professione, socials (icone cliccabili).
+ *   • Badges: buon senso / bastian contrario + category badges.
+ *   • Cronologia pubblica dei voti (se privacy pubblica).
+ *   • Azioni: aggiungi a cerchia, DM, blocca, segnala.
+ *
+ * VISIBILITÀ:
+ *   - Se l'altro utente ha `history_public=false` → non mostra la cronologia.
+ *   - Se ha `circle_privacy="circle"` → non mostra i membri cerchia.
+ *   - Se l'utente corrente è nella `user_blocks` dell'altro → 403.
+ * ══════════════════════════════════════════════════════════════════
+ */
 import { useEffect, useRef, useState, useCallback } from "react";
 import {
   View, Text, StyleSheet, Pressable, ActivityIndicator, ScrollView, Image, Linking, Modal, TextInput, Alert,

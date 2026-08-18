@@ -1,3 +1,25 @@
+/**
+ * Populus — Il mio profilo (`/(tabs)/profile`).
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * Schermata "profilo mio": foto galleria, dati anagrafici, badges,
+ * cronologia dei voti (con filtro maggioranza/minoranza), preferenze
+ * privacy, edit profilo, professione.
+ *
+ * SEZIONI PRINCIPALI:
+ *   §1 State + auth binding                   (~L31)
+ *   §2 History cache & fetch                  (~L40)
+ *   §3 Foto: pick / crop / upload / reorder   (verso la metà)
+ *   §4 Filtri cronologia                      (verso la metà)
+ *   §5 Modali: EditProfile / Prefs / Profession / CategoryBadges
+ *   §6 Styles                                 (~L1465)
+ *
+ * Note:
+ *   - `SCROLL_KEY = "my-profile"` è usato da `scrollMemory` per
+ *     preservare la posizione tra remount del tab.
+ *   - I sub-modal sono già estratti in `src/components/profile/`.
+ * ══════════════════════════════════════════════════════════════════
+ */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Image, Platform, Switch, Alert } from "react-native";
 import * as ImagePicker from "expo-image-picker";

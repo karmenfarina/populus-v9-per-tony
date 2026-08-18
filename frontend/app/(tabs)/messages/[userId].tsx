@@ -1,3 +1,29 @@
+/**
+ * Populus — Chat 1-a-1 (DM) (`/(tabs)/messages/[userId]`).
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * Schermata di conversazione con un altro utente. Include:
+ *   • Cronologia messaggi paginata (FlatList inverted).
+ *   • Composer testo + immagine (ImagePicker → base64).
+ *   • Reazioni singole emoji (long-press su bolla).
+ *   • Blocco / Sblocco utente.
+ *   • Realtime via `MessagingContext` (WebSocket).
+ *   • Gestione back con `useSmartBack`.
+ *
+ * SEZIONI:
+ *   §1 State + refs + params           (~L45)
+ *   §2 Load & pagination messages
+ *   §3 Send / react / delete
+ *   §4 Block / Unblock / Report
+ *   §5 Composer input + image picker
+ *   §6 Modali (reactions, report, block)
+ *   §7 Styles
+ *
+ * Nota: `useMessaging()` fornisce lo stream WS. Ogni messaggio in
+ * arrivo o inviato passa da lì → non chiamare `api.sendMessage()`
+ * direttamente da qui: usa il context.
+ * ══════════════════════════════════════════════════════════════════
+ */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   View,

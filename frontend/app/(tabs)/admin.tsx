@@ -1,3 +1,27 @@
+/**
+ * Populus — Pannello di controllo Admin (`/(tabs)/admin`).
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * Accessibile solo dall'account founder (`carlofarinapayme@gmail.com`).
+ * Racchiude 4 tab:
+ *   • ANALYTICS — KPI, retention, top categorie, profili (`AnalyticsPanel`).
+ *   • DEMOGRAFIA — voti per regione/sesso/età (endpoint `/admin/stats`).
+ *   • HIDDEN — faide nascoste con possibilità di ripristino/edit.
+ *   • BOT — controllo fleet (100 personas): enable, count, burst, reset.
+ *
+ * Chiave admin (`ADMIN_TOKEN`) storata in AsyncStorage (`populus_admin_key`).
+ * Ogni chiamata usa header `X-Admin-Key: <token>`.
+ *
+ * SEZIONI:
+ *   §1 State + key persistence          (~L46)
+ *   §2 Bot fleet loading/actions        (~L84)
+ *   §3 Analytics fetch trigger          (verso 200)
+ *   §4 Tabs UI                          (verso 400)
+ *   §5 Sub-components: StatCard,
+ *      SectionBlock, BarRow             (~L934-969)
+ *   §6 Styles                           (~L970)
+ * ══════════════════════════════════════════════════════════════════
+ */
 import { useEffect, useRef, useState, useCallback } from "react";
 import {
   View, Text, StyleSheet, ScrollView, Pressable, TextInput, ActivityIndicator,
