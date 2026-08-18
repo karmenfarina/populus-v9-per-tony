@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "931872462409",
+    "project_id": "populus-1f567",
+    "storage_bucket": "populus-1f567.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:931872462409:android:a4b6e69c57867bf2b11198",
+        "android_client_info": {
+          "package_name": "com.emergent.teampick.bfsfcz"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBZj3IGRelTNBvVmxJht_8hb0opP5tociE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

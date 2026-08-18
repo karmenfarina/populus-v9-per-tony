@@ -86,7 +86,3 @@ android-sdk/
 credentials.json
 *.key
 .credentials
-firebase-service-account.json
-backend/firebase-service-account.json
-google-services.json
-frontend/google-services.json

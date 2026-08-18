@@ -1,0 +1,42 @@
+{
+  "summary": "Regression smoke test after react-native-google-mobile-ads downgrade (16.4.0 -> 15.4.0). Frontend web preview loads cleanly (POPULUS auth screen, no red screen, no bundler errors). Anonymous login -> /terms -> accept both checkboxes -> ACCETTO E CONTINUO -> lands on home '/'. Home feed renders 6 feud cards with correct testIDs (feud-card-*). Tapping a feud card opens /feud/{id} with feud-detail-screen mounted. AdBanner renders the expected web stub: testID 'ad-placeholder-feud-detail' with 'SPAZIO PUBBLICITARIO / Visibile solo nel build nativo di produzione' - NO crash, NO module-not-found. Console captured 0 [error] entries and 0 pageerror events; zero 'mobile-ads' / 'Cannot find module' strings across the full flow. Backend smoke: /api/categories 200 (list of 9), /api/feuds/hype?limit=3 200 (list with feud_id/title/party_a/party_b). NOTE: /api/health does NOT exist in server.py - only /api/ (returns {message: 'Populus API', ok: true}); this is a spec mismatch in the review request, not a bug. Nothing to fix; downgrade is safe from a runtime-in-web-preview perspective. EAS Android build itself must still be triggered by the user via Emergent Publish - out of scope for this agent.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/health", "issue": "Endpoint does not exist in backend/server.py. Only /api/ acts as a root probe (returns {message,ok:true}). Review request assumed /api/health -> 200; used /api/ as the equivalent. If a dedicated health probe is desired, main agent can add one."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/test_reports/iteration_138.json",
+    "/app/backend/tests/test_iter138_ads_downgrade_regression.py",
+    "/app/test_reports/pytest/iter138_ads_regression.xml"
+  ],
+  "action_items": [
+    "Optional: add a lightweight `@api_router.get('/health')` endpoint for uptime probes (the deploy pipeline / uptime monitors often expect /api/health specifically).",
+    "The user must still trigger a real EAS Android build to prove the Kotlin metadata error is gone - the ads downgrade cannot be validated in the web preview alone. Web preview only confirms the JS bundle still resolves the mobileAds imports via the .native/.web platform-extension shim."
+  ],
+  "critical_code_review_comments": [
+    "src/ads/AdBanner.tsx correctly guards native module load with `Platform.OS === 'web' || isExpoGo` and only imports react-native-google-mobile-ads through the platform-extension shim (mobileAds.native.ts / mobileAds.web.ts). API surface used (BannerAd, BannerAdSize, TestIds, mobileAds) is stable between v15.x and v16.x, so the downgrade is API-safe.",
+    "package.json now pins react-native-google-mobile-ads at 15.4.0 - matches EAS Kotlin 2.1.0 toolchain (play-services-ads-24.x compiled with Kotlin 2.1.0).",
+    "expo-doctor still warns that expo/expo-constants/expo-file-system are on 54.0.35 / 18.0.13 / 19.0.23 while expo@54 expects .37/.14/.24. Pre-existing, unrelated to this ads fix, but worth a `yarn expo install --fix` in a later chore PR.",
+    "app.json config plugin block for react-native-google-mobile-ads is intact (androidAppId/iosAppId) - unchanged as claimed."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter138_ads_downgrade_regression.py (new — 3 backend smoke tests)"
+  ],
+  "success_rate": {
+    "backend": "100% (3/3 pytest, with /api/health substituted by /api/)",
+    "frontend": "100% (auth->terms->home->feud detail->ad web-stub all pass, 0 console errors, 0 pageerrors)"
+  },
+  "seed_data_creation": "Created 3 throwaway anonymous users during flow attempts (nicknames i138_*, i138b_*, i138c_*). No cleanup needed - anonymous users self-scope.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Web preview cannot validate the EAS Android build itself; only the JS runtime + web stubs. If the user re-triggers Publish and the Kotlin error re-appears, next agent should check `node_modules/react-native-google-mobile-ads/android/build.gradle` for the play-services-ads version pin and confirm it stays on 24.x. The .native/.web platform-extension shim lives in /app/frontend/src/ads/. The AdBanner web stub testID is `ad-placeholder-{placement}` (e.g. `ad-placeholder-feud-detail`).",
+  "rca_of_issue": "N/A - regression smoke only. Prior fix (main agent) downgraded react-native-google-mobile-ads from 16.4.0 to 15.4.0 to align play-services-ads version with EAS Kotlin 2.1.0. Verified downstream JS bundle still resolves, no import crashes, AdBanner web stub renders correctly."
+}
