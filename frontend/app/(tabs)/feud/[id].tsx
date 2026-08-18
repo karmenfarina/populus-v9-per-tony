@@ -31,9 +31,9 @@ import { navStack } from "@/src/utils/navStack";
 import { reviewManager } from "@/src/utils/reviewManager";
 
 export default function FeudDetail() {
-  const { id, comment: commentParam, side: sideParam, from, archiveCat, archiveDate, messagesUserId } =
+  const { id, comment: commentParam, side: sideParam, t: navNonce, from, archiveCat, archiveDate, messagesUserId } =
     useLocalSearchParams<{
-      id: string; comment?: string; side?: string; from?: string;
+      id: string; comment?: string; side?: string; t?: string; from?: string;
       archiveCat?: string; archiveDate?: string; messagesUserId?: string;
     }>();
   const router = useRouter();
@@ -444,9 +444,15 @@ export default function FeudDetail() {
   // (ref registered via <CommentItem onRef>), scroll to it precisely
   // using measureLayout(ScrollView) so the target ends near the top
   // of the visible area regardless of how deep it sits in the list.
+  //
+  // Re-triggering: `scrolledToCommentRef` is keyed on `commentParam +
+  // navNonce`. Every tap on a notification carries a fresh `t=` nonce
+  // (see notifications.tsx), so the same comment scrolls into view
+  // EVERY time the user taps its notification — not just the first.
   useEffect(() => {
     if (!commentParam || activeSide === null) return;
-    if (scrolledToCommentRef.current === commentParam) return;
+    const scrollKey = `${commentParam}::${navNonce || ""}`;
+    if (scrolledToCommentRef.current === scrollKey) return;
     let cancelled = false;
     let tries = 0;
     const tryScroll = () => {
@@ -466,7 +472,7 @@ export default function FeudDetail() {
             targetHandle,
             (_x: number, y: number) => {
               if (cancelled) return;
-              scrolledToCommentRef.current = commentParam as string;
+              scrolledToCommentRef.current = scrollKey;
               try {
                 // -24px so the target isn't glued to the very top edge.
                 scrollRef.current?.scrollTo({ y: Math.max(0, y - 24), animated: true });

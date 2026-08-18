@@ -165,6 +165,12 @@ export default function NotificationsScreen() {
                     q.set("from", "notifications");
                     if (item.comment_id) q.set("comment", item.comment_id);
                     if (item.side) q.set("side", item.side);
+                    // Nonce guarantees each tap produces a UNIQUE URL,
+                    // even for the same notification. Without it, expo-
+                    // router would deduplicate a re-tap to the same
+                    // feud/comment and the receiving screen wouldn't
+                    // fire its scroll-to-comment effect a second time.
+                    q.set("t", String(Date.now()));
                     router.push(`/feud/${item.feud_id}?${q.toString()}`);
                   } else if (item.type === "badge") {
                     // Badge notifications (new/changed) → open the user's own

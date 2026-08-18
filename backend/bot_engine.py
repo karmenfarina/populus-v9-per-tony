@@ -424,9 +424,13 @@ async def _act_for_bot(
         voted_side = await _bot_cast_vote(bot, feud, rng)
         if voted_side is None:
             continue
-        # 2) Maybe comment
+        # 2) Maybe comment. The commenting side is loosely aligned with
+        # the CURRENT vote distribution on the feud (with the bot's own
+        # voted side as a mild anchor) so bot comments end up distributed
+        # across both factions coherently — not piled up on one side.
         if rng.random() < com_prob:
-            await _bot_add_comment(bot, feud, voted_side)
+            comment_side = _pick_comment_side(feud, voted_side, rng)
+            await _bot_add_comment(bot, feud, comment_side)
         # 3) Rare: post a story sharing this feud
         if rng.random() < story_prob:
             await _bot_create_story(bot, feud)
@@ -549,6 +553,46 @@ def _pick_side_for_bot(
     if tone in ("polemico", "cinico", "sarcastico"):
         bias = 0.55  # slight preference for the underdog (side B)
     return "B" if rng.random() < bias else "A"
+
+
+def _pick_comment_side(
+    feud: Dict[str, Any], voted_side: str, rng: random.Random
+) -> str:
+    """Choose which side the bot COMMENTS on.
+
+    We deliberately decouple this from the voted side so bot comments
+    are distributed across both factions in a way that roughly tracks
+    the current vote distribution on the feud (never perfectly — with
+    smoothing + jitter so it doesn't look mechanical).
+
+    Blend:
+      * p_votes: current vote share of side A, Laplace-smoothed so a
+                 brand-new feud with 0 votes defaults to ~0.5 instead
+                 of being undefined.
+      * voted_anchor: bot's own voted side counts for ~25% of the
+                      decision so persona still leaks through.
+      * jitter: ±0.06 uniform noise so distribution looks organic.
+    """
+    try:
+        va = int(feud.get("votes_a", 0) or 0)
+    except Exception:
+        va = 0
+    try:
+        vb = int(feud.get("votes_b", 0) or 0)
+    except Exception:
+        vb = 0
+    total = va + vb
+    # Laplace smoothing (α=3): early feuds gravitate to 50/50, populated
+    # feuds converge to the real ratio.
+    p_a_votes = (va + 3.0) / (total + 6.0)
+    voted_anchor = 1.0 if voted_side == "A" else 0.0
+    # 75% distribution, 25% persona anchor
+    p_a = 0.75 * p_a_votes + 0.25 * voted_anchor
+    # Mild jitter so consecutive bots don't produce identical splits
+    p_a += rng.uniform(-0.06, 0.06)
+    # Clamp so extreme feuds still get the occasional minority comment
+    p_a = max(0.08, min(0.92, p_a))
+    return "A" if rng.random() < p_a else "B"
 
 
 _LEFT_KEYWORDS = re.compile(
