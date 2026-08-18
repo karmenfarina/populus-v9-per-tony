@@ -482,17 +482,14 @@ export default function FeudDetail() {
               // the border/background dissolve smoothly.
               setHighlightCommentId(commentParam as string);
               highlightAnim.setValue(1);
-              // Give the user a generous window to notice the highlight
-              // BEFORE it starts fading — the earlier 900ms hold was too
-              // short: users landing on a long thread reported "the link
-              // opens but doesn't show me the comment" because the visual
-              // cue was gone before their eyes tracked to the target.
-              // Now: hold at full intensity for 3s, then a 2.4s ease-out.
+              // Shorter, punchier highlight per user feedback: 1.2s hold
+              // then 1s ease-out (total 2.2s) — enough to catch the eye
+              // without lingering on the comment.
               Animated.sequence([
-                Animated.delay(3000),
+                Animated.delay(1200),
                 Animated.timing(highlightAnim, {
                   toValue: 0,
-                  duration: 2400,
+                  duration: 1000,
                   easing: Easing.out(Easing.cubic),
                   // border colors + backgroundColor aren't supported by the
                   // native driver — keep JS-driven so the interpolation
