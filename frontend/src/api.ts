@@ -103,21 +103,22 @@ function requiresAuth(path: string): boolean {
 async function request<T = any>(path: string, opts: RequestInit = {}): Promise<T> {
   const token = await getToken();
   // Logout short-circuit — never hit the network with a stale/absent
-  // token. Two paths land here:
-  //   1. `_isLoggedOut` flag has been raised by AuthContext.logout()
-  //      (a definitive "we are logging out" signal).
-  //   2. No token at all — could be a background effect firing after
-  //      the token was cleared but before the (tabs) layout unmounted,
-  //      OR a genuinely-unauthenticated screen calling an authed
-  //      endpoint by accident. Either way, we don't want to burn a
-  //      network round-trip and definitely don't want the backend's
-  //      raw "Missing bearer token" message to bubble up as a red
-  //      screen (that was the "logout crash" report).
-  // The unauthenticated GETs that legitimately support anonymous
-  // access opt out by prefixing the path with `_public_` (stripped
-  // before the actual fetch) — none currently do so, this hook is
-  // reserved for future use.
-  if ((_isLoggedOut && !token) || (!token && requiresAuth(path))) {
+  // token FOR AUTHENTICATED PATHS. Public paths (login/signup/anon/
+  // legal/health…) must ALWAYS be allowed to fire even without a
+  // token, otherwise a user who just logged out (or was booted by a
+  // 401) cannot log back in — the `_isLoggedOut` flag would raise
+  // "Sessione terminata" for `/auth/anonymous` too. So the guard
+  // now checks `requiresAuth(path)` in both branches.
+  //
+  // Two conditions we still want to short-circuit:
+  //   1. Explicit logout in flight (`_isLoggedOut === true`) AND the
+  //      path is authenticated. Prevents background pollers
+  //      (notifications/messaging every 30 s) from hitting the
+  //      backend with a bare header during teardown.
+  //   2. No token in storage AND the path is authenticated. Same
+  //      protection, different trigger (fresh cold start, expired
+  //      session, etc.).
+  if ((_isLoggedOut || !token) && requiresAuth(path)) {
     throw new ApiError(401, 'Sessione terminata');
   }
   const headers: Record<string, string> = {

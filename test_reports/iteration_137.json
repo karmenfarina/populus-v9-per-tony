@@ -1,0 +1,32 @@
+{
+  "summary": "Verified bug fix for 'Sessione terminata' regression on anonymous re-login after leaving /terms unaccepted. Scenario A (auth-guard redirect): anonymous login → /terms → programmatic navigation back to /auth → user was AUTO-REDIRECTED to /terms as intended (no error shown). Scenario B (public-path guard regression): fresh anonymous login and post-clear-token anonymous login BOTH succeed and land on /terms without 'Sessione terminata'. Scenario C (backend regression): POST /api/auth/anonymous, GET /api/legal/terms, GET /api/legal/nda all return 200 with expected payload shape. No React Native deprecated packages / SafeAreaView issues detected in the two edited files. Only pre-existing web console warnings ('shadow*' / 'textShadow*' / props.pointerEvents deprecated) surfaced — unrelated to this fix.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/test_reports/iteration_137.json"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "auth.tsx useEffect correctly mirrors index.tsx routing table; guards against re-submission race by redirecting as soon as AuthContext resolves a user with terms_accepted=false.",
+    "api.ts guard change is sound: `(_isLoggedOut || !token) && requiresAuth(path)` correctly whitelists PUBLIC_PATH_PREFIXES so /auth/anonymous, /auth/login, /legal/* always fire — resolves the false-positive 'Sessione terminata'.",
+    "Minor pre-existing warning noise on web ('shadow*'/'textShadow*'/props.pointerEvents deprecated) — unrelated, tracked elsewhere."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "100%",
+    "frontend": "100%"
+  },
+  "seed_data_creation": "Created three throwaway anonymous users via /api/auth/anonymous during the flow (test_regr_1, test_agent_*, test_fresh_*, test_relog_*). No cleanup needed — anonymous users are self-scoped.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Bug fix verified. If regression re-appears, first confirm /api/auth/anonymous is still in PUBLIC_PATH_PREFIXES in /app/frontend/src/api.ts and that auth.tsx useEffect still redirects to /terms when user.terms_accepted !== true. The web preview uses expo-secure-store which stores via localStorage — clearing localStorage is the reliable way to simulate a fresh no-token state in Playwright.",
+  "rca_of_issue": "Root cause was in /app/frontend/src/api.ts request() guard: `((_isLoggedOut && !token) || (!token && requiresAuth(path)))`. First branch fired whenever _isLoggedOut was true AND token was absent — for ANY path including public /auth/anonymous. After the user backed out of /terms without accepting, AuthContext still held a stale user snapshot but /auth mounted, so re-submitting anonymous went through, but any earlier logout state or race could trip the guard on the public path. Fix scopes the short-circuit to requiresAuth(path). Additionally auth.tsx now redirects on-mount to the correct pending screen so the user doesn't re-submit a second anonymous account and confuse state. Verified via full end-to-end Playwright flow."
+}

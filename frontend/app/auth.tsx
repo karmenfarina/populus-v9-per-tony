@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   View, Text, StyleSheet, TextInput, Pressable, ScrollView,
   KeyboardAvoidingView, Platform, ActivityIndicator, Image,
@@ -17,7 +17,26 @@ export default function AuthScreen() {
   const router = useRouter();
   // `login` and `signup` (legacy backend endpoints) are intentionally
   // not destructured — the email tab is now backed by Firebase.
-  const { anonymous, loginWithGoogle, firebaseSignup, firebaseLogin, firebaseResendVerification } = useAuth();
+  const { user, loading: authLoading, anonymous, loginWithGoogle, firebaseSignup, firebaseLogin, firebaseResendVerification } = useAuth();
+
+  // Guard: if a session is already active when we land on /auth
+  // (e.g. the user went back from /terms without accepting), route
+  // them to the correct pending screen based on their state.
+  // Otherwise they'd see the auth form, re-submit anonymously, and
+  // hit odd flicker/error paths. Mirrors the routing table in
+  // app/index.tsx so both entry points behave identically.
+  useEffect(() => {
+    if (authLoading || !user) return;
+    if (user.terms_accepted !== true) {
+      router.replace("/terms");
+      return;
+    }
+    if (!user.onboarding_completed) {
+      router.replace("/onboarding");
+      return;
+    }
+    router.replace("/(tabs)");
+  }, [user, authLoading, router]);
   // Email/password is now backed by Firebase Auth (verification email
   // sent by Firebase from noreply@populus-1f567.firebaseapp.com — no
   // custom SMTP or domain required). Legacy backend signup/login are
