@@ -231,6 +231,20 @@ export default function UserPublicScreen() {
       try {
         await api.unblockUser(id);
         setIsBlocked(false);
+        // After unblock, the profile payload we currently hold is the
+        // "ghost view" served while blocked (nickname + avatar-less
+        // shell). Re-fetch the full public payload so the real avatar,
+        // history_counts, badges and photos snap back in without a
+        // manual reload. Best-effort: any failure just keeps the
+        // pre-unblock state and the user can navigate back and forth.
+        try {
+          const fresh: any = await api.publicUser(id);
+          setProfile(fresh);
+          // Clear the history cache — the pre-unblock ghost had 0 items
+          // and if any stale copy is around we want the fresh counts.
+          setHistoryCache({} as Record<HFilter, HistoryItem[]>);
+          historyLoadedAtRef.current = {} as Record<HFilter, number>;
+        } catch { /* keep prior state */ }
         try {
           const { blockEvents } = await import("@/src/utils/blockEvents");
           blockEvents.emit();
@@ -774,11 +788,22 @@ export default function UserPublicScreen() {
                     (feud purged, no snapshot) inflate `total_votes`
                     but never render in the list, causing a mismatch. */}
                 <Text style={styles.sectionCountBadge}>
-                  {historyHidden
-                    ? "—"
-                    : historyLoadedAtRef.current[filter]
-                      ? history.length
-                      : ((profile as any).history_counts?.[filter] ?? profile.total_votes ?? 0)}
+                  {(() => {
+                    if (historyHidden) return "—";
+                    // Prefer the server-side precomputed count from the
+                    // profile payload — it never lies, matches the list
+                    // rendered inside the dropdown, and is available
+                    // BEFORE the async loadHistory() finishes. Falls
+                    // back to the currently-loaded array length only if
+                    // the server didn't send counts (older responses).
+                    // Last resort: profile.total_votes. This ordering
+                    // eliminates the "0 → real number" flash reported
+                    // when the dropdown first opened.
+                    const counts = (profile as any).history_counts;
+                    if (counts && typeof counts[filter] === "number") return counts[filter];
+                    if (historyLoadedAtRef.current[filter]) return history.length;
+                    return profile.total_votes ?? 0;
+                  })()}
                 </Text>
                 <Ionicons name={historyExpanded ? "chevron-up" : "chevron-down"} size={20} color={colors.onSurface} />
               </View>

@@ -1,0 +1,33 @@
+{
+  "summary": "Iter121 both UX polish fixes verified via Playwright on mobile viewport 390x844. Test A (unblock re-fetch): from ghost view of blocked chatUserB (public-blocked visible) → tapped unblock-btn → public-blocked disappeared and full profile screen rendered with STORICO VOTI count badge showing '12' (server-side history_counts.all), URL still /user/user_16f709708760. api.publicUser(id) is called after api.unblockUser(id) at /app/frontend/app/(tabs)/user/[id].tsx:240-247, history cache cleared. Test B (no-flash '0'): MutationObserver + 20ms polling captured 49 samples (19 non-null) of the STORICO VOTI count badge during initial render — the sequence of unique consecutive values was exactly ['12'] with NO transitional '0' frame. The new priority order (history_counts[filter] → history.length gated by historyLoadedAtRef → total_votes) at /app/frontend/app/(tabs)/user/[id].tsx:790-806 confirmed live. Backend regression: GET /api/users/user_16f709708760 with chat_a bearer returns history_counts={all:12,majority:12,minority:0} — correct numeric shape maintained since iter117.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/test_reports/iter121_after_unblock.png"
+  ],
+  "action_items": [
+    "None — iter121 UX polish fixes verified fixed. No new bugs surfaced."
+  ],
+  "critical_code_review_comments": [
+    "toggleBlock unblock branch (/app/frontend/app/(tabs)/user/[id].tsx:230-255): the try/catch around api.publicUser(id) silently swallows any error and leaves the ghost view state. Consider surfacing a lightweight toast so users know to reload if the refetch fails. Currently the setIsBlocked(false) is already committed so the render gate will fall through to render the (stale) ghost profile from state — potentially rendering a mismatched view. Low risk on happy path.",
+    "The badge count IIFE at :791-806 assumes profile.history_counts[filter] is always a number when present. Defensive typeof check is in place — good. Note: if the server ever returns history_counts as null for hidden histories, the fallback correctly walks through to total_votes. This is guarded upstream by historyHidden === '—' short-circuit."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "100% (light regression: /api/users/{uid} history_counts shape verified)",
+    "frontend": "100% (both UX polish fixes verified live via Playwright)"
+  },
+  "seed_data_creation": "None. Reused chat_a/chatUserB pre-seeded accounts. Initial DELETE /api/users/user_16f709708760/block issued to ensure clean unblocked starting state, then re-blocked/unblocked as test flow.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "chatUserB has NO avatar photos in DB (picture=null, primary_photo_id=null, photos=[]). This means the post-unblock full profile shows the person-outline SVG placeholder inside avatarRing, NOT an <img> element. So do NOT assert on an <img src=...base64> to verify avatar restore for chatUserB — assert instead that public-blocked disappears and public-history-toggle appears with server-side history_counts count (e.g. '12'). If a real photo-restore test is needed, upload a photo for chatUserB first via /api/users/photos with chat_b's bearer token. testIDs used: public-blocked, unblock-btn, menu-block, public-user-screen, public-history-toggle, open-gallery-viewer. Auth on web preview: POST /api/auth/login → localStorage.setItem('faide_token', JSON.stringify(token)) → hard nav. AsyncStorage.web wraps localStorage but stores JSON — the double quotes matter.",
+  "rca_of_issue": "Iter121 was polish only, both root causes were data-timing bugs in /app/frontend/app/(tabs)/user/[id].tsx: (1) ghost-view profile shell (no avatar/history_counts) persisted in state after unblock because the API call only flipped the isBlocked flag; fix re-fetches api.publicUser(id) and clears historyCache. (2) STORICO VOTI count badge previously read history.length from an empty historyCache slice while loadHistory() was still in flight — displayed '0' for one paint. Fix flips read priority to server-precomputed profile.history_counts[filter] which is present in the initial profile response. Both regressions covered by the Playwright script executed live against the preview URL."
+}
