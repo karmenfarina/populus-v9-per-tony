@@ -116,6 +116,7 @@ from models import (
 # Analytics module — event logging + admin dashboard endpoints.
 # See /app/backend/analytics.py for the design notes.
 import analytics as _analytics
+import cache as _cache
 from analytics import (
     log_event as _log_event,
     EVT_APP_OPEN, EVT_SIGNUP, EVT_LOGIN, EVT_FEUD_VIEW,
@@ -1809,6 +1810,15 @@ from constants import CATEGORIES  # noqa: E402
 
 @api_router.get('/categories')
 async def get_categories():
+    # Constante process-wide: memoizza la risposta wrappata così ogni request
+    # riusa lo stesso oggetto. La cache HTTP `Cache-Control: 300s` gestisce
+    # gli hop CDN/browser, questa evita l'allocazione ripetuta lato Python.
+    return await _cache.get_or_set(
+        'categories:all', 3600.0, lambda: _resolve_categories()
+    )
+
+
+async def _resolve_categories():
     return {'categories': CATEGORIES}
 
 
@@ -1860,6 +1870,19 @@ async def list_hype_feuds(
     home. See the frontend chip row for the always-mounted HYPE chip.
     """
     limit = max(1, min(int(limit or 8), 200))
+    # Fast-path per utenti anonimi (nessuna blocklist personale da applicare):
+    # cachiamo la risposta per 20 secondi. È il caso più frequente (home
+    # visitata anche prima del login) e più costoso (aggregation su ~1500
+    # feuds + ~20k comments + ~30k replies + vote lookup).
+    if user is None:
+        cache_key = f"feuds:hype:anon:{limit}"
+        return await _cache.get_or_set(
+            cache_key, 20.0, lambda: _compute_hype_feuds(user=None, limit=limit)
+        )
+    return await _compute_hype_feuds(user=user, limit=limit)
+
+
+async def _compute_hype_feuds(user: Optional[dict], limit: int):
     since = now_utc() - timedelta(days=7)
     docs = await db.feuds.find(
         {'created_at': {'$gte': since}, 'is_hidden': {'$ne': True}}, {'_id': 0}
@@ -1929,19 +1952,22 @@ async def list_hype_feuds(
             author_pairs.add((c['feud_id'], c['user_id']))
         for r in raw_reps:
             author_pairs.add((r['feud_id'], r['user_id']))
-        # Pull current votes in one round-trip per feud (batch by
-        # feud_id). MongoDB doesn't do compound $in easily, so we
-        # group per-feud user lists.
-        by_feud: dict[str, set[str]] = {}
-        for fid, uid in author_pairs:
-            by_feud.setdefault(fid, set()).add(uid)
+        # Pull current votes in a SINGLE round-trip. Prima facevamo una
+        # query per feud (N round-trip), ora usiamo un solo $in su
+        # feud_id + $in su user_id e filtriamo in memoria le tuple valide.
+        # Riduzione tipica: 150 round-trip → 1.
         current_vote: dict[tuple[str, str], str] = {}
-        for fid, uids in by_feud.items():
+        if author_pairs:
+            all_feuds = list({p[0] for p in author_pairs})
+            all_users = list({p[1] for p in author_pairs})
+            valid_pairs = author_pairs  # snapshot
             async for v in db.votes.find(
-                {'feud_id': fid, 'user_id': {'$in': list(uids)}},
-                {'_id': 0, 'user_id': 1, 'side': 1},
+                {'feud_id': {'$in': all_feuds}, 'user_id': {'$in': all_users}},
+                {'_id': 0, 'feud_id': 1, 'user_id': 1, 'side': 1},
             ):
-                current_vote[(fid, v['user_id'])] = v['side']
+                key = (v['feud_id'], v['user_id'])
+                if key in valid_pairs:
+                    current_vote[key] = v['side']
         # Count only VISIBLE items: author's current vote matches the
         # side the comment/reply was posted on. Items whose author
         # never voted (edge case: legacy data) are treated as visible
@@ -2020,6 +2046,19 @@ async def list_hype_feuds(
 
 @api_router.get('/feuds')
 async def list_feuds(category: Optional[str] = None, user: Optional[dict] = Depends(get_current_user_optional)):
+    # Anon fast-path: cache breve. Il feed live cambia solo quando arriva
+    # un nuovo feud, e un ritardo di 5-10s è invisibile all'utente ma
+    # elimina il 95% del carico DB su ondate di traffico (es. share virale).
+    if user is None:
+        cat_key = (category or 'all').lower()
+        cache_key = f"feuds:live:anon:{cat_key}"
+        return await _cache.get_or_set(
+            cache_key, 10.0, lambda: _list_feuds_impl(category, user=None)
+        )
+    return await _list_feuds_impl(category, user)
+
+
+async def _list_feuds_impl(category: Optional[str], user: Optional[dict]):
     q = {}
     if category and category != 'all':
         q['category'] = category
@@ -2027,11 +2066,6 @@ async def list_feuds(category: Optional[str] = None, user: Optional[dict] = Depe
     q['created_at'] = {'$gte': now_utc() - timedelta(hours=24)}
     # Never surface admin-hidden (soft-deleted) feuds in the live feed.
     q['is_hidden'] = {'$ne': True}
-    # Strict chronological order (newest first) across all categories. The
-    # previous personalization ranking (affinity * recency) was reverted per
-    # user request: the feed must feel like a news timeline where "1 min ago"
-    # always precedes "20 min ago" which precedes "1 h ago", regardless of
-    # which category the user engages with most.
     docs = await db.feuds.find(q, {'_id': 0}).sort('created_at', -1).to_list(200)
     voted_map: dict = {}
     if user and docs:

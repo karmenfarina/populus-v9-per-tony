@@ -1,13 +1,15 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  View, Text, StyleSheet, ScrollView, Pressable, FlatList, RefreshControl,
+  View, Text, StyleSheet, ScrollView, Pressable, RefreshControl,
   ActivityIndicator, TextInput, Image, useWindowDimensions, Platform,
   PanResponder,
 } from "react-native";
+import { FlashList, type FlashListRef } from "@shopify/flash-list";
 import { useRouter, useLocalSearchParams, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { api, Feud } from "@/src/api";
+import { cachedGet } from "@/src/utils/clientCache";
 import { useAuth } from "@/src/auth/AuthContext";
 import { colors, spacing, font, radius } from "@/src/theme";
 import FeudCard from "@/src/components/FeudCard";
@@ -42,7 +44,7 @@ export default function HomeFeed() {
   const chipScrollRef = useRef<ScrollView>(null);
   const chipLayouts = useRef<Record<string, { x: number; w: number }>>({});
   // Ref + visibility flag driving the floating "back to top" pill on the feed.
-  const feedListRef = useRef<FlatList<Feud>>(null);
+  const feedListRef = useRef<FlashListRef<Feud>>(null);
   const [showTopBtn, setShowTopBtn] = useState(false);
   const { width: winW } = useWindowDimensions();
   const centerChip = useCallback((id: string, animated = true) => {
@@ -54,23 +56,21 @@ export default function HomeFeed() {
   useEffect(() => { centerChip(selected); }, [selected, centerChip]);
 
   const load = useCallback(async (category: string) => {
-    // The always-on HYPE rail bypasses `/feuds` entirely and hits its own
-    // endpoint. It has independent ordering rules (chronological days
-    // desc + engagement score desc within each day) and does NOT honour
-    // the user's favorite_categories filter — by design it's a global
-    // "what's blowing up" ribbon.
+    // Categorie sono immutabili nella sessione: la cache client 10min evita
+    // di richiamare più volte /categories nella navigazione tra tab.
+    // Per il feed usiamo cache 5s: la focus-effect già ha un throttle di 3s,
+    // ma questo protegge da re-mount rapido (es. cambio orientamento).
     if (category === "hype") {
-      const res = await api.feudsHype();
+      const res = await cachedGet(`feuds:hype`, 5000, () => api.feudsHype());
       setFeuds(res.feuds);
       return;
     }
-    const res = await api.feuds(category);
+    const res = await cachedGet(
+      `feuds:${category}`,
+      5000,
+      () => api.feuds(category)
+    );
     let list: Feud[] = res.feuds;
-    // "Tutte" scope: when the user has favorite categories set, we restrict
-    // the aggregated feed to their favorites — otherwise the chip labelled
-    // "Tutte" would contradict the personalization the user chose in
-    // onboarding. If no favorites are set (anonymous / not yet onboarded)
-    // "Tutte" keeps its literal meaning and shows everything.
     if (category === "all") {
       const favs = user?.favorite_categories || [];
       if (favs.length > 0) {
@@ -84,7 +84,8 @@ export default function HomeFeed() {
   useEffect(() => {
     (async () => {
       try {
-        const c = await api.categories();
+        // /categories cache 10min (contenuto statico)
+        const c = await cachedGet('categories', 600_000, () => api.categories());
         const favs = user?.favorite_categories || [];
         // Chip row order: [TUTTE, HYPE, ...user favorites]. HYPE is fixed
         // right after "Tutte" — it can never be hidden or reordered by the
@@ -218,6 +219,35 @@ export default function HomeFeed() {
     } finally { setSearching(false); }
   };
 
+  // ── Memoized list callbacks — evitano un re-render dell'intera lista
+  //    ogni volta che HomeFeed si ri-renderizza (per cambio di stato non
+  //    correlato ai dati della FlashList).
+  const keyExtractor = useCallback((f: Feud) => f.feud_id, []);
+  const renderItem = useCallback(
+    ({ item }: { item: Feud }) => (
+      <FeudCard feud={item} onPress={() => router.push(`/feud/${item.feud_id}`)} />
+    ),
+    [router]
+  );
+  const handleScroll = useCallback((e: any) => {
+    const y = e.nativeEvent.contentOffset.y;
+    scrollAtTopRef.current = y <= 4;
+    setShowTopBtn(y > 600);
+  }, []);
+  const ItemSeparator = useMemo(() => {
+    const Sep = () => <View style={{ height: spacing.lg }} />;
+    Sep.displayName = "ItemSeparator";
+    return Sep;
+  }, []);
+  const EmptyList = useMemo(
+    () => (
+      <View style={styles.center} testID="home-empty">
+        <Text style={styles.empty}>NESSUNA FAIDA IN QUESTA CATEGORIA.</Text>
+      </View>
+    ),
+    []
+  );
+
   return (
     <SafeAreaView style={styles.safe} edges={["top"]} testID="home-screen">
       <View style={styles.header}>
@@ -310,35 +340,18 @@ export default function HomeFeed() {
         </View>
       ) : (
         <View style={{ flex: 1 }} {...(isWeb ? webPan.panHandlers : {})}>
-        <FlatList
+        <FlashList
           ref={feedListRef}
           data={feuds}
-          keyExtractor={(f) => f.feud_id}
+          keyExtractor={keyExtractor}
           contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xxxl }}
-          ItemSeparatorComponent={() => <View style={{ height: spacing.lg }} />}
+          ItemSeparatorComponent={ItemSeparator}
           refreshControl={<RefreshControl refreshing={pullRefreshing} onRefresh={onRefresh} tintColor={colors.brandSecondary} colors={[colors.brandSecondary]} />}
-          onScroll={(e) => {
-            const y = e.nativeEvent.contentOffset.y;
-            scrollAtTopRef.current = y <= 4;
-            // Show the floating scroll-to-top pill once the user has moved
-            // past ~1.2 viewport heights so the button doesn't distract at
-            // the top of the feed.
-            setShowTopBtn(y > 600);
-          }}
+          onScroll={handleScroll}
           scrollEventThrottle={100}
-          // Preserve scroll offset when the list refreshes on focus (e.g.
-          // returning from a feud detail). Without this the FlatList jumps
-          // back to the top, which is jarring after quickly scrolling through
-          // multiple posts.
-          maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
-          ListEmptyComponent={
-            <View style={styles.center} testID="home-empty">
-              <Text style={styles.empty}>NESSUNA FAIDA IN QUESTA CATEGORIA.</Text>
-            </View>
-          }
-          renderItem={({ item }) => (
-            <FeudCard feud={item} onPress={() => router.push(`/feud/${item.feud_id}`)} />
-          )}
+          removeClippedSubviews
+          ListEmptyComponent={EmptyList}
+          renderItem={renderItem}
         />
         <ScrollToTopButton
           visible={showTopBtn}

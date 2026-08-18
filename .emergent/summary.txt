@@ -4,114 +4,140 @@ Additional PRODUCT REQUIREMENTS added during the session:
 - A unified Terms of Service and NDA acceptance screen with explicit lockdown rules.
 - Hot feud notifications should only trigger based on real user activity.
 - Robust deep-linking to comment mentions (auto-expanding the comment section and reliably scrolling to the target on every tap).
-- **Latest**: Ensure bot comments are distributed realistically across both factions (Yellow/Red) based on actual human voting distribution, rather than stacking on one side due to persona biases. Reduce the duration of the yellow highlight for deep-linked comments.
+- Ensure bot comments are distributed realistically across both factions (Yellow/Red) based on actual human voting distribution.
+- **Latest**: Code cleanup and reorganization. Create downloadable documentation detailing app rules, architecture, and AI logic. Reset the database to Day 1 (wiping all interactions but keeping the admin and 100 bots). Optimize backend architecture for extreme scalability (handling hundreds of thousands of users) and strengthen app security without altering any existing features, design, or UX.
 
-**User's preferred language**: Italian (You MUST automatically detect the user's primary language from their messages inside the <trajectory> tag and INSTRUCT next agent to respond in the user's preferred language only)
+**User's preferred language**: Italian (You MUST respond to the user in Italian only)
 
 **what currently exists?** 
-A full-stack Expo frontend and FastAPI backend social application (Populus). It features real-time feuds, voting mechanics, nested comments, smart mentions, user profiles, an admin dashboard, a unified NDA/ToS onboarding flow, and an autonomous, AI-driven bot fleet powered by APScheduler and Claude Haiku. 
+A full-stack Expo frontend and FastAPI backend social application (Populus). The backend monolithic  has been partially refactored to extract standalone routers. The DB has been reset to Day 1 state with 39+ custom indexes applied for scalability. Endpoints are optimized with Gzip compression, rate-limiting, and hardened JWT secrets. The application features a fully functional autonomous bot fleet driven by APScheduler and an admin dashboard for bot management. Thorough documentation has been generated in the  directory.
 
 **Last working item**:
-    - Last item agent was working: Proposed an incremental strategy for refactoring the massive monolithic files (, ), after successfully fixing the deep-link comment highlight duration. The user explicitly requested to stop (lascia stare per ora. fermati).
-    - Status: NONE
+    - Last item agent was working: Investigating the user's report of seeing strange bot names (e.g., chat_a) in the comments. The agent verified via database queries that the DB is completely clean (only 1 admin and the 100 official bots exist, and no comments from chat_a exist in the DB). The agent informed the user that this is likely a frontend client cache issue and provided instructions to hard refresh/reload the Expo app.
+    - Status: USER VERIFICATION PENDING
     - Agent Testing Done: Y
-    - Which testing method agent to use?: NA (testing already done by main agent via manual code inspection).
+    - Which testing method agent to use?: NA (DB verification via python script is already complete).
     - User Testing Done: N
 
 **All Pending/In progress Issue list**:  
-  *(None. All active bugs requested by the user have been fixed and validated.)*
+  Issue 1: Ghost/Strange Bot Names Visible in Frontend (P0)
+     - Attempted fixes: Investigated MongoDB directly. DB contains exactly 101 users (1 admin + 100 valid bots) and 0 comments from anomalous names. The issue is confirmed as local cache/AsyncStorage data persistence on the client's device. 
+     - Next debug checklist: Wait for user to confirm if reloading the app/clearing cache solved the issue. If the user still sees them, check frontend  or /React Query caches (if any) or instruct them on how to wipe app data completely.
+     - Why fix this issue and what will be achieved with the fix? Ensures the user sees the true Day 1 state of the app without confusing ghost data from previous tests.
+     - Status: USER VERIFICATION PENDING
+     - Is recurring issue? N
+     - Should Test frontend/backend/both after fix? Frontend
+     - Blocked on other issue: None
 
 **In progress Task List**: 
-  *(None)*
+  *(None active, waiting on user verification of the cache issue)*
 
 **Upcoming and Future Tasks**
-  Task 1: Complete Backend & Frontend Refactoring (Priority P2)
-     - Where to resume:  (>7900 lines), , and  (>2000 lines).
-     - What will be achieved with this? Improve code maintainability by splitting massive monolithic files into smaller components/routers. 
-     - *CRITICAL NOTE: The user explicitly commanded lascia stare per ora. fermati (leave it for now. stop). DO NOT initiate this task without prompting the user first and receiving explicit approval.*
+  Task 1: Complete Frontend Refactoring (Phase 3 of Cleanup) (Priority P2)
+     - Where to resume: , , , .
+     - What will be achieved with this? Splitting massive frontend files (>1000-2000 lines) into smaller, reusable components in . 
+     - *Note: The agent added Table of Contents (TOC) to these files but paused full extraction because of the high risk of breaking complex UI logic (e.g., deep linking). Only proceed if explicitly requested and carefully tested step-by-step.*
 
 **Completed work in this session**
-- Bug Fix (Bot Engine): **Bot Comment Distribution**: Added  in  to balance bot comments across sides based on the actual voting distribution of the feud, smoothing it with Laplace, instead of strictly following the bot's ideological bias (DONE).
-- UI/UX Polish: **Deep-Link Highlight Duration**: Reduced the duration of the yellow highlight on a deep-linked comment in  from 5.4s to a total of 2.2s (1.2s hold + 1s fade) (DONE).
-- Feature: **100 Bot Fleet & Engine** (DONE in previous sessions).
-- UI/Feature: **Unified NDA/ToS Flow** (DONE in previous sessions).
+- Documentation: Created , , ,  in  (DONE).
+- DB Reset: Created and executed  which wiped all human interactions, retaining only 1 admin and 100 bots (DONE).
+- Backend Refactoring: Extracted , , , , , and  routers from  to . Extracted constants to  and  (DONE).
+- UX Bug Fix: Fixed misleading PRIMA ATTIVA I BOT disabled button label in the admin panel by changing it to an explicit instruction text block (DONE).
+- Scalability: Implemented  to auto-ensure 39+ custom indexes on boot. Added Gzip compression middleware to the FastAPI app. Tuned Motor connection pool limits (DONE).
+- Security: Generated and applied a robust 64-char hex . Added rate-limiting (in-memory) to , , , and . Added Content-Security-Policy (CSP) headers to the HTML share endpoints (DONE).
 
 **Earlier issues found/mentioned but not fixed**
   *(None)*
 
 **Known issue recurrence from previous fork**
-  - Issue recurrence in previous fork: Deep link scrolling & mention logic. 
+  - Issue recurrence in previous fork: Deep link scrolling & mention logic.
   - Recurrence count: 3+
-  - Status: RESOLVED (User verified that  fix accurately triggers scrolling on repeated taps).
-  Note: Be highly aware of the complex  chains managing , , , and  inside .
+  - Status: RESOLVED
+  Note: Be highly aware of the complex  chains managing , , , and  inside . DO NOT refactor this file without extreme caution.
 
 **Code Architecture**
-- : Monolithic FastAPI backend.
--  & : Autonomous bot scheduling and persona generation.
-- : Expo router UI screens.
-- : Reusable components.
+- : Main FastAPI entry point (reduced in size, includes routers).
+- : Contains modularized endpoint files (, , , , , ).
+-  & : Autonomous bot scheduling and logic.
+- : Expo router UI screens (currently monolithic but documented with TOCs).
+- : Centralized markdown documentation of app features and backend logic.
 
 **Key Technical Concepts**
 - **APScheduler**: Used in backend for background task execution (Bot actions).
-- **Emergent LLM Key (Claude Haiku 4.5)**: Used exclusively for bot comment/story generation.
-- **navNonce**: A URL parameter used in Expo Router to force a  re-trigger when tapping the same notification twice.
-- **React Native Animated**: Used for the highlight fading effect on deep-linked comments.
+- **Emergent LLM Key (Claude Haiku 4.5)**: Used for bot comment/story generation.
+- **Motor Connection Pooling**: Optimized for concurrent DB connections.
+- **FastAPI GzipMiddleware & Rate Limiting**: Added for performance and security.
 
 **key DB schema**
-- : Contains human users and bots. Bots are identifiable via .
-- :  MUST always be populated to prevent frontend crashes.
+- : Contains human users and bots (, ).
+- :  MUST always be populated.
+- Indexes: 39+ custom indexes enforce optimal querying on fields like , , , , etc.
 
 **changes in tech stack**
-- Added  and  via pip for background bot operations (from previous sessions).
+- Added  for response compression.
 
 **All files of reference** 
--  (Updated to handle realistic bot comment side distribution)
--  (Updated to reduce highlight animation duration)
--  (Monolithic backend file)
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+-  (all newly created route files)
+-  (UX text update applied here)
 
 **Areas that need refactoring**: 
 - 
 - 
 - 
+(These frontend components remain massive monolithic files. Table of Contents were added, but no component extraction has taken place to avoid breaking functionality.)
 
 **key api endpoints**
 - : Triggers immediate bot activity.
 - : Deletes all previous bot comments/replies.
+- : Serves the new markdown documentation files.
 
 **Critical Info for New Agent** 
 - **Language**: MUST communicate with the user in **Italian**.
-- **User Instruction**: The user explicitly halted work (lascia stare per ora. fermati). **AWAIT USER INSTRUCTIONS before making any changes.** Do not start the refactoring process automatically.
-- **Bot Logic**: The bot engine dynamically fetches the current vote split on a feud and distributes comments to simulate realistic user engagement, heavily utilizing the Emergent LLM key. 
+- **User's Immediate Concern**: The user is confused by seeing old ghost data (bots named ) in the frontend after the DB reset. The DB is completely wiped and clean. You must guide them properly on clearing their app state/cache.
+- **Backend Optimizations**: The backend now strictly enforces rate-limiting on auth endpoints. If you test signups programmatically, be aware of HTTP 429 limits.
 
 **documents and test reports created in this job**
--  (from previous run)
+- 
+- 
+- 
+- 
+-  (Scalability and security test run results, 100% PASS).
 
 **Last 10 User Messages and any pending HUMAN messages** 
-1. (User) Confirmed the deep-link scroll fix works. Requested to start refactoring, but FIRST fix the bot comment distribution (bots were commenting heavily on one side instead of matching real vote distribution).
-2. (Agent) Implemented  in  to balance the distribution and tested it with a python script.
-3. (User) Approved the fix. Requested to reduce the duration of the yellow highlight on focused comments, and then proceed with refactoring.
-4. (Agent) Modified  to reduce the highlight duration (5.4s -> 2.2s). Asked the user for confirmation on the refactoring strategy since it's massive/high risk.
-5. (User) lascia stare per ora. fermati (leave it for now. stop).
-6. (Agent) Stopped Expo, acknowledged user, and finished the session.
+1. (User) fai quello che devi ora. (Proceed with remaining tasks).
+2. (Agent) Completed backend scalability (Indexes, Gzip) and Security (Rate limiting, CSP, strict JWT). Verified with Testing Agent (100% Pass). Finished session.
+3. (User) vedo bot con nomi strani in chat nei commenti di qualche post, è normale? sono dei bot di prova estranei ai 100 con nomi plausibili creati? quelli funzionano ancora? sono attivi? rispondi alle domande senza sprecare crediti possibilmente (I see bots with weird names in chat, is this normal?)
+4. (Agent) Clarified that the 100 bots are currently inactive. Stated the visible comments are just residues from testing before the reset. Offered to run the bot comment cleanup tool.
+5. (User) ripulisci i commenti residui dei bot non facenti parte dei 100. (Clean the residual comments from bots not part of the 100).
+6. (Agent) Clarified that the DB is totally clean of strange bot names, there are only 100 valid bots. Asked the user to clarify if they mean names like chat_a.
+7. (User) no ci sono dei nomi strani tipo chat_a, ecc. quelli intendo (Yes, there are weird names like chat_a, etc., that's what I mean).
+8. (Agent) Checked the DB again. Proved there are exactly 101 users total (1 admin + 100 bots) and 0 comments/users with . Explained to the user that this is frontend client-side cache and instructed them to force-refresh or reload the Expo app. Pending user confirmation.
 
 **Project Health Check:**
-- Frontend: Functional. Highlight and scrolling logic stabilized.
-- Backend: Stable. APScheduler background bot activity running securely.
+- Frontend: Functional. (Displaying cached ghost data on user's device, requires a refresh).
+- Backend: Highly stable, modularized, optimized, and secured. 100% Testing Agent pass.
 
 **3rd Party Integrations** 
-- Emergent Managed Google Auth 
+- Emergent Managed Google Auth
 - OpenAI/Claude (AI Feuds / Bot Engine) — uses Emergent LLM Key
 - YouTube Data API (Media Extraction) — uses internal Key
 
 **Testing status**
-  - Testing agent used after significant changes: NO (not required for these specific small logic/UI tweaks).
+  - Testing agent used after significant changes: YES (Verified backend endpoints, bot logic, and scalability/security updates over two runs).
   - Troubleshoot agent used after agent stuck in loop: NO
-  - Test files created: None this session.
-  - Known regressions: None currently known.
+  - Test files created: 
+  - Known regressions: None
 
 **Credentials to test flow:**
-Check . 
+Check .
 Admin Email: 
 
 **What agent forgot to execute**
-Nothing. The agent successfully fixed all requested bugs and explicitly stopped exactly when the user issued the stop command.</analysis>
+Phase 3 of the refactoring plan (extracting frontend monolithic components) was paused due to risk. It was intentionally avoided, not strictly forgotten, but remains incomplete based on the initial instruction.</analysis>

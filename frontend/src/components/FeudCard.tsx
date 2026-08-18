@@ -1,4 +1,6 @@
-import { View, Text, StyleSheet, Pressable, ImageBackground } from "react-native";
+import { memo } from "react";
+import { View, Text, StyleSheet, Pressable } from "react-native";
+import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { Feud } from "@/src/api";
 import { colors, spacing, font, radius } from "@/src/theme";
@@ -26,7 +28,7 @@ function formatRelativeTime(iso?: string): string {
   return `${dd}/${mm}`;
 }
 
-export default function FeudCard({ feud, onPress, showArchivedBadge = false }: {
+export default memo(function FeudCard({ feud, onPress, showArchivedBadge = false }: {
   feud: Feud;
   onPress: () => void;
   /** Kept for backwards compatibility. Since the "ARCHIVIATA" tag was replaced
@@ -50,7 +52,17 @@ export default function FeudCard({ feud, onPress, showArchivedBadge = false }: {
   const badgeLabel = showArchivedBadge ? dateOnly : timeLabel;
   return (
     <Pressable style={styles.card} onPress={onPress} testID={`feud-card-${feud.feud_id}`}>
-      <ImageBackground source={{ uri: feud.image_url }} style={styles.cardImage}>
+      <View style={styles.cardImage}>
+        {/* expo-image: cache disco+memoria automatica, decoding progressivo,
+            trasparente per view background. */}
+        <Image
+          source={{ uri: feud.image_url }}
+          style={StyleSheet.absoluteFill}
+          contentFit="cover"
+          transition={150}
+          cachePolicy="memory-disk"
+          recyclingKey={feud.feud_id}
+        />
         <LinearGradient
           colors={["rgba(0,0,0,0)", "rgba(0,0,0,0.85)"]}
           style={StyleSheet.absoluteFill}
@@ -70,7 +82,7 @@ export default function FeudCard({ feud, onPress, showArchivedBadge = false }: {
           </Text>
           <Text style={styles.cardTitle} numberOfLines={3}>{feud.title}</Text>
         </View>
-      </ImageBackground>
+      </View>
       <View style={styles.splitRow}>
         <View style={[styles.splitHalf, { backgroundColor: colors.brandPrimary }]}>
           {revealed && <Text style={styles.splitPct}>{feud.pct_a}%</Text>}
@@ -96,7 +108,27 @@ export default function FeudCard({ feud, onPress, showArchivedBadge = false }: {
       </View>
     </Pressable>
   );
-}
+}, (prev, next) => {
+  // Ricorda: memo evita re-render se le prop non cambiano. Confrontiamo
+  // solo i campi rilevanti per il rendering (evita comparazioni profonde).
+  const a = prev.feud, b = next.feud;
+  return (
+    prev.onPress === next.onPress &&
+    prev.showArchivedBadge === next.showArchivedBadge &&
+    a.feud_id === b.feud_id &&
+    a.image_url === b.image_url &&
+    a.title === b.title &&
+    a.party_a === b.party_a &&
+    a.party_b === b.party_b &&
+    a.category_label === b.category_label &&
+    a.revealed === b.revealed &&
+    a.total_votes === b.total_votes &&
+    a.pct_a === b.pct_a &&
+    a.pct_b === b.pct_b &&
+    a.created_at === b.created_at &&
+    a.hype_comments === b.hype_comments
+  );
+});
 
 const styles = StyleSheet.create({
   card: {
@@ -106,7 +138,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     overflow: "hidden",
   },
-  cardImage: { height: 210, justifyContent: "flex-end" },
+  cardImage: { height: 210, justifyContent: "flex-end", position: "relative" },
   cardImageContent: { padding: spacing.md, gap: spacing.xs },
   cardCat: {
     color: colors.brandSecondary,

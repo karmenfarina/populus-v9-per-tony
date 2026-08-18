@@ -17,6 +17,7 @@ import { NotificationsProvider } from "@/src/notifications/NotificationsContext"
 import { MessagingProvider } from "@/src/messaging/MessagingContext";
 import { StoryUploadProvider } from "@/src/stories/StoryUploadContext";
 import { reviewManager } from "@/src/utils/reviewManager";
+import NetworkBanner from "@/src/components/NetworkBanner";
 import Constants from "expo-constants";
 
 LogBox.ignoreAllLogs(true);
@@ -158,6 +159,10 @@ export default function RootLayout() {
                       Android lets the screen draw behind the status bar. */}
                   <StatusBar style="light" translucent backgroundColor="transparent" />
                   <Stack screenOptions={{ headerShown: false, animation: "fade", contentStyle: { backgroundColor: "#000000" } }} />
+                  {/* Banner globale che appare in caso di rete lenta/assente. Non
+                      dipende da NetInfo (che su alcuni provider mobili è ottimista):
+                      si basa sui retry effettivi eseguiti dal wrapper API. */}
+                  <NetworkBanner topInset={Platform.OS === "ios" ? 44 : 8} />
                 </StoryUploadProvider>
               </MessagingProvider>
             </NotificationsProvider>

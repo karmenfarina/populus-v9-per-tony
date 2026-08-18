@@ -16,7 +16,7 @@ import requests
 
 BASE_URL = os.environ.get(
     "EXPO_PUBLIC_BACKEND_URL",
-    "https://populus-bot-fleet.preview.emergentagent.com",
+    "https://populus-bots.preview.emergentagent.com",
 ).rstrip("/")
 
 ADMIN_KEY = "populus-admin-42b8f3"

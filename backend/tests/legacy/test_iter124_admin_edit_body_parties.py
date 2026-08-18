@@ -23,7 +23,7 @@ load_dotenv('/app/backend/.env')
 BASE_URL = (
     os.environ.get('EXPO_PUBLIC_BACKEND_URL')
     or os.environ.get('EXPO_BACKEND_URL')
-    or 'https://populus-bot-fleet.preview.emergentagent.com'
+    or 'https://populus-bots.preview.emergentagent.com'
 ).rstrip('/')
 JWT_SECRET = os.environ['JWT_SECRET']
 API = f'{BASE_URL}/api'

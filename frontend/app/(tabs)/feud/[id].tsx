@@ -42,6 +42,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import * as Clipboard from "expo-clipboard";
 import { api, ApiError, Comment, Feud, Reply, Sponsor } from "@/src/api";
+import { invalidateCache } from "@/src/utils/clientCache";
 import { colors, spacing, font, sideColor, onSideColor, radius } from "@/src/theme";
 import { ScrollToTopButton } from "@/src/components/ScrollToTopButton";
 import MentionInput from "@/src/components/MentionInput";
@@ -566,6 +567,8 @@ export default function FeudDetail() {
       try { await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); } catch {}
       const res = await api.vote(feud.feud_id, side);
       setFeud(res.feud);
+      // Invalida la cache client del feed: le percentuali sono cambiate.
+      invalidateCache('feuds:');
       // Reload comments so nickname_side reflects the new faction everywhere.
       try {
         const c = await api.comments(feud.feud_id, ownerUid);

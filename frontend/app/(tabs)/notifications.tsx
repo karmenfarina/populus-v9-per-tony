@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  View, Text, StyleSheet, FlatList, ActivityIndicator, Pressable, RefreshControl,
+  View, Text, StyleSheet, ActivityIndicator, Pressable, RefreshControl,
 } from "react-native";
+import { FlashList, type FlashListRef } from "@shopify/flash-list";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -52,7 +53,7 @@ export default function NotificationsScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   // Floating "back to top" pill on the notifications list.
-  const notifListRef = useRef<FlatList<Notif>>(null);
+  const notifListRef = useRef<FlashListRef<Notif>>(null);
   const [showTopBtn, setShowTopBtn] = useState(false);
 
   const load = useCallback(async () => {
@@ -95,6 +96,12 @@ export default function NotificationsScreen() {
     try { await load(); } finally { setRefreshing(false); }
   };
 
+  const NotifSeparator = useMemo(() => {
+    const S = () => <View style={styles.sep} />;
+    S.displayName = "NotifSep";
+    return S;
+  }, []);
+
   if (!user) {
     return (
       <SafeAreaView style={styles.safe} edges={["top"]} testID="notif-noauth">
@@ -118,14 +125,15 @@ export default function NotificationsScreen() {
           <Text style={styles.emptyTxt}>Niente per ora. Torna più tardi.</Text>
         </View>
       ) : (
-        <FlatList
+        <FlashList
           ref={notifListRef}
           data={items}
           keyExtractor={(i) => i.notif_id}
           contentContainerStyle={styles.list}
-          ItemSeparatorComponent={() => <View style={styles.sep} />}
+          ItemSeparatorComponent={NotifSeparator}
           onScroll={(e) => setShowTopBtn(e.nativeEvent.contentOffset.y > 500)}
           scrollEventThrottle={120}
+          removeClippedSubviews
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.brandSecondary} />}
           renderItem={({ item }) => {
             const iconName = ICONS[item.type] || "notifications";

@@ -1,0 +1,40 @@
+{
+  "summary": "Backend-only regression suite per iter 136 (perf caching + N+1 fix). Nuova suite pytest /app/backend/tests/test_iter136_perf_cache.py — 19/19 PASS (100%). Copertura: (1) GET /api/categories — payload stabile tra chiamate consecutive (cache TTL 1h attiva), risposta identica byte-a-byte tra due request; latenza <3s. (2) GET /api/feuds anon — cache TTL 10s: due chiamate ravvicinate ritornano stesso set di feuds; per anon revealed=False + votes_a/pct_a/votes_b/pct_b tutti None come previsto; filtro ?category=politica funziona. (3) GET /api/feuds auth — utente fresh anon (via /api/auth/anonymous) riceve payload con struttura corretta (feud_id, revealed). (4) GET /api/feuds/hype anon — cache TTL 20s, personalized=False, source='hype', ogni item ha hype_comments, hype_engagement, revealed=False, votes_a/b=None; min-engagement threshold rispettato (hype_comments>=2). (5) GET /api/feuds/hype auth — N+1 fix verificato: risposta <8s con comment_count/hype_comments popolati correttamente; nessun errore. (6) Regressione /api/feuds/{id}, /api/feuds/{id}/comments, /api/feuds/{id}/vote (POST side=A → GET conferma revealed=True, my_vote='A', pct_a+pct_b=100). (7) Regressione /api/notifications, /api/stories/feed per utente anon. (8) /api/admin/bots/status con X-Admin-Key OK; senza header → 401/403. Full regression: iter134 (21 test) + iter135 (25 test) rieseguiti → 46/46 PASS: nessuna regressione introdotta dal modulo cache. Cleanup: eliminati 2 utenti test_i136_* + votes correlati; DB restored (users 110→108).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter136_perf_cache.py",
+    "/app/test_reports/pytest/iter136_perf_cache.xml"
+  ],
+  "action_items": [
+    "Nessuna azione richiesta — tutti gli endpoint richiesti passano, nessuna regressione introdotta dal modulo cache. Il main agent può procedere con Phase 2 (frontend FlashList + expo-image + memo) e Phase 3 (client cache) con confidenza."
+  ],
+  "critical_code_review_comments": [
+    "cache.py: implementazione in-memory single-process con stampede protection tramite `_inflight` future — corretta per singolo worker. Se in futuro si scala a più worker/pod, sostituire con Redis mantenendo l'interfaccia get_or_set/invalidate/invalidate_prefix (già dichiarato nel docstring del modulo).",
+    "server.py:1877-1881: /feuds/hype cache key = f\"feuds:hype:anon:{limit}\" — chiave dipende solo da limit, non da altri parametri. Bene, perché il payload anon è deterministico dato il DB state.",
+    "server.py:2053-2057: /feuds cache key = f\"feuds:live:anon:{cat_key}\" con cat_key=(category or 'all').lower() — corretto, evita cache poisoning tra categorie diverse.",
+    "server.py:1964-1970: N+1 fix per current_vote fatto con singola query $in su feud_ids + user_ids e filtro in-memory su valid_pairs (author_pairs) — corretto e performante (matrice piccola perché author_pairs è già l'intersezione autori/feuds coinvolti).",
+    "cache.py:87: TTL_seconds convertito con max(0.1, float(ttl_seconds)) — protegge da TTL=0 accidentale. Bene.",
+    "Nessuna invalidazione della cache è stata individuata nei code path che scrivono feuds/votes/comments — accettabile perché i TTL sono cortissimi (10s / 20s / 3600s per categorie che sono statiche), ma se in futuro si volesse ridurre lag su nuovi feuds bisognerebbe invalidare 'feuds:live:anon:*' e 'feuds:hype:anon:*' dopo una POST /feuds o un vote. Non blocking, ma valutare per Phase 3."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter136_perf_cache.py (new)"
+  ],
+  "success_rate": {
+    "backend": "100%",
+    "frontend": "not_tested"
+  },
+  "seed_data_creation": "Il test suite ha creato 1 utente anonimo TEST_i136_* per esercitare i path autenticati (fixture module-scoped per evitare rate-limit su /api/auth/anonymous). Cleanup post-run: eliminati 2 utenti test_i136_* residui (uno da questo run + uno da retry) + 2 vote correlati + 0 sessioni. DB finale: 108 users (era 110 pre-run — la baseline reale è 101 secondo iter135, quindi rimangono 7 utenti pre-esistenti non correlati a questo iter).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Suite iter136 (19 test) copre esaustivamente gli endpoint cachati (/categories 1h, /feuds anon 10s, /feuds/hype anon 20s) + il path N+1-fixato (/feuds/hype auth). Combinare con iter134 (bot admin + router regression) e iter135 (scale + security) per un check completo backend: `pytest backend/tests/test_iter134_*.py backend/tests/test_iter135_*.py backend/tests/test_iter136_*.py`. La suite iter136 crea un solo anon user (rate-limit-friendly) usando fixture module-scoped — safe da rilanciare ripetutamente. Base URL usata: EXPO_PUBLIC_BACKEND_URL=https://populus-bots.preview.emergentagent.com. Nota: /api/feuds/{id} ritorna il feud wrapped in {feud: {...}}, non top-level (già gestito nei test).",
+  "rca_of_issue": "Nessun bug trovato. Il modulo cache (/app/backend/cache.py) e il fix N+1 su /feuds/hype funzionano correttamente e non hanno introdotto regressioni. Contract API preservato: shape identica, campi hype_comments/hype_engagement/revealed/votes_a/votes_b/my_vote correttamente popolati sia in path anon che auth."
+}

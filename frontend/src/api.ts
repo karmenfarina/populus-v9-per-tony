@@ -125,44 +125,125 @@ async function request<T = any>(path: string, opts: RequestInit = {}): Promise<T
     ...(opts.headers as any),
   };
   if (token) headers['Authorization'] = `Bearer ${token}`;
-  let res: Response;
-  try {
-    res = await fetch(`${BASE}/api${path}`, { ...opts, headers });
-  } catch {
-    // Fetch itself failed → offline, DNS, CORS block, etc.
-    throw new ApiError(0, 'Impossibile contattare il server. Controlla la connessione.');
-  }
-  const text = await res.text();
-  let data: any = null;
-  try { data = text ? JSON.parse(text) : null; } catch { data = text; }
-  if (!res.ok) {
-    const rawDetail = data && (data.detail ?? data.message);
-    let userMsg: string;
-    if (Array.isArray(rawDetail)) {
-      // Pydantic 422 — extract every field message.
-      const items = rawDetail.map(friendlyValidation).filter(Boolean);
-      userMsg = items.length > 0 ? items.join('\n') : 'Dati non validi.';
-    } else if (typeof rawDetail === 'string' && rawDetail.trim()) {
-      userMsg = rawDetail;
-    } else if (res.status >= 500) {
-      userMsg = 'Errore del server. Riprova tra poco.';
-    } else if (res.status === 401) {
-      userMsg = 'Credenziali non valide.';
-    } else if (res.status === 403) {
-      userMsg = "Non hai i permessi per questa operazione.";
-    } else if (res.status === 404) {
-      userMsg = 'Contenuto non trovato.';
-    } else if (res.status === 409) {
-      userMsg = 'Conflitto: la risorsa esiste già.';
-    } else if (res.status === 429) {
-      userMsg = 'Troppe richieste. Aspetta qualche istante e riprova.';
-    } else {
-      userMsg = `Errore imprevisto (HTTP ${res.status}).`;
+
+  // ── Retry & timeout policy ─────────────────────────────────────────
+  // Rete instabile (3G, tunnel, wifi che fa flip) è la causa nº1 di UX
+  // percepita come "app rotta". Politica:
+  //  • Timeout hard: 12s per GET, 20s per write (LLM/aggregations lente).
+  //  • Retry SOLO su errori di rete / 5xx / 429 e SOLO per idempotenti
+  //    (GET / HEAD / metodo assente = GET).
+  //  • Backoff esponenziale con jitter: 300ms, 800ms, 1800ms.
+  //  • Max 3 tentativi totali (2 retry).
+  //  • Ogni retry emette un evento a `NetworkStatus` che alza il banner
+  //    "connessione lenta" solo dopo il primo retry andato a segno.
+  const method = (opts.method || 'GET').toUpperCase();
+  const isIdempotent = method === 'GET' || method === 'HEAD';
+  const timeoutMs = method === 'GET' ? 12_000 : 20_000;
+  const maxAttempts = isIdempotent ? 3 : 1;
+
+  let lastError: unknown = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    let res: Response;
+    try {
+      res = await fetch(`${BASE}/api${path}`, {
+        ...opts,
+        headers,
+        signal: controller.signal,
+      });
+    } catch (e: any) {
+      clearTimeout(timer);
+      // AbortError = timeout; TypeError = fetch-level failure (DNS,
+      // TLS, offline, CORS, proxy). Both retryable.
+      lastError = e;
+      _networkStatus.notify({ kind: 'error', attempt, path });
+      if (attempt < maxAttempts) {
+        await _sleep(_backoffDelay(attempt));
+        continue;
+      }
+      const isTimeout = e?.name === 'AbortError';
+      throw new ApiError(
+        0,
+        isTimeout
+          ? 'Connessione lenta o assente. Ricontrolla la rete e riprova.'
+          : 'Impossibile contattare il server. Controlla la connessione.'
+      );
     }
-    throw new ApiError(res.status, userMsg);
+    clearTimeout(timer);
+
+    // Retry-able server errors (5xx and 429). We do NOT retry 4xx
+    // client errors — those are actual bugs / auth issues.
+    if (isIdempotent && (res.status >= 500 || res.status === 429) && attempt < maxAttempts) {
+      _networkStatus.notify({ kind: 'error', attempt, path });
+      await _sleep(_backoffDelay(attempt));
+      continue;
+    }
+
+    const text = await res.text();
+    let data: any = null;
+    try { data = text ? JSON.parse(text) : null; } catch { data = text; }
+    if (!res.ok) {
+      const rawDetail = data && (data.detail ?? data.message);
+      let userMsg: string;
+      if (Array.isArray(rawDetail)) {
+        const items = rawDetail.map(friendlyValidation).filter(Boolean);
+        userMsg = items.length > 0 ? items.join('\n') : 'Dati non validi.';
+      } else if (typeof rawDetail === 'string' && rawDetail.trim()) {
+        userMsg = rawDetail;
+      } else if (res.status >= 500) {
+        userMsg = 'Errore del server. Riprova tra poco.';
+      } else if (res.status === 401) {
+        userMsg = 'Credenziali non valide.';
+      } else if (res.status === 403) {
+        userMsg = "Non hai i permessi per questa operazione.";
+      } else if (res.status === 404) {
+        userMsg = 'Contenuto non trovato.';
+      } else if (res.status === 409) {
+        userMsg = 'Conflitto: la risorsa esiste già.';
+      } else if (res.status === 429) {
+        userMsg = 'Troppe richieste. Aspetta qualche istante e riprova.';
+      } else {
+        userMsg = `Errore imprevisto (HTTP ${res.status}).`;
+      }
+      throw new ApiError(res.status, userMsg);
+    }
+    // Success — if we had recovered from a network hiccup on a prior
+    // attempt, notify success so the banner can hide itself.
+    if (attempt > 1) _networkStatus.notify({ kind: 'recovered', path });
+    return data as T;
   }
-  return data as T;
+  // Non dovremmo mai arrivare qui; il loop torna o rilancia.
+  throw (lastError as any) ?? new ApiError(0, 'Errore di rete.');
 }
+
+// ── Helpers per il retry + broadcast dello stato rete ───────────────
+function _backoffDelay(attempt: number): number {
+  // 300ms, 800ms, 1800ms + jitter fino a 200ms.
+  const base = attempt === 1 ? 300 : attempt === 2 ? 800 : 1800;
+  return base + Math.floor(Math.random() * 200);
+}
+function _sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/**
+ * Bus event-driven per stato rete. Le view (banner, toast) si
+ * sottoscrivono; il wrapper `request()` emette `error`/`recovered`.
+ * Nessuna dipendenza da NetInfo: distingue "rete assente" da "server
+ * lento" osservando i retry effettivi (più affidabile del segnale OS
+ * che a volte è ottimista).
+ */
+type NetEvent = { kind: 'error' | 'recovered'; attempt?: number; path?: string };
+type NetListener = (e: NetEvent) => void;
+export const _networkStatus = (() => {
+  const listeners = new Set<NetListener>();
+  return {
+    subscribe(fn: NetListener) { listeners.add(fn); return () => listeners.delete(fn); },
+    notify(e: NetEvent) { listeners.forEach((fn) => { try { fn(e); } catch {} }); },
+  };
+})();
+export const networkStatus = _networkStatus;
 
 export const api = {
   signup: (email: string, password: string, nickname: string) =>

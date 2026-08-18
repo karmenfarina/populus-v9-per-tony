@@ -21,6 +21,6 @@
   "seed_data_creation": "Per-run anonymous nicknames (tst<ts>) and registered accounts (reg_<ts>@test.dev, nickname reg<ts>). No persistent seed created.",
   "retest_needed": false,
   "should_main_agent_self_test": false,
-  "context_for_next_testing_agent": "Preview URL: https://populus-bot-fleet.preview.emergentagent.com. Anonymous profile has: anon-banner (block with lock, heading, body, CTA), NO profile-edit-button, NO prefs-section. anon-register-btn logs out + routes to /auth. Registered profile has: profile-edit-button, prefs-section, and edit-modal with bio-input + 5 social-input-{key} + photo-add-{library,camera} + profile-edit-save. After save, profile-bio shows on header.",
+  "context_for_next_testing_agent": "Preview URL: https://populus-bots.preview.emergentagent.com. Anonymous profile has: anon-banner (block with lock, heading, body, CTA), NO profile-edit-button, NO prefs-section. anon-register-btn logs out + routes to /auth. Registered profile has: profile-edit-button, prefs-section, and edit-modal with bio-input + 5 social-input-{key} + photo-add-{library,camera} + profile-edit-save. After save, profile-bio shows on header.",
   "rca_of_issue": "N/A — no bugs found. Redesign verified end-to-end on mobile viewport 390x844."
 }

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  View, Text, StyleSheet, ScrollView, Pressable, FlatList,
+  View, Text, StyleSheet, ScrollView, Pressable,
   ActivityIndicator, useWindowDimensions,
 } from "react-native";
+import { FlashList, type FlashListRef } from "@shopify/flash-list";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -39,6 +40,19 @@ export default function ArchiveScreen() {
   const params = useLocalSearchParams<{ category?: string; date?: string }>();
   const initialCat = (params.category as string) || "all";
   const initialDate = (params.date as string) || null;
+  const ArchiveSeparator = useMemo(() => {
+    const S = () => <View style={{ height: spacing.lg }} />;
+    S.displayName = "ArchiveSep";
+    return S;
+  }, []);
+  const ArchiveEmpty = useMemo(
+    () => (
+      <View style={styles.center} testID="archive-empty-feuds">
+        <Text style={styles.empty}>NESSUNA FAIDA IN QUESTA CATEGORIA.</Text>
+      </View>
+    ),
+    []
+  );
   const [cats, setCats] = useState<{ id: string; label: string }[]>([ALL_CAT]);
   const [category, setCategory] = useState<string>(initialCat);
   const [dates, setDates] = useState<DateEntry[]>([]);
@@ -68,7 +82,7 @@ export default function ArchiveScreen() {
   const chipScrollRef = useRef<ScrollView>(null);
   const chipLayouts = useRef<Record<string, { x: number; w: number }>>({});
   // Floating "back to top" pill on the archive feuds list.
-  const archiveListRef = useRef<FlatList<Feud>>(null);
+  const archiveListRef = useRef<FlashListRef<Feud>>(null);
   const [showTopBtn, setShowTopBtn] = useState(false);
   // Bulletproof "scroll to top" gate: once we tap the floating pill we
   // LOCK all `showTopBtn` updates until the user MANUALLY grabs the list
@@ -263,28 +277,22 @@ export default function ArchiveScreen() {
             <ActivityIndicator size="large" color={colors.brandPrimary} />
           </View>
         ) : (
-          <FlatList
+          <FlashList
             ref={archiveListRef}
             data={feuds}
             keyExtractor={(f) => f.feud_id}
             contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xxxl }}
-            ItemSeparatorComponent={() => <View style={{ height: spacing.lg }} />}
+            ItemSeparatorComponent={ArchiveSeparator}
             onScroll={(e) => {
               if (scrollLockRef.current) return;
               setShowTopBtn(e.nativeEvent.contentOffset.y > 600);
             }}
             onScrollBeginDrag={() => {
-              // The user has physically touched the list — this is the
-              // ONLY event we treat as "release the lock". Any subsequent
-              // onScroll can now legitimately turn the pill back on.
               scrollLockRef.current = false;
             }}
             scrollEventThrottle={120}
-            ListEmptyComponent={
-              <View style={styles.center} testID="archive-empty-feuds">
-                <Text style={styles.empty}>NESSUNA FAIDA IN QUESTA CATEGORIA.</Text>
-              </View>
-            }
+            removeClippedSubviews
+            ListEmptyComponent={ArchiveEmpty}
             renderItem={({ item }) => (
               <FeudCard
                 feud={item}

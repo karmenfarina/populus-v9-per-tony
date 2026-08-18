@@ -21,7 +21,7 @@ from pymongo import MongoClient
 
 BASE_URL = os.environ.get(
     "EXPO_PUBLIC_BACKEND_URL",
-    "https://populus-bot-fleet.preview.emergentagent.com",
+    "https://populus-bots.preview.emergentagent.com",
 ).rstrip("/")
 API = f"{BASE_URL}/api"
 ADMIN_KEY = "populus-admin-42b8f3"

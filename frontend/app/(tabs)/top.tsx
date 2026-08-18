@@ -1,7 +1,8 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  View, Text, StyleSheet, FlatList, RefreshControl, Pressable, ActivityIndicator,
+  View, Text, StyleSheet, RefreshControl, Pressable, ActivityIndicator,
 } from "react-native";
+import { FlashList, type FlashListRef } from "@shopify/flash-list";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -19,7 +20,7 @@ export default function TopScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Floating "back to top" pill on the TOP list.
-  const topListRef = useRef<FlatList<Feud>>(null);
+  const topListRef = useRef<FlashListRef<Feud>>(null);
   const [showTopBtn, setShowTopBtn] = useState(false);
 
   const load = useCallback(async () => {
@@ -45,6 +46,25 @@ export default function TopScreen() {
     setRefreshing(true);
     load();
   }, [load]);
+
+  const keyExtractor = useCallback((f: Feud) => f.feud_id, []);
+  const renderItem = useCallback(
+    ({ item }: { item: Feud }) => (
+      <FeudCard
+        feud={item}
+        onPress={() => router.push({ pathname: `/feud/${item.feud_id}`, params: { from: 'top' } })}
+      />
+    ),
+    [router]
+  );
+  const handleScroll = useCallback((e: any) => {
+    setShowTopBtn(e.nativeEvent.contentOffset.y > 600);
+  }, []);
+  const Separator = useMemo(() => {
+    const S = () => <View style={{ height: spacing.md }} />;
+    S.displayName = "Sep";
+    return S;
+  }, []);
 
   // Non-registered users see a lock screen
   if (user && user.auth_provider === "anonymous") {
@@ -114,14 +134,15 @@ export default function TopScreen() {
           </Pressable>
         </View>
       ) : (
-        <FlatList
+        <FlashList
           ref={topListRef}
           data={feuds}
-          keyExtractor={(f) => f.feud_id}
+          keyExtractor={keyExtractor}
           contentContainerStyle={styles.list}
-          ItemSeparatorComponent={() => <View style={{ height: spacing.md }} />}
-          onScroll={(e) => setShowTopBtn(e.nativeEvent.contentOffset.y > 600)}
+          ItemSeparatorComponent={Separator}
+          onScroll={handleScroll}
           scrollEventThrottle={120}
+          removeClippedSubviews
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -130,12 +151,7 @@ export default function TopScreen() {
               colors={[colors.brandPrimary]}
             />
           }
-          renderItem={({ item }) => (
-            <FeudCard
-              feud={item}
-              onPress={() => router.push({ pathname: `/feud/${item.feud_id}`, params: { from: 'top' } })}
-            />
-          )}
+          renderItem={renderItem}
           testID="top-list"
         />
       )}

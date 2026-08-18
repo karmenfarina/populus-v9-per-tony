@@ -4,11 +4,11 @@ import {
   Text,
   Pressable,
   ScrollView,
-  Image,
   StyleSheet,
   ActivityIndicator,
   Modal,
 } from "react-native";
+import { Image } from "expo-image";
 import { useRouter, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "@/src/api";
@@ -322,7 +322,7 @@ export default function StoriesBar() {
                   );
                 }
                 const uri = raw.startsWith("data:") ? raw : `data:image/jpeg;base64,${raw}`;
-                return <Image source={{ uri }} style={styles.avatar} />;
+                return <Image source={{ uri }} style={styles.avatar} cachePolicy="memory-disk" contentFit="cover" />;
               })()}
               {/* Removed the red "+" badge overlay — user feedback:
                   it read as visual noise, especially over the initials
@@ -367,7 +367,7 @@ export default function StoriesBar() {
             >
               <View style={styles.avatarWrap}>
                 {g.author?.avatar ? (
-                  <Image source={{ uri: g.author.avatar }} style={styles.avatar} />
+                  <Image source={{ uri: g.author.avatar }} style={styles.avatar} cachePolicy="memory-disk" contentFit="cover" recyclingKey={g.user_id} />
                 ) : (
                   // Initials fallback — same pattern as the "my ring"
                   // case above. Empty gray circles read as broken

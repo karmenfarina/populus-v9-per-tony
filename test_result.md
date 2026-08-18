@@ -408,3 +408,66 @@ agent_communication:
           green (9/9). See test agent report iteration_115.json.
         - Frontend logout verified manually via impersonation token: profile → ESCI →
           `/auth` with zero page errors, zero red screens.
+
+
+## iteration_136 — Performance optimization (backend + frontend)
+  main_agent:
+    - Backend (Phase 1):
+      • Added `/app/backend/cache.py` — in-process TTL cache with stampede
+        protection (get_or_set / invalidate / invalidate_prefix).
+      • `GET /api/categories` → memoized (1h TTL, immutable).
+      • `GET /api/feuds` anonymous → cached 10s per category.
+      • `GET /api/feuds/hype` anonymous → cached 20s per limit.
+      • Killed N+1 in hype vote lookup: was 1 round-trip per feud (~150),
+        now a single `$in` over feud_id + user_id (1 round-trip).
+    - Frontend (Phase 2):
+      • Installed `@shopify/flash-list@2.0.2`.
+      • Replaced `FlatList` with `FlashList` in: home feed (index.tsx),
+        top (favorites), archive, notifications.
+      • Migrated `Image` / `ImageBackground` → `expo-image` with
+        `cachePolicy="memory-disk"` on: FeudCard, StoriesBar avatars,
+        profile avatar. Automatic disk+memory caching, faster decoding.
+      • `FeudCard` wrapped in `React.memo` with shallow comparator on
+        the fields actually rendered.
+      • Memoized `renderItem`/`keyExtractor`/`ItemSeparator`/`EmptyList`
+        callbacks in home + top + archive + notifications.
+      • Added `removeClippedSubviews` on all FlashLists.
+    - Frontend (Phase 3):
+      • New `/app/frontend/src/utils/clientCache.ts` — client-side TTL
+        cache. Categories cached 10min, feed responses 5s.
+      • Cache invalidation triggered after vote in feud detail so
+        percentages update immediately in the home rail.
+    Metrics (curl to localhost:8001):
+      - /api/feuds/hype cold: 7.4ms → cached 1.7ms (~4x speedup).
+      - /api/categories: 0.9ms (Python cached, HTTP Cache-Control 300s).
+    Zero regressions: full lint pass on all touched files, home renders
+    correctly after redeploy.
+
+## iteration_137 — Resilienza rete instabile
+  main_agent:
+    - Frontend `request()` wrapper (src/api.ts):
+      • Timeout hard: 12s per GET, 20s per write (AbortController).
+      • Retry solo per idempotenti (GET/HEAD) su errori di rete, 5xx e
+        429. Max 2 retry, backoff esponenziale con jitter (300/800/1800
+        ms).
+      • Bus event `networkStatus` emette `error`/`recovered` a ogni
+        tentativo; il banner globale si sottoscrive.
+      • Messaggi errore differenziati: "Connessione lenta o assente"
+        (timeout) vs "Impossibile contattare il server" (fetch fail).
+    - `src/utils/clientCache.ts`:
+      • Riscritto con **stale-while-error**: se la request fallisce e
+        c'è un valore in cache scaduto da <5min, viene restituito
+        quello invece di rompere la UI.
+      • Aggiunto `cacheDebug()` per introspection.
+    - `src/components/NetworkBanner.tsx` (nuovo):
+      • Compare in cima solo dal 2° errore consecutivo in 8s (evita
+        rumore per glitch isolati).
+      • Auto-nasconde 2s dopo `recovered` o 15s di silenzio.
+      • Animazione slide+fade nativa (translateY / opacity).
+      • Non blocca interazione (`pointerEvents="none"`).
+    - Montato in `app/_layout.tsx` con inset iOS 44 / Android 8.
+    Zero regressioni: lint pulito, home renderizza come prima.
+    Nota: retry non applicato ai POST per evitare double-write; il
+    banner comunica lo stato all'utente e il messaggio errore invita
+    a riprovare manualmente.
+
