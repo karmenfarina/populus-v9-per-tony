@@ -1099,11 +1099,12 @@ export default function Profile() {
               <View style={styles.sectionIcon}>
                 <Ionicons name="briefcase" size={18} color={colors.brandSecondary} />
               </View>
-              <Text style={[styles.prefsTitle, { flex: 1 }]}>PROFESSIONE</Text>
-              <View style={styles.sectionHeadRight}>
+              <Text style={styles.prefsTitle} numberOfLines={1}>PROFESSIONE</Text>
+              <View style={[styles.sectionHeadRight, { flex: 1, justifyContent: "flex-end", minWidth: 0 }]}>
                 <Text
                   style={[styles.professionValue, !user.profession && { color: colors.muted }]}
                   numberOfLines={1}
+                  ellipsizeMode="tail"
                 >
                   {user.profession || "Non impostata"}
                 </Text>
@@ -1885,7 +1886,8 @@ const styles = StyleSheet.create({
   professionValue: {
     fontSize: font.sizes.base,
     color: colors.onSurface,
-    maxWidth: 180,
+    flexShrink: 1,
+    textAlign: "right",
   },
   professionItem: {
     flexDirection: "row",
