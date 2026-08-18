@@ -430,6 +430,13 @@ async def _act_for_bot(
         # 3) Rare: post a story sharing this feud
         if rng.random() < story_prob:
             await _bot_create_story(bot, feud)
+        # 3b) Sometimes reply to a REAL user's comment on this feud so
+        # the founder/real users get an interaction back on Populus,
+        # not just silent votes/comments in parallel. Probability is
+        # tuned so ~1 in 4 bot actions on a feud lead to a reply IF a
+        # human comment is available to reply to.
+        if rng.random() < com_prob * 0.6:
+            await _bot_add_reply(bot, feud, voted_side, rng)
         # 4) Hot-news trigger — bot engagement DOES count toward the
         # thresholds (bots are real users of the platform for engagement
         # purposes). Fire-and-forget; the fanout is idempotent (uses the
@@ -601,6 +608,141 @@ async def _bot_add_comment(
         await _db.comments.insert_one(doc)
     except Exception as e:
         logger.warning(f"bot comment insert failed: {e}")
+
+
+async def _bot_add_reply(
+    bot: Dict[str, Any], feud: Dict[str, Any], side: str, rng: random.Random,
+) -> None:
+    """Pick a real-user comment on this feud and post a natural reply.
+
+    Behaviour choices:
+      * Only replies to HUMANS (comments authored by non-bot / non-dev users).
+        This ensures the founder and real users actually get pinged back,
+        which is the whole point of the feature.
+      * Skips comments the bot already replied to (idempotent-ish — we
+        allow at most one bot reply per human comment per bot).
+      * Prefers comments on the SAME side as the bot (agree-and-add) with
+        50% probability; otherwise picks any side to keep debate lively.
+      * Generates a short natural comment via Claude Haiku with a
+        "reply-style" system prompt (references the parent's opinion).
+      * Emits a `reply` notification to the parent-comment author via
+        `server._emit_notification` (fire-and-forget) so the founder
+        SEES the reply arrive.
+    """
+    feud_id = feud.get("feud_id")
+    if not feud_id:
+        return
+    # Fetch bot ids (used to filter out replies to other bots)
+    bot_ids = [
+        u["user_id"] async for u in _db.users.find(
+            {"is_bot": True}, {"_id": 0, "user_id": 1}
+        )
+    ]
+    # Candidate comments: authored by humans, not by this bot, on this feud
+    candidates = await _db.comments.find(
+        {
+            "feud_id": feud_id,
+            "user_id": {"$nin": bot_ids},
+        },
+        {"_id": 0},
+    ).sort("created_at", -1).limit(30).to_list(30)
+    if not candidates:
+        return
+    # Prefer same-side comments with 50% chance
+    if rng.random() < 0.5:
+        same_side = [c for c in candidates if c.get("side") == side]
+        if same_side:
+            candidates = same_side
+    # Skip comments this bot already replied to
+    my_replies = await _db.replies.distinct(
+        "comment_id",
+        {"user_id": bot["user_id"], "feud_id": feud_id},
+    )
+    my_replies_set = set(my_replies or [])
+    candidates = [c for c in candidates if c.get("comment_id") not in my_replies_set]
+    if not candidates:
+        return
+    parent = rng.choice(candidates)
+    parent_text = (parent.get("text") or "").strip()
+    reply_text = await _generate_reply(
+        _rehydrate_persona(bot), feud, side, parent_text
+    )
+    if not reply_text:
+        return
+    reply_text = _clean_comment(reply_text)
+    if not reply_text:
+        return
+    now = _now()
+    reply_doc = {
+        "reply_id": f"rep_bot_{bot['user_id']}_{parent['comment_id']}_{int(now.timestamp())}",
+        "comment_id": parent["comment_id"],
+        "feud_id": feud_id,
+        "user_id": bot["user_id"],
+        "nickname": bot.get("nickname"),
+        "side": side,
+        "text": reply_text,
+        "mentions": [],
+        "created_at": now,
+    }
+    try:
+        await _db.replies.insert_one(reply_doc)
+    except Exception as e:
+        logger.warning(f"bot reply insert failed: {e}")
+        return
+    # Notify parent-comment author (never bots).
+    try:
+        parent_uid = parent.get("user_id")
+        if parent_uid and parent_uid not in bot_ids and parent_uid != bot["user_id"]:
+            import server as _server  # lazy import to avoid cycle
+            await _server._emit_notification(
+                parent_uid,
+                "reply",
+                title="Nuova risposta al tuo commento",
+                body=reply_text[:120],
+                feud_id=feud_id,
+                comment_id=parent["comment_id"],
+                side=side,
+                actor_id=bot["user_id"],
+            )
+    except Exception as e:
+        logger.warning(f"bot reply notify failed: {e}")
+
+
+async def _generate_reply(
+    persona: Dict[str, Any], feud: Dict[str, Any], side: str, parent_text: str,
+) -> Optional[str]:
+    """Ask Claude Haiku to reply to a real user's comment on this feud."""
+    api_key = os.environ.get("EMERGENT_LLM_KEY")
+    if not api_key:
+        return None
+    try:
+        from emergentintegrations.llm.chat import LlmChat, UserMessage
+    except Exception:
+        return None
+    hint = random_style_hint(random.Random(), persona.get("verbosity"))
+    system = system_prompt_for(persona, hint)
+    side_label = feud.get("party_a") if side == "A" else feud.get("party_b")
+    user_prompt = (
+        f"Post: «{feud.get('title', '')}» — categoria {feud.get('category_label') or ''}. "
+        f"Fazioni: «{feud.get('party_a', '')}» vs «{feud.get('party_b', '')}». "
+        f"Tu stai dalla parte di: «{side_label}». "
+        f"Un altro utente ha appena scritto questo commento: «{parent_text[:220]}». "
+        f"Rispondi in modo naturale, come faresti in una discussione social. "
+        f"Puoi essere d'accordo, in disaccordo o aggiungere un punto — a seconda della tua personalità. "
+        f"Regole: max 220 caratteri, italiano informale, non usare l'@ del destinatario."
+    )
+    async with _llm_lock:
+        try:
+            chat = LlmChat(
+                api_key=api_key,
+                session_id=f"botreply-{persona.get('display_name', 'x')[:20]}-{int(_now().timestamp())}",
+                system_message=system,
+            ).with_model("anthropic", "claude-haiku-4-5-20251001")
+            resp = await chat.send_message(UserMessage(text=user_prompt))
+            return (str(resp) or "").strip() or None
+        except Exception as e:
+            logger.warning(f"LLM reply gen failed: {e}")
+            return None
 
 
 async def _bot_create_story(bot: Dict[str, Any], feud: Dict[str, Any]) -> None:

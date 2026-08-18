@@ -1,0 +1,46 @@
+{
+  "summary": "Testato entrambi i cambi. (1) DEEP-LINK: fix pienamente verificato — con chat_a (vote resettato) senza deep-link la sezione commenti mostra 'comments-idle'; con /feud/feud_2e5b4481a8a4?comment=cmt_62969a7cd072&side=A&from=notifications la sezione si apre su lato A e comment-cmt_62969a7cd072 è nel DOM; ripetendo il deep-link dopo un ritorno alla pagina senza params la sezione si RIAPRE (regressione risolta); test analogo su side=B con cmt_f65cfc96b24e OK. (2) BOT REPLY: la feature funziona a metà — i bot generano correttamente reply su commenti umani (verificato: bot rispondono a cmt di chat_a/chatUserB con testo italiano coerente, ≤220 char, nickname = quello corrente del bot), MA la NOTIFICA all'autore del parent FALLISCE con `_emit_notification() got an unexpected keyword argument 'actor_user_id'`. Root cause: `bot_engine._bot_add_reply` (bot_engine.py:697-707) passa `actor_user_id=` e `actor_nickname=`, ma `server._emit_notification` (server.py:3611) accetta solo `actor_id=` e nessun `actor_nickname`. Nessuna notifica di tipo 'reply' con actor bot arriva a chat_a → il requisito 'chat_a abbia ricevuto una notifica type=reply con actor_user_id=bot_id' è fallito.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "bot_engine._bot_add_reply → server._emit_notification",
+        "issue": "TypeError silenzioso: _emit_notification() got an unexpected keyword argument 'actor_user_id'. bot_engine.py:697-707 chiama _emit_notification(..., actor_user_id=bot.uid, actor_nickname=bot.nick), ma la signature reale è server.py:3611 async def _emit_notification(user_id, ntype, *, title, body, feud_id=None, comment_id=None, side=None, actor_id=None, send_push_too=False). Ogni reply-notification a chat_a/agli utenti viene loggata come warning e persa. La reply-doc invece è stata correttamente inserita in db.replies.",
+        "priority": "CRITICAL"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter132_bot_reply_and_deeplink.py",
+    "/app/test_reports/pytest/iter132_bot_reply.xml",
+    "/app/test_reports/iter132_no_deeplink.png",
+    "/app/test_reports/iter132_deeplink_A.png",
+    "/app/test_reports/iter132_redeep.png",
+    "/app/test_reports/iter132_deeplink_B.png"
+  ],
+  "action_items": [
+    "URGENTE: in /app/backend/bot_engine.py:697-707 rinominare `actor_user_id=bot['user_id']` in `actor_id=bot['user_id']` e rimuovere `actor_nickname=bot.get('nickname')` (oppure aggiungere `actor_nickname` alla signature di server._emit_notification se serve tenere la nickname nella notifica). Attualmente ogni bot-reply notifica fallisce silenziosamente e chat_a/utenti non ricevono l'alert.",
+    "Considerare in bot_engine._score_feuds_for_bot un piccolo boost per i feud che hanno commenti umani non ancora risposti (attualmente il feud target si è visto poco durante il burst: 80 bot × 1-3 pick × top-40 sono dominati dai feud che matchano main_topic — un 'nudge' verso feud con human comment non-risposto renderebbe la feature più deterministica per QA e per l'esperienza utente)."
+  ],
+  "critical_code_review_comments": [
+    "bot_engine.py:697 passa keyword `actor_user_id` e `actor_nickname` che non esistono nella signature di server._emit_notification (server.py:3611): il try/except intorno inghiotte l'errore in un logger.warning, quindi il bug è invisibile a chi non guarda i log. Aggiungere `actor_nickname` a _emit_notification (per popolarlo poi nel documento notifications) o mappare a `actor_id` risolve.",
+    "Il feature `_bot_add_reply` scrive `reply_doc` PRIMA della notifica, quindi anche senza fix le reply arrivano visivamente sul feud, ma non c'è push/bell-icon feedback all'autore del parent — che è l'obiettivo dichiarato della feature.",
+    "Il fix deep-link in feud/[id].tsx:401-441 è idiomatico: `repliesExpandedForRef` (auto-expand-once per comment_id) separato dal `setActiveSide` funzionale che riapre la sezione se cur è null o punta al lato sbagliato con target confirmed. Regressione risolta."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "80% (4/5 sotto-scenari: setup vote/comment OK, bot toggle/count/burst OK, bot reply generation su commento umano OK e nickname match OK; notifica reply=FAIL)",
+    "frontend": "100% (4/4: no-deeplink=idle, deeplink side A apre + target presente, re-deeplink dopo return riapre, deeplink side B apre + target presente)"
+  },
+  "seed_data_creation": "Ho temporaneamente bumpato `feuds.created_at` di feud_2e5b4481a8a4 al `now()` per farlo entrare nel top-40 usato da bot_engine._fetch_candidate_feuds (era in posizione 117); ho ripristinato created_at originale (2026-08-17 19:22:54.588000) al termine dei test. Il vote di chat_a è stato eliminato per l'apertura idle, poi ricreato dal test_a via API (side A). I bot sono stati disabilitati in teardown.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Per rieseguire i test bot-reply usare test_iter132_bot_reply_and_deeplink.py. Attenzione: bot_engine considera solo top-40 feuds by created_at DESC — se il feud test non è recente, i bot non lo toccheranno. La test class già bumpa created_at in setup e restore in teardown. Il JWT chat_a in test_credentials.md scade il 2026-08-24. Anche `_emit_notification` accetta `actor_id`, NON `actor_user_id`. Sul frontend il pattern `[data-testid=\"comments-idle\"]` / `[data-testid=\"comments-list-a|b\"]` / `[data-testid=\"comment-<id>\"]` è affidabile per verificare stato deep-link.",
+  "rca_of_issue": "Notification signature mismatch. In server.py:3611 la funzione è definita come `async def _emit_notification(user_id, ntype, *, title, body, feud_id=None, comment_id=None, side=None, actor_id=None, send_push_too=False)`. In bot_engine.py:697 la chiamata usa `actor_user_id=` (non esistente) e `actor_nickname=` (non esistente). Python solleva TypeError, catturato dal try/except al 708 come warning `bot reply notify failed`. Riparazione minima: sostituire `actor_user_id=bot['user_id'], actor_nickname=bot.get('nickname')` con `actor_id=bot['user_id']`. Se si vuole preservare `actor_nickname` nel doc notifiche va anche aggiornata la signature e il doc di _emit_notification in server.py. Repro: enable bots + burst, monitorare `tail -f /var/log/supervisor/backend.err.log | grep 'bot reply notify failed'`."
+}

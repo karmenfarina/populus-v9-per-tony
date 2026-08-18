@@ -1,0 +1,39 @@
+{
+  "summary": "Regressione backend verificata: il fix del kwarg mismatch in bot_engine._bot_add_reply è pienamente funzionante. (1) Static-check: server._emit_notification ora accetta `actor_id` e NON accetta più `actor_user_id` — PASS. (2) End-to-end: invocando direttamente bot_engine._bot_add_reply su un bot + un commento umano (feud esistente), viene inserita una entry in db.replies con user_id=bot_id (is_bot=true) e una entry in db.notifications con type='reply', actor_id=bot_id, user_id=parent_author, feud_id, comment_id, side, body coerente con reply.text — PASS. (3) Nessun warning `bot reply notify failed`, `unexpected keyword argument 'actor_user_id'` o `'actor_nickname'` nel backend log durante l'esecuzione — PASS. (4) Deep-link smoke: come chat_a (token via localStorage), navigato a /feud/feud_2e5b4481a8a4?comment=cmt_62969a7cd072&side=A → `[data-testid=\"comments-list-a\"]` presente e `[data-testid=\"comment-cmt_62969a7cd072\"]` nel DOM — PASS (feature deep-link resta stabile).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter133_bot_reply_notification_fix.py",
+    "/app/backend/tests/conftest.py",
+    "/app/backend/tests/pytest.ini",
+    "/app/test_reports/pytest/iter133_bot_reply_notification.xml",
+    "/app/test_reports/iter133_deeplink_smoke.png"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Fix applicato correttamente in bot_engine.py:697-706: la chiamata usa `actor_id=bot['user_id']` (unico kwarg identity oltre a feud_id/comment_id/side) e non passa più `actor_nickname` — la nickname del bot autore rimane comunque risolvibile dal doc utenti via actor_id in fase di rendering della notifica.",
+    "Il try/except attorno a `_emit_notification` in bot_engine.py:693-708 continua a catturare qualsiasi eccezione trasformandola in warning; utile mantenerlo per non bloccare il flusso ma consigliato loggare a livello ERROR con `exc_info=True` per non nascondere altri regressioni silenziose future."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter133_bot_reply_notification_fix.py (new)",
+    "/app/backend/tests/conftest.py (new — carica backend/.env)",
+    "/app/backend/tests/pytest.ini (new — asyncio_mode=auto)"
+  ],
+  "success_rate": {
+    "backend": "100% (2/2 test: signature check + end-to-end _bot_add_reply → replies+notifications)",
+    "frontend": "100% (1/1 smoke deep-link: side=A apre e target comment nel DOM)"
+  },
+  "seed_data_creation": "Nessun seed. Il test end-to-end usa il primo commento umano con feud ancora esistente (auto-discovery). Non è stato modificato lo stato bot_active né bumpato created_at feed. L'unico side-effect è: +1 reply doc dal bot laura.puglisi (bot_000) su un commento umano casuale e +1 notification per il parent author. Non serve teardown perché la feature è idempotente per (bot, parent_comment) e i test successivi la skippano.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Per rieseguire: `cd /app/backend && python -m pytest tests/test_iter133_bot_reply_notification_fix.py -v`. Il test dipende da EMERGENT_LLM_KEY per generare la reply via _generate_reply — se la chiave è assente o l'LLM restituisce None, il reply doc non viene creato e il test fallirà con `bot did not create a reply doc` (in tal caso controllare /var/log/supervisor/backend.err.log). pytest-asyncio 1.4.0 è stato installato; conftest.py carica backend/.env; pytest.ini imposta asyncio_mode=auto. Il test di firma è statico e non richiede DB/LLM.",
+  "rca_of_issue": "Fix confermato in /app/backend/bot_engine.py:705 (`actor_id=bot['user_id']`, single-kwarg). La signature server.py::_emit_notification è `(user_id, ntype, *, title, body, feud_id=None, comment_id=None, side=None, actor_id=None, send_push_too=False)` e ora combacia. Nessun `actor_nickname` è più passato (che avrebbe comunque causato TypeError). Il test end-to-end assert (a) `db.replies` contiene un doc nuovo per (bot, feud_id) con user_id=bot_id, (b) `db.notifications` contiene un doc con type='reply', actor_id=bot_id, user_id=parent_uid, comment_id=parent_comment_id, feud_id, side ∈ {A,B}, body corrispondente ai primi 60 char di reply.text, (c) nessuna occorrenza di 'bot reply notify failed' | 'unexpected keyword argument actor_user_id' | 'unexpected keyword argument actor_nickname' nel log tail letto dopo la call."
+}

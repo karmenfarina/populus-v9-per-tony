@@ -388,14 +388,20 @@ export default function FeudDetail() {
   //     opens immediately — the user's biggest complaint was that the
   //     screen stayed on the "Tocca una fazione per leggere i commenti"
   //     placeholder even after tapping a mention notification.
-  const deepLinkHandledRef = useRef<string | null>(null);
+  // Deep-link from a notification. Two responsibilities:
+  //  (a) OPEN the comments section on the correct side whenever a
+  //      `?comment=` param is present. This must ALWAYS force the side
+  //      open — even if the user had previously closed the comments
+  //      by tapping the active tab, or if we're re-arriving from a
+  //      second notification tap. The earlier version cached a "handled"
+  //      ref and returned early once fired, which meant a re-open of
+  //      the same comment silently did nothing.
+  //  (b) EXPAND that comment's reply thread once, so a mention buried
+  //      inside a reply is visible without any extra tap.
+  const repliesExpandedForRef = useRef<string | null>(null);
   useEffect(() => {
     if (!feud || !commentParam) return;
-    // "handled" means we've already found the target on the RIGHT side.
-    // While the side is still being inferred from a fallback (my_vote), we
-    // keep the effect open so the eventual sideA/sideB arrival can move
-    // the active tab to the correct side.
-    if (deepLinkHandledRef.current === commentParam) return;
+
     const cA = sideA.find((c) => c.comment_id === commentParam);
     const cB = sideB.find((c) => c.comment_id === commentParam);
     let target: "A" | "B" | null = null;
@@ -405,17 +411,27 @@ export default function FeudDetail() {
     else if (sideParam === "A" || sideParam === "B") {
       target = sideParam as "A" | "B"; confirmed = true;
     } else if (feud.my_vote === "A" || feud.my_vote === "B") {
-      // Fallback: no side hint AND the comment hasn't been fetched
-      // yet (e.g. it's a reply). Open the viewer's own side so the
-      // comments panel is visible — but do NOT mark handled: as soon
-      // as sideA/sideB arrive, this effect re-runs and refines the tab.
+      // Soft fallback: keep the effect open so a later sideA/sideB
+      // update can refine the side to the CONFIRMED one.
       target = feud.my_vote;
     } else {
       target = "A";
     }
-    setActiveSide(target);
-    if (confirmed) {
-      deepLinkHandledRef.current = commentParam as string;
+
+    // Only bump activeSide if it's null OR pointing at the wrong side.
+    // Re-tapping the same notification with a still-open section keeps
+    // the section open (avoids the visible flicker of state churn).
+    setActiveSide((cur) => {
+      if (cur === target) return cur;
+      // If cur is set to a DIFFERENT side and the target is CONFIRMED,
+      // move to the confirmed side. If unconfirmed (soft fallback) and
+      // the user already has a side open, don't yank them around.
+      if (cur && !confirmed) return cur;
+      return target;
+    });
+
+    if (confirmed && repliesExpandedForRef.current !== commentParam) {
+      repliesExpandedForRef.current = commentParam as string;
       // Auto-expand replies to reveal the notification's context. Silent
       // failure is fine — the target may be a top-level comment with no
       // replies yet.
@@ -460,11 +476,17 @@ export default function FeudDetail() {
               // the border/background dissolve smoothly.
               setHighlightCommentId(commentParam as string);
               highlightAnim.setValue(1);
+              // Give the user a generous window to notice the highlight
+              // BEFORE it starts fading — the earlier 900ms hold was too
+              // short: users landing on a long thread reported "the link
+              // opens but doesn't show me the comment" because the visual
+              // cue was gone before their eyes tracked to the target.
+              // Now: hold at full intensity for 3s, then a 2.4s ease-out.
               Animated.sequence([
-                Animated.delay(900),
+                Animated.delay(3000),
                 Animated.timing(highlightAnim, {
                   toValue: 0,
-                  duration: 1400,
+                  duration: 2400,
                   easing: Easing.out(Easing.cubic),
                   // border colors + backgroundColor aren't supported by the
                   // native driver — keep JS-driven so the interpolation
@@ -1449,9 +1471,13 @@ function CommentItem({
             cs.highlightOverlay,
             {
               opacity: highlightAnim,
+              // Bumped from 0.14 → 0.28 so the yellow tint reads as a
+              // proper highlight instead of a subtle tint. Combined with
+              // the 3px yellow border on `.highlightOverlay`, the deep-
+              // linked comment now visibly pops for the full 3s hold.
               backgroundColor: highlightAnim.interpolate({
                 inputRange: [0, 1],
-                outputRange: ["rgba(255,216,20,0)", "rgba(255,216,20,0.14)"],
+                outputRange: ["rgba(255,216,20,0)", "rgba(255,216,20,0.28)"],
               }),
             },
           ]}
@@ -1646,10 +1672,13 @@ const cs = StyleSheet.create({
     // Absolute-positioned tint that sits above the base comment card and
     // is faded via the parent's Animated.Value. `borderRadius` matches
     // the card so the fade tint clips cleanly at the rounded corners.
+    // Thick yellow border + bright semi-transparent fill make the
+    // deep-link target immediately visible to a user tracking down
+    // a mention notification in a long thread.
     ...StyleSheet.absoluteFillObject,
     borderRadius: radius.md,
-    borderWidth: 2,
-    borderColor: colors.brandSecondary,
+    borderWidth: 3,
+    borderColor: "#FFD814",
     zIndex: 5,
   },
   sideBar: { width: 4 },
