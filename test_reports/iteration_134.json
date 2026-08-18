@@ -1,0 +1,35 @@
+{
+  "summary": "Backend-only testing for iter 134. Verified full bot admin flow (state → toggle ON → count 25 → burst → toggle OFF) and regression on the six newly-extracted routers (legal, docs, sponsors, favorites, support, blocks, notifications). All 21 pytest cases PASS (100%). Endpoints /api/admin/bots/{state,toggle,count,burst} behave correctly: state returns full snapshot, toggle ON auto-activates 30 bots when count=0, count=25 sets reported_active=25 immediately, burst bumps last_burst_at asynchronously, toggle OFF sets reported_active=0 while preserving active_count config. Boundary validation (count>100 → 422) works. Extracted routers respond correctly: legal terms/nda return markdown, docs list+by-slug OK with 404 on missing slug, sponsors return >=5 seeded items with `_id` excluded, all auth-gated endpoints (favorites, notifications, blocks, support) correctly return 401 without a session. Bot config left in OFF state after tests. NOTE: frontend was NOT tested — testing_type=backend only per review payload.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter134_bots_and_router_regression.py",
+    "/app/test_reports/pytest/iter134_bots_and_regression.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "bot_routes.py POST /burst: run_initial_burst() is fired via asyncio.create_task then the handler returns get_state() BEFORE last_burst_at is written. The test still passes because run_initial_burst updates last_burst_at very quickly, but for stronger consistency consider awaiting the DB update (not the whole burst) inside the endpoint so the returned state already reflects the new last_burst_at.",
+    "bot_engine.set_enabled(): when flipping to True with active_count==0 the engine now defaults to 30 bots — that's a reasonable UX default but may surprise the admin who explicitly wants 0. Consider surfacing this in the BotPanel UI copy so the founder knows the switch will not leave the fleet empty.",
+    "bot_engine.set_enabled(enabled=False): does NOT reset active_count in bot_config; only bot_active flags on user docs are cleared. This is intentional (preserve the last selected count) and confirmed by the test — worth documenting in the panel."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter134_bots_and_router_regression.py (new)"
+  ],
+  "success_rate": {
+    "backend": "100%",
+    "frontend": "not_tested"
+  },
+  "seed_data_creation": "None — reused existing 100-bot Day-1 seed. Tests are stateless: leave the bot fleet in the OFF state with active_count=25 at the end.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Bot admin endpoint chain fully covered by tests/test_iter134_bots_and_router_regression.py::TestBotAdminEndpoints. Extracted-router smoke tests live in TestExtractedRoutersRegression in the same file. Frontend BotPanel UX fix (educational Alert when bots=OFF, yellow hint box, renamed button 'ESEGUI ORA (bot offline)') was NOT verified visually because headless Google auth for the founder account is not available. If the main agent needs UI verification later, it can render a mocked auth session or add a testID-driven mobile Playwright flow. Backend base URL used: http://localhost:8001 per review payload.",
+  "rca_of_issue": "Original user report: 'PRIMA ATTIVA I BOT' button did nothing. Root cause was UX, not backend: the burst button in BotPanel was `disabled` when bots=OFF while its label read like a call-to-action, giving the impression it should activate the bots. Backend endpoints work correctly — burst returns 200 and bumps last_burst_at whenever it's fired (verified). The UX fix (educational Alert on tap when bots=OFF + explanatory yellow hint box + relabelled button 'ESEGUI ORA (bot offline)' with lock icon) addresses the confusion without changing backend semantics. Reproduction: with bots OFF, tapping the burst button previously did nothing because `disabled` swallowed the press event; after the fix, tapping shows an educational Alert instructing the user to enable the 'Attività Bot' switch first."
+}

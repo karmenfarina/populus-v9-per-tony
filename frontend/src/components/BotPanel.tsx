@@ -13,7 +13,7 @@
  * pure controlled input: parent owns state + mutations.
  */
 import React, { useMemo } from "react";
-import { View, Text, StyleSheet, Pressable, ActivityIndicator, ScrollView, Switch } from "react-native";
+import { View, Text, StyleSheet, Pressable, ActivityIndicator, ScrollView, Switch, Alert, Platform } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { colors, spacing, font, radius } from "@/src/theme";
 
@@ -106,7 +106,7 @@ export default function BotPanel(props: Props) {
             <Text style={styles.h1}>ATTIVITÀ BOT</Text>
             <Text style={styles.muted}>
               {state.enabled ? "I bot sono online e interagiscono con la piattaforma."
-                             : "I bot sono offline. Nessun voto o commento verrà generato."}
+                             : "I bot sono offline. Nessun voto o commento verrà generato. Attivando l'interruttore, se il contatore è a 0 verranno accesi automaticamente 30 bot."}
             </Text>
           </View>
           <Switch
@@ -241,15 +241,45 @@ export default function BotPanel(props: Props) {
         <Text style={styles.muted}>
           Forza un ciclo di attività ora (i bot voteranno e commenteranno sui post più recenti).
         </Text>
+        {!state.enabled && (
+          // Helper esplicativo mostrato quando i bot sono spenti: il testo
+          // "PRIMA ATTIVA I BOT" sul bottone poteva essere frainteso come
+          // un'azione, mentre in realtà il bottone burst è disabilitato.
+          // Qui rendiamo esplicito il prossimo step (usare lo switch in cima).
+          <View style={styles.warnBox} testID="bots-offline-hint">
+            <Ionicons name="information-circle" size={18} color={colors.brandPrimary} />
+            <Text style={styles.warnTxt}>
+              I bot sono offline. Per usarli, attiva prima l&rsquo;interruttore
+              &ldquo;Attività Bot&rdquo; in cima a questa schermata.
+            </Text>
+          </View>
+        )}
         <Pressable
-          style={[styles.secondaryBtn, busy && styles.stepBtnDisabled]}
-          onPress={onBurst}
-          disabled={busy || !state.enabled}
+          style={[styles.secondaryBtn, (busy || !state.enabled) && styles.stepBtnDisabled]}
+          onPress={() => {
+            if (!state.enabled) {
+              // Feedback esplicativo se l'utente clicca comunque quando i
+              // bot sono spenti (spiega dove andare invece di stare zitti).
+              const msg = "I bot sono offline. Attiva prima l'interruttore \"Attività Bot\" in cima alla schermata, poi torna qui per lanciare il burst.";
+              if (Platform.OS === "web") {
+                (globalThis as any).alert?.(msg);
+              } else {
+                Alert.alert("Attiva prima i bot", msg);
+              }
+              return;
+            }
+            onBurst();
+          }}
+          disabled={busy}
           testID="bots-burst"
         >
-          <Ionicons name="flash-outline" size={18} color={colors.brandSecondary} />
+          <Ionicons
+            name={state.enabled ? "flash-outline" : "lock-closed-outline"}
+            size={18}
+            color={colors.brandSecondary}
+          />
           <Text style={styles.secondaryBtnTxt}>
-            {state.enabled ? "ESEGUI ORA" : "PRIMA ATTIVA I BOT"}
+            {state.enabled ? "ESEGUI ORA" : "ESEGUI ORA (bot offline)"}
           </Text>
         </Pressable>
 
@@ -465,6 +495,26 @@ const styles = StyleSheet.create({
     lineHeight: 16,
     marginTop: spacing.sm,
     fontStyle: "italic",
+  },
+  // Riquadro esplicativo mostrato quando i bot sono OFF, per chiarire che
+  // il bottone burst è disabilitato e come attivarli davvero (switch in cima).
+  warnBox: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: spacing.sm,
+    backgroundColor: (colors as any).brandPrimarySoft || "rgba(240,26,26,0.08)",
+    borderColor: colors.brandPrimary,
+    borderWidth: 1,
+    borderRadius: radius?.md || 10,
+    padding: spacing.sm,
+    marginTop: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  warnTxt: {
+    flex: 1,
+    color: colors.onSurface,
+    fontSize: font.sizes.sm,
+    lineHeight: 18,
   },
   err: {
     color: colors.error,
