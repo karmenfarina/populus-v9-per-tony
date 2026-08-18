@@ -1,0 +1,39 @@
+{
+  "summary": "Regression smoke after react-native-google-mobile-ads upgrade 15.4.0 -> 15.8.3 (fix for the second EAS build failure: unresolved 'currentActivity' / 'runOnUiThread' at ReactNativeGoogleMobileAdsModule.kt in v15.4.0). Verified on the web preview: (a) node_modules/react-native-google-mobile-ads/package.json is on 15.8.3; (b) its ReactNativeGoogleMobileAdsModule.kt now uses 'reactApplicationContext.currentActivity' (new-arch-safe pattern) — the Kotlin errors from iter138 fix cannot recur; (c) frontend JS bundle still resolves the .native/.web platform-extension shim, no import crash. Anonymous login (nickname -> /terms via terms-checkbox + nda-checkbox testIDs -> terms-accept-btn) -> '/' home renders 6 feud-card-* items. Tapping feud-card-feud_599566d7133a opens /feud/feud_599566d7133a and 'ad-placeholder-feud-detail' testID renders the exact expected text 'SPAZIO PUBBLICITARIO / Visibile solo nel build nativo di produzione'. Console captured 0 error entries and 0 pageerror events; 0 'mobile-ads' / 'google-mobile-ads' / 'Cannot find module' strings across the full flow. Backend smoke: /api/ 200 (ok:true), /api/categories 200 (9 categories), /api/feuds/hype?limit=3 200 (feud list with feud_id/title/party_a/party_b). EAS Android build itself is out of scope for the web-preview agent — the user must re-trigger Publish to prove the Kotlin build now compiles.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/test_reports/iteration_139.json",
+    "/app/backend/tests/test_iter138_ads_downgrade_regression.py",
+    "/app/test_reports/pytest/iter139_ads_regression.xml"
+  ],
+  "action_items": [
+    "User must re-trigger EAS Android build via Emergent Publish to confirm the ':react-native-google-mobile-ads:compileReleaseKotlin' task now succeeds with v15.8.3 (only real-toolchain verification can confirm this — web preview only proves the JS bundle side).",
+    "If the Android build still fails, next agent should inspect /app/frontend/node_modules/react-native-google-mobile-ads/android/build.gradle for the play-services-ads version (should stay on 24.6.0) and check Kotlin metadata version matches the EAS toolchain (currently Kotlin 2.1.0)."
+  ],
+  "critical_code_review_comments": [
+    "Verified /app/frontend/node_modules/react-native-google-mobile-ads is pinned at 15.8.3 in both package.json and installed node_modules — no drift.",
+    "Verified ReactNativeGoogleMobileAdsModule.kt lines 112, 114, 139, 144, 167, 168 all use reactApplicationContext.currentActivity (new-arch-safe pattern) — exact fix for the v15.4.0 failure mode.",
+    "AdBanner.tsx web stub logic is unchanged since iter138: Platform.OS === 'web' || isExpoGo -> renders 'SPAZIO PUBBLICITARIO / Visibile solo nel build nativo di produzione' with testID ad-placeholder-{placement}. Public API surface (BannerAd, BannerAdSize) is stable between 15.4.x and 15.8.x so no source-code change is needed in /app/frontend/src/ads/.",
+    "app.json config plugin block for react-native-google-mobile-ads (androidAppId/iosAppId) is unchanged as claimed.",
+    "Pre-existing (not related to this fix): expo-doctor still flags expo 54.0.35 / expo-constants 18.0.13 / expo-file-system 19.0.23 as slightly behind (.37/.14/.24). Worth a 'yarn expo install --fix' in a future chore PR but not blocking."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "100% (3/3 pytest)",
+    "frontend": "100% (auth -> terms -> home -> feud detail -> ad web-stub all green; 0 console errors)"
+  },
+  "seed_data_creation": "Created 1 throwaway anonymous user (nickname i13961XXX) during the regression flow. Anonymous accounts are self-scoped, no cleanup required.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Web preview cannot validate the actual EAS Android build — only the JS runtime and the web stub. If the user triggers Publish and the Kotlin/gradle error resurfaces, inspect node_modules/react-native-google-mobile-ads/android/build.gradle for the play-services-ads version pin (should be 24.6.0 in 15.8.3) and confirm Kotlin metadata alignment with EAS toolchain (2.1.0). The AdBanner web stub testID pattern is 'ad-placeholder-{placement}' (e.g. 'ad-placeholder-feud-detail'). Terms flow needs BOTH terms-checkbox AND nda-checkbox tapped before terms-accept-btn is enabled.",
+  "rca_of_issue": "N/A — regression smoke only. Upgrade path: 16.4.0 (fail: Kotlin metadata mismatch) -> 15.4.0 (fail: unresolved currentActivity/runOnUiThread on new arch, iter138 side-effect) -> 15.8.3 (current: uses reactApplicationContext.currentActivity, keeps play-services-ads 24.6.0 for Kotlin 2.1.0 alignment). Web-side JS bundle continues to work via the mobileAds.native.ts / mobileAds.web.ts platform-extension shim."
+}
