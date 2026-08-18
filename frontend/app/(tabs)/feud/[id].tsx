@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   View, Text, StyleSheet, ScrollView, Pressable, TextInput, ActivityIndicator,
   KeyboardAvoidingView, Platform, ImageBackground, Linking, Alert, BackHandler,
+  Modal,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useRouter, useFocusEffect, usePathname } from "expo-router";
@@ -137,6 +138,26 @@ export default function FeudDetail() {
   const [inAppShareOpen, setInAppShareOpen] = useState(false);
   const { sourcesExpanded, setSourcesExpanded } = useUIPrefs();
   const scrollRef = useRef<ScrollView>(null);
+  // Founder-admin gate. Hardcoded email per spec — do NOT wire this to a
+  // generic is_admin flag. Controls the visibility of Edit/Delete buttons
+  // in the topbar and the corresponding modals below.
+  const ADMIN_EMAIL = "carlofarinapayme@gmail.com";
+  const isAdmin = !!user && (user.email || "").trim().toLowerCase() === ADMIN_EMAIL;
+  const [adminEditOpen, setAdminEditOpen] = useState(false);
+  const [adminConfirmDelete, setAdminConfirmDelete] = useState(false);
+  const [adminSaving, setAdminSaving] = useState(false);
+  const [adminEditTitle, setAdminEditTitle] = useState("");
+  const [adminEditQuestion, setAdminEditQuestion] = useState("");
+  const [adminEditCategory, setAdminEditCategory] = useState<string>("");
+  const [adminEditSummary, setAdminEditSummary] = useState("");
+  const [adminEditPartyA, setAdminEditPartyA] = useState("");
+  const [adminEditPartyB, setAdminEditPartyB] = useState("");
+  const [adminCategories, setAdminCategories] = useState<{ id: string; label: string }[]>([]);
+  // Deep-link target: the specific comment we should scroll to + flash.
+  // Keyed by comment_id → the actual View ref (used by measureLayout).
+  const commentRefsRef = useRef<Record<string, View | null>>({});
+  const [highlightCommentId, setHighlightCommentId] = useState<string | null>(null);
+  const scrolledToCommentRef = useRef<string | null>(null);
   // Floating "back to top" pill: appears once the user scrolls past the hero
   // + poll and is deep into comments. Threshold raised so the button doesn't
   // pop up while the user is still reading the article.
@@ -348,7 +369,9 @@ export default function FeudDetail() {
 
   // Deep-link from a notification: if a `comment` param is present, activate
   // the correct side tab and auto-expand that comment's reply thread so the
-  // user sees the reply without any extra taps.
+  // user sees the reply without any extra taps. Also scrolls the ScrollView
+  // to the target comment (measured via onLayout) and briefly flashes its
+  // border so the user immediately spots it in a long thread.
   const deepLinkHandledRef = useRef(false);
   useEffect(() => {
     if (deepLinkHandledRef.current) return;
@@ -367,6 +390,61 @@ export default function FeudDetail() {
     toggleReplies(commentParam).catch(() => { /* silent */ });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [feud, sideA, sideB, commentParam, sideParam]);
+
+  // Once the side tab is set AND the target comment has been mounted
+  // (ref registered via <CommentItem onRef>), scroll to it precisely
+  // using measureLayout(ScrollView) so the target ends near the top
+  // of the visible area regardless of how deep it sits in the list.
+  useEffect(() => {
+    if (!commentParam || activeSide === null) return;
+    if (scrolledToCommentRef.current === commentParam) return;
+    let cancelled = false;
+    let tries = 0;
+    const tryScroll = () => {
+      if (cancelled) return;
+      const node = commentRefsRef.current[commentParam as string];
+      const scrollNode = scrollRef.current as any;
+      if (node && scrollNode) {
+        // Some RN versions expose the inner scrollable via getInnerViewNode
+        // or getNode; measureLayout can accept either. We try the inner
+        // node first for accuracy, then fall back to the top-level ref.
+        const targetHandle =
+          (scrollNode.getInnerViewNode && scrollNode.getInnerViewNode()) ||
+          (scrollNode.getScrollableNode && scrollNode.getScrollableNode()) ||
+          scrollNode;
+        try {
+          (node as any).measureLayout(
+            targetHandle,
+            (_x: number, y: number) => {
+              if (cancelled) return;
+              scrolledToCommentRef.current = commentParam as string;
+              try {
+                // -24px so the target isn't glued to the very top edge.
+                scrollRef.current?.scrollTo({ y: Math.max(0, y - 24), animated: true });
+              } catch { /* noop */ }
+              setHighlightCommentId(commentParam as string);
+              setTimeout(() => {
+                setHighlightCommentId((cur) => (cur === commentParam ? null : cur));
+              }, 2500);
+            },
+            () => {
+              // measureLayout failed — retry a couple of times before giving up.
+              if (tries++ < 15) setTimeout(tryScroll, 120);
+            }
+          );
+          return;
+        } catch {
+          // fall through to retry
+        }
+      }
+      if (tries++ < 15) {
+        setTimeout(tryScroll, 120);
+      }
+    };
+    // First attempt after a beat so the side flip has time to reflow.
+    setTimeout(tryScroll, 150);
+    return () => { cancelled = true; };
+  }, [commentParam, activeSide, sideA, sideB]);
 
   const vote = async (side: "A" | "B") => {
     if (!feud) return;
@@ -568,6 +646,96 @@ export default function FeudDetail() {
     }
   };
 
+  // ── Founder-admin: open the edit modal pre-filled with current values ──
+  const openAdminEdit = async () => {
+    if (!feud) return;
+    setAdminEditTitle(feud.title || "");
+    setAdminEditQuestion(feud.question || "");
+    setAdminEditCategory(feud.category || "");
+    setAdminEditSummary(feud.summary || "");
+    setAdminEditPartyA(feud.party_a || "");
+    setAdminEditPartyB(feud.party_b || "");
+    setAdminEditOpen(true);
+    // Load the category whitelist lazily the first time the admin opens
+    // the modal — same source of truth the backend PATCH validates against.
+    if (adminCategories.length === 0) {
+      try {
+        const c = await api.categories();
+        setAdminCategories(c.categories || []);
+      } catch { /* silent */ }
+    }
+  };
+
+  const submitAdminEdit = async () => {
+    if (!feud) return;
+    const title = adminEditTitle.trim();
+    const question = adminEditQuestion.trim();
+    const summary = adminEditSummary.trim();
+    const partyA = adminEditPartyA.trim();
+    const partyB = adminEditPartyB.trim();
+    if (!title) { setError("Il titolo non può essere vuoto"); return; }
+    if (!question) { setError("La domanda non può essere vuota"); return; }
+    if (!summary) { setError("Il testo non può essere vuoto"); return; }
+    if (!partyA) { setError("La fazione A non può essere vuota"); return; }
+    if (!partyB) { setError("La fazione B non può essere vuota"); return; }
+    setAdminSaving(true);
+    try {
+      const res = await api.adminEditFeud(feud.feud_id, {
+        title,
+        question,
+        category: adminEditCategory || undefined,
+        summary,
+        party_a: partyA,
+        party_b: partyB,
+      });
+      setFeud(res.feud);
+      setAdminEditOpen(false);
+    } catch (e: any) {
+      setError(e?.detail || e?.message || "Impossibile aggiornare la faida");
+    } finally {
+      setAdminSaving(false);
+    }
+  };
+
+  const submitAdminHide = async () => {
+    if (!feud) return;
+    setAdminSaving(true);
+    try {
+      await api.adminHideFeud(feud.feud_id);
+      setAdminConfirmDelete(false);
+      // Feed the admin a clear confirmation, then send them home.
+      // Non-blocking Alert; on web we just go straight back.
+      try {
+        Alert.alert("Faida nascosta", "La faida è stata rimossa dai feed. Puoi ripristinarla dalla lista faide nascoste in Admin.");
+      } catch { /* noop */ }
+      goBack();
+    } catch (e: any) {
+      setError(e?.detail || e?.message || "Impossibile nascondere la faida");
+    } finally {
+      setAdminSaving(false);
+    }
+  };
+
+  const submitAdminRestore = async () => {
+    if (!feud) return;
+    setAdminSaving(true);
+    try {
+      const res = await api.adminRestoreFeud(feud.feud_id);
+      // Reload the feud so `is_hidden` flips back to false in the UI.
+      try {
+        const fresh = await api.feud(feud.feud_id);
+        setFeud(fresh.feud);
+      } catch {
+        setFeud({ ...feud, is_hidden: false });
+      }
+      void res;
+    } catch (e: any) {
+      setError(e?.detail || e?.message || "Impossibile ripristinare la faida");
+    } finally {
+      setAdminSaving(false);
+    }
+  };
+
   if (loading) {
     return (
       <SafeAreaView style={styles.safe} edges={["top"]}>
@@ -594,6 +762,7 @@ export default function FeudDetail() {
             Le faide vengono conservate per 14 giorni. Dopo questo periodo la discussione e i commenti vengono rimossi definitivamente.
           </Text>
           <Pressable onPress={() => router.replace("/")} style={styles.goneBtn} testID="gone-home-btn">
+            <Ionicons name="arrow-back" size={16} color={colors.onBrandSecondary} />
             <Text style={styles.goneBtnTxt}>TORNA ALLE FAIDE ATTIVE</Text>
           </Pressable>
         </View>
@@ -610,12 +779,52 @@ export default function FeudDetail() {
           <Text style={styles.backTxt}>INDIETRO</Text>
         </Pressable>
         <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
+          {isAdmin && (
+            <>
+              <Pressable
+                onPress={openAdminEdit}
+                testID="admin-edit-button"
+                hitSlop={8}
+                style={styles.adminBtn}
+              >
+                <Ionicons name="create-outline" size={18} color={colors.brandSecondary} />
+              </Pressable>
+              {feud.is_hidden ? (
+                <Pressable
+                  onPress={submitAdminRestore}
+                  testID="admin-restore-button"
+                  hitSlop={8}
+                  disabled={adminSaving}
+                  style={styles.adminBtn}
+                >
+                  <Ionicons name="refresh-outline" size={18} color={colors.brandSecondary} />
+                </Pressable>
+              ) : (
+                <Pressable
+                  onPress={() => setAdminConfirmDelete(true)}
+                  testID="admin-delete-button"
+                  hitSlop={8}
+                  style={styles.adminBtn}
+                >
+                  <Ionicons name="trash-outline" size={18} color={colors.brandPrimary} />
+                </Pressable>
+              )}
+            </>
+          )}
           <Text style={styles.topCat}>{feud.category_label.toUpperCase()}</Text>
           <Pressable onPress={onShare} testID="share-button" style={styles.shareBtn}>
             <Ionicons name="share-outline" size={18} color={colors.brandSecondary} />
           </Pressable>
         </View>
       </View>
+      {isAdmin && feud.is_hidden && (
+        <View style={styles.hiddenBanner} testID="admin-hidden-banner">
+          <Ionicons name="eye-off-outline" size={16} color={colors.brandPrimary} />
+          <Text style={styles.hiddenBannerTxt}>
+            FAIDA NASCOSTA — visibile solo a te. Tocca l'icona ↻ per ripristinare.
+          </Text>
+        </View>
+      )}
 
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={80}>
         <ScrollView
@@ -939,6 +1148,13 @@ export default function FeudDetail() {
                     canReply={!!feud.my_vote}
                     onDeleteComment={() => deleteOwnComment(c.comment_id)}
                     onDeleteReply={(rid) => deleteOwnReply(c.comment_id, rid)}
+                    onRegisterRef={(node) => {
+                      // Store/clear the ref so the deep-link scroll effect
+                      // above can call measureLayout on the exact row.
+                      if (node) commentRefsRef.current[c.comment_id] = node;
+                      else delete commentRefsRef.current[c.comment_id];
+                    }}
+                    highlighted={highlightCommentId === c.comment_id}
                   />
                 ))
               )}
@@ -984,13 +1200,147 @@ export default function FeudDetail() {
         onClose={() => setInAppShareOpen(false)}
         onOpenExternal={() => setShareOpen(true)}
       />
+
+      {/* ── Founder-admin: edit modal ─────────────────────────── */}
+      <Modal
+        visible={isAdmin && adminEditOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setAdminEditOpen(false)}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          style={styles.adminModalOverlay}
+        >
+          <View style={styles.adminModalCard} testID="admin-edit-modal">
+            <Text style={styles.adminModalTitle}>MODIFICA FAIDA</Text>
+            <Text style={styles.adminModalHint}>
+              Visibile solo all'admin. Le modifiche sono immediate per tutti gli utenti.
+            </Text>
+
+            <ScrollView
+              style={styles.adminModalScroll}
+              contentContainerStyle={{ paddingBottom: spacing.sm }}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator
+            >
+              <Text style={styles.adminFieldLabel}>TITOLO</Text>
+              <TextInput
+                value={adminEditTitle}
+                onChangeText={setAdminEditTitle}
+                placeholder="Titolo della faida"
+                placeholderTextColor={colors.muted}
+                style={styles.adminInput}
+                testID="admin-edit-title"
+                multiline
+              />
+
+              <Text style={styles.adminFieldLabel}>DOMANDA</Text>
+              <TextInput
+                value={adminEditQuestion}
+                onChangeText={setAdminEditQuestion}
+                placeholder="Domanda del sondaggio"
+                placeholderTextColor={colors.muted}
+                style={styles.adminInput}
+                testID="admin-edit-question"
+                multiline
+              />
+
+              <Text style={styles.adminFieldLabel}>FAZIONE A</Text>
+              <TextInput
+                value={adminEditPartyA}
+                onChangeText={setAdminEditPartyA}
+                placeholder="Nome fazione A"
+                placeholderTextColor={colors.muted}
+                style={styles.adminInput}
+                testID="admin-edit-party-a"
+              />
+
+              <Text style={styles.adminFieldLabel}>FAZIONE B</Text>
+              <TextInput
+                value={adminEditPartyB}
+                onChangeText={setAdminEditPartyB}
+                placeholder="Nome fazione B"
+                placeholderTextColor={colors.muted}
+                style={styles.adminInput}
+                testID="admin-edit-party-b"
+              />
+
+              <Text style={styles.adminFieldLabel}>TESTO ARTICOLO</Text>
+              <TextInput
+                value={adminEditSummary}
+                onChangeText={setAdminEditSummary}
+                placeholder="Testo/riassunto dell'articolo"
+                placeholderTextColor={colors.muted}
+                style={[styles.adminInput, styles.adminInputTall]}
+                testID="admin-edit-summary"
+                multiline
+                textAlignVertical="top"
+              />
+
+              <Text style={styles.adminFieldLabel}>CATEGORIA</Text>
+              <View style={styles.adminCatWrap}>
+                {(adminCategories.length ? adminCategories : [{ id: feud.category, label: feud.category_label }]).map((cat) => {
+                  const active = adminEditCategory === cat.id;
+                  return (
+                    <Pressable
+                      key={cat.id}
+                      onPress={() => setAdminEditCategory(cat.id)}
+                      testID={`admin-edit-cat-${cat.id}`}
+                      style={[styles.adminCatChip, active && styles.adminCatChipActive]}
+                    >
+                      <Text style={[styles.adminCatChipTxt, active && styles.adminCatChipTxtActive]}>
+                        {cat.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </ScrollView>
+
+            <View style={styles.adminModalActions}>
+              <Pressable
+                onPress={() => setAdminEditOpen(false)}
+                style={[styles.adminModalBtn, styles.adminModalBtnGhost]}
+                testID="admin-edit-cancel"
+                disabled={adminSaving}
+              >
+                <Text style={styles.adminModalBtnGhostTxt}>ANNULLA</Text>
+              </Pressable>
+              <Pressable
+                onPress={submitAdminEdit}
+                style={[styles.adminModalBtn, styles.adminModalBtnPrimary]}
+                testID="admin-edit-save"
+                disabled={adminSaving}
+              >
+                <Text style={styles.adminModalBtnPrimaryTxt}>
+                  {adminSaving ? "SALVATAGGIO..." : "SALVA"}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* ── Founder-admin: soft-delete confirmation modal ─────── */}
+      <ConfirmModal
+        visible={isAdmin && adminConfirmDelete}
+        title="Nascondi faida"
+        body="La faida verrà rimossa da tutti i feed. Potrai ripristinarla in qualsiasi momento dalla lista faide nascoste in Admin."
+        confirmLabel="NASCONDI"
+        cancelLabel="ANNULLA"
+        danger
+        testID="admin-confirm-delete"
+        onCancel={() => setAdminConfirmDelete(false)}
+        onConfirm={submitAdminHide}
+      />
     </SafeAreaView>
   );
 }
 
 function CommentItem({
   c, meId, expanded, onToggle, onExpand, replyingTo, setReplyingTo, replyText, setReplyText,
-  onSubmitReply, canReply, onDeleteComment, onDeleteReply,
+  onSubmitReply, canReply, onDeleteComment, onDeleteReply, onRegisterRef, highlighted,
 }: {
   c: Comment; meId: string | null; expanded?: Reply[]; onToggle: () => void;
   /** Forces the reply thread OPEN (idempotent — no-op if already expanded).
@@ -1002,6 +1352,12 @@ function CommentItem({
   onSubmitReply: () => void; canReply: boolean;
   onDeleteComment: () => void;
   onDeleteReply: (replyId: string) => void;
+  /** Registers/unregisters this row's outer View so the parent's deep-link
+   *  effect can measure and scroll to it. */
+  onRegisterRef?: (node: View | null) => void;
+  /** When true, apply a temporary highlight border (used to draw the
+   *  user's eye to the comment they were deep-linked to). */
+  highlighted?: boolean;
 }) {
   const router = useRouter();
   const isReplying = replyingTo === c.comment_id;
@@ -1025,7 +1381,11 @@ function CommentItem({
     setConfirm({ kind: "reply", rid });
 
   return (
-    <View style={cs.item} testID={`comment-${c.comment_id}`}>
+    <View
+      ref={onRegisterRef}
+      style={[cs.item, highlighted && cs.itemHighlighted]}
+      testID={`comment-${c.comment_id}`}
+    >
       <View style={[cs.sideBar, { backgroundColor: accent }]} />
       <View style={cs.body}>
         <View style={cs.headRow}>
@@ -1203,6 +1563,14 @@ const cs = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
+  itemHighlighted: {
+    // Bright brand-secondary border + soft-tinted background: quickly
+    // draws the user's eye to the comment they were deep-linked to
+    // from a notification. Auto-clears after ~2.5s.
+    borderWidth: 2,
+    borderColor: colors.brandSecondary,
+    backgroundColor: "rgba(255, 216, 20, 0.10)",
+  },
   sideBar: { width: 4 },
   body: { flex: 1, padding: spacing.md, gap: 4 },
   headRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm },
@@ -1244,6 +1612,147 @@ const styles = StyleSheet.create({
   backBtn: { flexDirection: "row", alignItems: "center", gap: 6 },
   backTxt: { color: colors.brandSecondary, fontSize: font.sizes.sm, letterSpacing: 1.5, fontWeight: "700" },
   topCat: { color: colors.brandSecondary, fontSize: font.sizes.sm, letterSpacing: 2, fontWeight: "700" },
+  // Founder-admin controls (edit/delete/restore) live inside the topbar.
+  adminBtn: {
+    padding: 6,
+    borderWidth: 1,
+    borderColor: colors.brandSecondary,
+    borderRadius: radius.sm,
+  },
+  hiddenBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    backgroundColor: "rgba(255,69,58,0.15)",
+    borderBottomWidth: 1,
+    borderColor: colors.brandPrimary,
+  },
+  hiddenBannerTxt: {
+    flex: 1,
+    color: colors.brandPrimary,
+    fontSize: font.sizes.xs,
+    fontWeight: "700",
+    letterSpacing: 0.5,
+  },
+  adminModalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.65)",
+    padding: spacing.lg,
+    justifyContent: "center",
+  },
+  adminModalCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+    gap: spacing.sm,
+    maxHeight: "90%",
+  },
+  adminModalScroll: {
+    // Let the inner form scroll within the modal instead of getting cut off
+    // when the admin edits the long article text on smaller screens.
+    maxHeight: "78%",
+  },
+  adminModalTitle: {
+    color: colors.brandSecondary,
+    fontSize: font.sizes.lg,
+    fontWeight: "800",
+    letterSpacing: 1.5,
+  },
+  adminModalHint: {
+    color: colors.muted,
+    fontSize: font.sizes.xs,
+    lineHeight: 16,
+    marginBottom: spacing.sm,
+  },
+  adminFieldLabel: {
+    color: colors.brandPrimary,
+    fontSize: font.sizes.xs,
+    letterSpacing: 1.5,
+    fontWeight: "700",
+    marginTop: spacing.xs,
+  },
+  adminInput: {
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+    borderRadius: radius.sm,
+    padding: spacing.sm,
+    fontSize: font.sizes.base,
+    color: colors.onSurface,
+    minHeight: 44,
+    textAlignVertical: "top",
+    backgroundColor: colors.surfaceSecondary,
+  },
+  adminInputTall: {
+    // The article-summary textarea gets extra room since it hosts several
+    // paragraphs of body copy.
+    minHeight: 140,
+    maxHeight: 260,
+  },
+  adminCatWrap: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.xs,
+    marginTop: spacing.xs,
+  },
+  adminCatChip: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 6,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceSecondary,
+  },
+  adminCatChipActive: {
+    borderColor: colors.brandSecondary,
+    backgroundColor: colors.brandSecondary,
+  },
+  adminCatChipTxt: {
+    color: colors.onSurface,
+    fontSize: font.sizes.sm,
+    fontWeight: "600",
+    letterSpacing: 0.3,
+  },
+  adminCatChipTxtActive: {
+    color: colors.onBrandSecondary,
+    fontWeight: "800",
+  },
+  adminModalActions: {
+    flexDirection: "row",
+    gap: spacing.sm,
+    marginTop: spacing.md,
+  },
+  adminModalBtn: {
+    flex: 1,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.sm,
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 44,
+  },
+  adminModalBtnGhost: {
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+    backgroundColor: "transparent",
+  },
+  adminModalBtnGhostTxt: {
+    color: colors.onSurface,
+    fontWeight: "700",
+    letterSpacing: 1,
+    fontSize: font.sizes.sm,
+  },
+  adminModalBtnPrimary: {
+    backgroundColor: colors.brandSecondary,
+  },
+  adminModalBtnPrimaryTxt: {
+    color: colors.onBrandSecondary,
+    fontWeight: "800",
+    letterSpacing: 1,
+    fontSize: font.sizes.sm,
+  },
   hero: { height: 220, justifyContent: "flex-end" },
   heroContent: { padding: spacing.lg },
   favBtn: {
@@ -1401,6 +1910,25 @@ const styles = StyleSheet.create({
   goneTitle: { color: colors.onSurface, fontSize: font.sizes.xxxl, letterSpacing: 2, fontWeight: "500" },
   goneMsg: { color: colors.onSurface, fontSize: font.sizes.lg, textAlign: "center", lineHeight: 24 },
   goneHint: { color: colors.muted, fontSize: font.sizes.sm, textAlign: "center", lineHeight: 18, marginTop: spacing.xs },
-  goneBtn: { marginTop: spacing.lg, paddingVertical: spacing.md, paddingHorizontal: spacing.xl, borderWidth: 2, borderColor: colors.onSurface, backgroundColor: colors.brandPrimary },
-  goneBtnTxt: { color: colors.onBrandPrimary, fontSize: font.sizes.base, letterSpacing: 2, fontWeight: "500" },
+  goneBtn: {
+    // Modern CTA styling — matches the yellow-pill primary buttons used
+    // throughout the app (feed empty state, unlock badges, etc.) instead
+    // of the older red-with-white-border look.
+    marginTop: spacing.lg,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.sm,
+    paddingVertical: spacing.sm + 2,
+    paddingHorizontal: spacing.xl,
+    borderRadius: radius.pill,
+    backgroundColor: colors.brandSecondary,
+    minHeight: 48,
+  },
+  goneBtnTxt: {
+    color: colors.onBrandSecondary,
+    fontSize: font.sizes.sm,
+    letterSpacing: 1.5,
+    fontWeight: "800",
+  },
 });

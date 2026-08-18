@@ -1,0 +1,33 @@
+{
+  "summary": "Iter124 backend-only: validated PATCH /api/feuds/{id} accepts three new admin-only fields (summary, party_a, party_b). Created /app/backend/tests/test_iter124_admin_edit_body_parties.py with 23 tests — 23/23 passed. Iter123 regression re-run: 21 passed + 1 skipped (unchanged from baseline). No issues found.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter124_admin_edit_body_parties.py",
+    "/app/test_reports/pytest/iter124_admin_body_parties.xml",
+    "/app/test_reports/pytest/iter124_iter123_regression.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "AdminEditFeudBody validation is consistent across all six fields (title/question/category/summary/party_a/party_b): each rejects empty/whitespace-only strings with a distinct italian message and rolls back the whole PATCH on any failure — verified by test_partial_bad_field_rolls_back.",
+    "Length caps are applied (summary 6000, party_a/party_b 80) — correctly truncated server-side rather than 400ing.",
+    "Docstring of admin_edit_feud still says 'title, question, and/or category' — cosmetic drift now that summary/party_a/party_b are also supported (server.py:2336). Not a functional bug."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter124_admin_edit_body_parties.py (new)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "N/A (backend-only request)"},
+  "seed_data_creation": "None. Reused an existing live feud; fixture restores original title/question/category/summary/party_a/party_b on teardown.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iter124 delta: PATCH /api/feuds/{id} now also accepts summary, party_a, party_b (all admin-only, empty/whitespace → 400 with italian message, length-capped 6000/80/80). Tests live in test_iter124_admin_edit_body_parties.py. Uses same admin identity as iter123 (user_13f93cbd1ea9 / carlofarinapayme@gmail.com) via JWT minted from backend/.env JWT_SECRET. Non-admin/anon/unauth all get 403/401 for the new fields.",
+  "rca_of_issue": "N/A — no bugs found. All 6 test cases enumerated in the request pass: (1) summary update persists (GET returns it), (2) party_a persists, (3) party_b persists, (4) empty/whitespace on any of the three returns 400 with the correct italian message ('Il testo non può essere vuoto', 'La fazione A non può essere vuota', 'La fazione B non può essere vuota'), (5) non-admin & anon still get 403, (6) combined title+summary+party_a+party_b PATCH applies atomically and untouched fields are preserved."
+}

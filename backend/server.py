@@ -73,6 +73,20 @@ JWT_TTL_DAYS = 7
 EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY')
 ADMIN_TOKEN = os.environ.get('ADMIN_TOKEN', '')
 
+# Founder/moderator email — the ONLY account allowed to edit/hide/restore any
+# feud via the admin control APIs below (`PATCH /feuds/{id}`,
+# `DELETE /feuds/{id}`, `POST /feuds/{id}/restore`, `GET /admin/hidden-feuds`).
+# Hardcoded per user request; do NOT wire this to a generic `is_admin` flag.
+FOUNDER_ADMIN_EMAIL = 'carlofarinapayme@gmail.com'
+
+
+def _is_founder_admin(user: Optional[dict]) -> bool:
+    """True iff the caller is signed in with the founder's email."""
+    if not user:
+        return False
+    email = (user.get('email') or '').strip().lower()
+    return email == FOUNDER_ADMIN_EMAIL
+
 app = FastAPI()
 api_router = APIRouter(prefix="/api")
 
@@ -1749,7 +1763,7 @@ async def list_hype_feuds(
     limit = max(1, min(int(limit or 8), 200))
     since = now_utc() - timedelta(days=7)
     docs = await db.feuds.find(
-        {'created_at': {'$gte': since}}, {'_id': 0}
+        {'created_at': {'$gte': since}, 'is_hidden': {'$ne': True}}, {'_id': 0}
     ).sort('created_at', -1).to_list(1500)
     if not docs:
         return {'feuds': [], 'personalized': False}
@@ -1912,6 +1926,8 @@ async def list_feuds(category: Optional[str] = None, user: Optional[dict] = Depe
         q['category'] = category
     # Only feuds from the last 24h appear in the live feed. Older ones live in the archive.
     q['created_at'] = {'$gte': now_utc() - timedelta(hours=24)}
+    # Never surface admin-hidden (soft-deleted) feuds in the live feed.
+    q['is_hidden'] = {'$ne': True}
     # Strict chronological order (newest first) across all categories. The
     # previous personalization ranking (affinity * recency) was reverted per
     # user request: the feed must feel like a news timeline where "1 min ago"
@@ -2062,7 +2078,7 @@ async def list_favorites(user: dict = Depends(get_current_user)):
     order = {d['feud_id']: i for i, d in enumerate(fav_docs)}
     feud_ids = list(order.keys())
     feuds = await db.feuds.find(
-        {'feud_id': {'$in': feud_ids}}, {'_id': 0}
+        {'feud_id': {'$in': feud_ids}, 'is_hidden': {'$ne': True}}, {'_id': 0}
     ).to_list(len(feud_ids))
     # Restore favorites order (most-recently-added first)
     feuds.sort(key=lambda f: order.get(f['feud_id'], 10**9))
@@ -2089,7 +2105,7 @@ async def archive_dates(category: Optional[str] = None):
     now = now_utc()
     since = now - timedelta(days=ARCHIVE_MAX_DAYS)
     live_cutoff = now - timedelta(hours=24)
-    match: dict = {'created_at': {'$gte': since, '$lt': live_cutoff}}
+    match: dict = {'created_at': {'$gte': since, '$lt': live_cutoff}, 'is_hidden': {'$ne': True}}
     if category and category != 'all':
         match['category'] = category
     pipeline = [
@@ -2122,7 +2138,7 @@ async def archive_feuds(
         raise HTTPException(status_code=400, detail=f'Archivio limitato a {ARCHIVE_MAX_DAYS} giorni')
     start = day
     end = day + timedelta(days=1)
-    q: dict = {'created_at': {'$gte': start, '$lt': end}}
+    q: dict = {'created_at': {'$gte': start, '$lt': end}, 'is_hidden': {'$ne': True}}
     if category and category != 'all':
         q['category'] = category
     docs = await db.feuds.find(q, {'_id': 0}).sort('created_at', -1).to_list(200)
@@ -2150,14 +2166,14 @@ async def search_feuds(q: str, user: Optional[dict] = Depends(get_current_user_o
     # Try text search first; fallback to regex if index missing
     try:
         cursor = db.feuds.find(
-            {'$text': {'$search': q}},
+            {'$text': {'$search': q}, 'is_hidden': {'$ne': True}},
             {'_id': 0, 'score': {'$meta': 'textScore'}},
         ).sort([('score', {'$meta': 'textScore'})]).limit(50)
         docs = await cursor.to_list(50)
     except Exception:
         rx = re.compile(re.escape(q), re.IGNORECASE)
         docs = await db.feuds.find(
-            {'$or': [{'title': rx}, {'summary': rx}, {'party_a': rx}, {'party_b': rx}]},
+            {'$or': [{'title': rx}, {'summary': rx}, {'party_a': rx}, {'party_b': rx}], 'is_hidden': {'$ne': True}},
             {'_id': 0},
         ).limit(50).to_list(50)
     voted_map: dict = {}
@@ -2268,6 +2284,13 @@ async def get_feud(feud_id: str, user: Optional[dict] = Depends(get_current_user
             status_code=410,
             detail='Faida più vecchia di 2 settimane',
         )
+    # Hidden feuds (soft-deleted by the founder admin) are visible ONLY to
+    # the admin themselves — everyone else gets a 410 as if it were purged.
+    if doc.get('is_hidden') and not _is_founder_admin(user):
+        raise HTTPException(
+            status_code=410,
+            detail='Faida non più disponibile',
+        )
     my_vote = None
     my_vote_changes = 0
     if user:
@@ -2283,7 +2306,152 @@ async def get_feud(feud_id: str, user: Optional[dict] = Depends(get_current_user
     _ensure_hashtag(doc)
     if isinstance(doc.get('created_at'), datetime):
         doc['created_at'] = _iso_utc(doc['created_at'])
+    # Expose the hidden-state to the admin UI so it can render a "NASCOSTA"
+    # banner + a "Ripristina" button. Regular users never see this field.
+    if _is_founder_admin(user):
+        doc['is_hidden'] = bool(doc.get('is_hidden'))
+        doc['is_admin_viewer'] = True
     return {'feud': doc}
+
+
+# ─── Founder-admin: edit / hide / restore any feud ──────────────────────────
+# All three endpoints share the same RBAC: the caller MUST be signed in with
+# the hardcoded `FOUNDER_ADMIN_EMAIL`. Any other user → 403.
+
+class AdminEditFeudBody(BaseModel):
+    title: Optional[str] = None
+    question: Optional[str] = None
+    category: Optional[str] = None
+    summary: Optional[str] = None
+    party_a: Optional[str] = None
+    party_b: Optional[str] = None
+
+
+@api_router.patch('/feuds/{feud_id}')
+async def admin_edit_feud(
+    feud_id: str,
+    body: AdminEditFeudBody,
+    user: dict = Depends(get_current_user),
+):
+    """Founder-admin only. Update any of a feud's editable fields
+    (title, question, category, summary, party_a, party_b). Only the
+    fields explicitly sent in the payload are applied. Empty strings
+    are rejected so admins can't blank out required fields by accident."""
+    if not _is_founder_admin(user):
+        raise HTTPException(status_code=403, detail='Permesso negato')
+    doc = await db.feuds.find_one({'feud_id': feud_id}, {'_id': 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail='Faida non trovata')
+    updates: dict = {}
+    if body.title is not None:
+        t = (body.title or '').strip()
+        if not t:
+            raise HTTPException(status_code=400, detail='Il titolo non può essere vuoto')
+        updates['title'] = t[:200]
+    if body.question is not None:
+        q = (body.question or '').strip()
+        if not q:
+            raise HTTPException(status_code=400, detail='La domanda non può essere vuota')
+        updates['question'] = q[:280]
+    if body.category is not None:
+        cat = (body.category or '').strip().lower()
+        # Whitelist against the app's canonical CATEGORIES list.
+        matched = next((c for c in CATEGORIES if c['id'] == cat), None)
+        if not matched:
+            raise HTTPException(status_code=400, detail='Categoria non valida')
+        updates['category'] = matched['id']
+        updates['category_label'] = matched['label']
+    if body.summary is not None:
+        # The article body / news summary shown under the hero image.
+        # Allow multi-paragraph content; only reject blank / whitespace-only
+        # strings so admins can't accidentally wipe the article.
+        s = (body.summary or '').strip()
+        if not s:
+            raise HTTPException(status_code=400, detail='Il testo non può essere vuoto')
+        updates['summary'] = s[:6000]
+    if body.party_a is not None:
+        pa = (body.party_a or '').strip()
+        if not pa:
+            raise HTTPException(status_code=400, detail='La fazione A non può essere vuota')
+        updates['party_a'] = pa[:80]
+    if body.party_b is not None:
+        pb = (body.party_b or '').strip()
+        if not pb:
+            raise HTTPException(status_code=400, detail='La fazione B non può essere vuota')
+        updates['party_b'] = pb[:80]
+    if not updates:
+        raise HTTPException(status_code=400, detail='Nessuna modifica indicata')
+    updates['edited_at'] = now_utc()
+    updates['edited_by'] = user['user_id']
+    await db.feuds.update_one({'feud_id': feud_id}, {'$set': updates})
+    fresh = await db.feuds.find_one({'feud_id': feud_id}, {'_id': 0})
+    _attach_percentages(fresh, revealed=True)
+    _ensure_hashtag(fresh)
+    if isinstance(fresh.get('created_at'), datetime):
+        fresh['created_at'] = _iso_utc(fresh['created_at'])
+    if isinstance(fresh.get('edited_at'), datetime):
+        fresh['edited_at'] = _iso_utc(fresh['edited_at'])
+    fresh['is_admin_viewer'] = True
+    fresh['is_hidden'] = bool(fresh.get('is_hidden'))
+    return {'feud': fresh}
+
+
+@api_router.delete('/feuds/{feud_id}')
+async def admin_hide_feud(feud_id: str, user: dict = Depends(get_current_user)):
+    """Founder-admin only. Soft-delete a feud by setting `is_hidden=True`.
+    The document is preserved so the admin can later restore it via
+    `POST /feuds/{id}/restore`. Regular users can no longer see it in any
+    feed (live, hype, archive, hashtag, search, favorites)."""
+    if not _is_founder_admin(user):
+        raise HTTPException(status_code=403, detail='Permesso negato')
+    doc = await db.feuds.find_one({'feud_id': feud_id}, {'_id': 0, 'feud_id': 1})
+    if not doc:
+        raise HTTPException(status_code=404, detail='Faida non trovata')
+    await db.feuds.update_one(
+        {'feud_id': feud_id},
+        {'$set': {
+            'is_hidden': True,
+            'hidden_at': now_utc(),
+            'hidden_by': user['user_id'],
+        }},
+    )
+    return {'ok': True, 'feud_id': feud_id, 'is_hidden': True}
+
+
+@api_router.post('/feuds/{feud_id}/restore')
+async def admin_restore_feud(feud_id: str, user: dict = Depends(get_current_user)):
+    """Founder-admin only. Un-hide a previously soft-deleted feud."""
+    if not _is_founder_admin(user):
+        raise HTTPException(status_code=403, detail='Permesso negato')
+    doc = await db.feuds.find_one({'feud_id': feud_id}, {'_id': 0, 'feud_id': 1})
+    if not doc:
+        raise HTTPException(status_code=404, detail='Faida non trovata')
+    await db.feuds.update_one(
+        {'feud_id': feud_id},
+        {
+            '$set': {'is_hidden': False, 'restored_at': now_utc(), 'restored_by': user['user_id']},
+            '$unset': {'hidden_at': '', 'hidden_by': ''},
+        },
+    )
+    return {'ok': True, 'feud_id': feud_id, 'is_hidden': False}
+
+
+@api_router.get('/admin/hidden-feuds')
+async def admin_list_hidden_feuds(user: dict = Depends(get_current_user)):
+    """Founder-admin only. Return every soft-deleted feud so the admin
+    UI can list them + offer a restore button."""
+    if not _is_founder_admin(user):
+        raise HTTPException(status_code=403, detail='Permesso negato')
+    docs = await db.feuds.find(
+        {'is_hidden': True}, {'_id': 0},
+    ).sort('hidden_at', -1).to_list(500)
+    for d in docs:
+        _attach_percentages(d, revealed=True)
+        if isinstance(d.get('created_at'), datetime):
+            d['created_at'] = _iso_utc(d['created_at'])
+        if isinstance(d.get('hidden_at'), datetime):
+            d['hidden_at'] = _iso_utc(d['hidden_at'])
+    return {'feuds': docs}
 
 
 def _ensure_hashtag(feud: dict) -> None:
@@ -2319,7 +2487,7 @@ async def feuds_by_hashtag(tag: str, user: Optional[dict] = Depends(get_current_
     window. Includes both live (24h) and archived (up to 14d) feuds."""
     key = _hashtag_norm(tag).replace('#', '')
     # Match either the stored `hashtag` key or compute-on-the-fly for legacy rows.
-    docs = await db.feuds.find({}, {'_id': 0}).sort('created_at', -1).to_list(500)
+    docs = await db.feuds.find({'is_hidden': {'$ne': True}}, {'_id': 0}).sort('created_at', -1).to_list(500)
     matched: List[dict] = []
     for d in docs:
         _ensure_hashtag(d)

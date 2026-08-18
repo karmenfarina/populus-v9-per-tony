@@ -359,6 +359,16 @@ export const api = {
     request(`/feuds/${feudId}/ai-summary`, { method: 'POST' }),
   reportUser: (userId: string, reason: string, message_id?: string) =>
     request(`/users/${userId}/report`, { method: 'POST', body: JSON.stringify({ reason, message_id }) }),
+  // ─── Founder-admin: edit / hide / restore feuds ─────────────────
+  // Only usable by the account matching FOUNDER_ADMIN_EMAIL on the
+  // backend. Any other caller receives 403.
+  adminEditFeud: (feudId: string, patch: { title?: string; question?: string; category?: string; summary?: string; party_a?: string; party_b?: string }) =>
+    request(`/feuds/${feudId}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  adminHideFeud: (feudId: string) =>
+    request(`/feuds/${feudId}`, { method: 'DELETE' }),
+  adminRestoreFeud: (feudId: string) =>
+    request(`/feuds/${feudId}/restore`, { method: 'POST' }),
+  adminHiddenFeuds: () => request('/admin/hidden-feuds'),
 };
 
 export type User = {
@@ -494,6 +504,12 @@ export type Feud = {
    *  the card badge (so the user sees real engagement before voting). */
   hype_comments?: number;
   hype_engagement?: number;
+  /** Founder-admin only. Flags whether the caller is the admin viewer
+   *  (server-computed) and whether this feud is currently soft-deleted. */
+  is_admin_viewer?: boolean;
+  is_hidden?: boolean;
+  edited_at?: string | null;
+  hidden_at?: string | null;
 };
 
 export type Mention = {

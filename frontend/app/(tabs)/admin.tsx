@@ -11,6 +11,7 @@ import * as Sharing from "expo-sharing";
 import { storage } from "@/src/utils/storage";
 import { colors, spacing, font } from "@/src/theme";
 import AnalyticsPanel, { AnalyticsPanelHandle } from "@/src/components/AnalyticsPanel";
+import { api } from "@/src/api";
 import { useAuth } from "@/src/auth/AuthContext";
 
 const KEY_STORAGE = "populus_admin_key";
@@ -53,8 +54,42 @@ export default function AdminScreen() {
   // Two-tab switch — Analytics (KPI + retention + categorie + profili) is
   // the growth-plan dashboard; Demografia is the legacy one (utile per
   // controllare voti per regione/sesso/età al volo).
-  const [tab, setTab] = useState<"analytics" | "demographics">("analytics");
+  const [tab, setTab] = useState<"analytics" | "demographics" | "hidden">("analytics");
   const analyticsRef = useRef<AnalyticsPanelHandle | null>(null);
+
+  // Founder-admin: soft-deleted feuds list (loaded lazily when the
+  // "NASCOSTE" tab opens). Tap a row → open the feud detail (admin sees
+  // the hidden banner + restore button there).
+  const [hiddenFeuds, setHiddenFeuds] = useState<any[] | null>(null);
+  const [hiddenLoading, setHiddenLoading] = useState(false);
+  const [hiddenError, setHiddenError] = useState<string | null>(null);
+  const [restoringId, setRestoringId] = useState<string | null>(null);
+
+  const loadHiddenFeuds = useCallback(async () => {
+    setHiddenLoading(true);
+    setHiddenError(null);
+    try {
+      const r = await api.adminHiddenFeuds();
+      setHiddenFeuds(r?.feuds || []);
+    } catch (e: any) {
+      setHiddenError(e?.detail || e?.message || "Impossibile caricare");
+      setHiddenFeuds([]);
+    } finally {
+      setHiddenLoading(false);
+    }
+  }, []);
+
+  const restoreHidden = async (feudId: string) => {
+    setRestoringId(feudId);
+    try {
+      await api.adminRestoreFeud(feudId);
+      setHiddenFeuds((prev) => (prev || []).filter((f) => f.feud_id !== feudId));
+    } catch (e: any) {
+      setHiddenError(e?.detail || e?.message || "Ripristino fallito");
+    } finally {
+      setRestoringId(null);
+    }
+  };
 
   // Reset confirmation flow — two-step: first Modal asks "azzerare?", then
   // if user says yes a second Modal offers the JSON snapshot download.
@@ -91,6 +126,10 @@ export default function AdminScreen() {
     if (hydrated && key && tab === "demographics") load(key);
   }, [hydrated, key, load, tab]);
 
+  useEffect(() => {
+    if (hydrated && tab === "hidden") loadHiddenFeuds();
+  }, [hydrated, tab, loadHiddenFeuds]);
+
   const submitKey = async () => {
     if (!keyInput.trim()) return;
     await storage.secureSet(KEY_STORAGE, keyInput.trim());
@@ -106,10 +145,12 @@ export default function AdminScreen() {
   const refreshCurrent = useCallback(async () => {
     if (tab === "analytics") {
       await analyticsRef.current?.reload();
+    } else if (tab === "hidden") {
+      await loadHiddenFeuds();
     } else if (key) {
       await load(key);
     }
-  }, [tab, key, load]);
+  }, [tab, key, load, loadHiddenFeuds]);
 
   // Fetch a full snapshot (analytics + legacy demografia) so the
   // report file the user downloads is a complete "before-reset" record.
@@ -500,9 +541,70 @@ export default function AdminScreen() {
         >
           <Text style={[styles.tabTxt, tab === "demographics" && styles.tabTxtActive]}>DEMOGRAFIA</Text>
         </Pressable>
+        <Pressable
+          style={[styles.tabBtn, tab === "hidden" && styles.tabBtnActive]}
+          onPress={() => setTab("hidden")}
+          testID="admin-tab-hidden"
+        >
+          <Text style={[styles.tabTxt, tab === "hidden" && styles.tabTxtActive]}>NASCOSTE</Text>
+        </Pressable>
       </View>
 
-      {tab === "analytics" ? (
+      {tab === "hidden" ? (
+        hiddenLoading ? (
+          <View style={styles.centerFill}><ActivityIndicator size="large" color={colors.brandPrimary} /></View>
+        ) : hiddenError ? (
+          <View style={styles.centerFill}>
+            <Text style={styles.err}>{hiddenError}</Text>
+            <Pressable onPress={loadHiddenFeuds} style={styles.smallBtn}>
+              <Text style={styles.smallBtnTxt}>RIPROVA</Text>
+            </Pressable>
+          </View>
+        ) : !hiddenFeuds || hiddenFeuds.length === 0 ? (
+          <View style={styles.centerFill}>
+            <Ionicons name="eye-off-outline" size={44} color={colors.muted} />
+            <Text style={{ color: colors.muted, marginTop: spacing.sm, fontSize: font.sizes.base }}>
+              Nessuna faida nascosta.
+            </Text>
+          </View>
+        ) : (
+          <ScrollView contentContainerStyle={styles.content}>
+            <Text style={{ color: colors.muted, fontSize: font.sizes.xs, letterSpacing: 1, marginBottom: spacing.sm }}>
+              {hiddenFeuds.length} FAIDA{hiddenFeuds.length === 1 ? "" : "E"} NASCOSTA{hiddenFeuds.length === 1 ? "" : "E"}
+            </Text>
+            {hiddenFeuds.map((f) => (
+              <View key={f.feud_id} style={styles.hiddenRow} testID={`hidden-${f.feud_id}`}>
+                <Pressable
+                  onPress={() => router.push(`/feud/${f.feud_id}`)}
+                  style={{ flex: 1 }}
+                  testID={`hidden-open-${f.feud_id}`}
+                >
+                  <Text style={styles.topCat}>{(f.category_label || "").toUpperCase()}</Text>
+                  <Text style={styles.topTitle} numberOfLines={2}>{f.title}</Text>
+                  <Text style={{ color: colors.muted, fontSize: font.sizes.xs, marginTop: 2 }}>
+                    {f.party_a} vs {f.party_b}
+                  </Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => restoreHidden(f.feud_id)}
+                  disabled={restoringId === f.feud_id}
+                  style={styles.hiddenRestoreBtn}
+                  testID={`hidden-restore-${f.feud_id}`}
+                >
+                  {restoringId === f.feud_id ? (
+                    <ActivityIndicator size="small" color={colors.onBrandSecondary} />
+                  ) : (
+                    <>
+                      <Ionicons name="refresh-outline" size={16} color={colors.onBrandSecondary} />
+                      <Text style={styles.hiddenRestoreTxt}>RIPRISTINA</Text>
+                    </>
+                  )}
+                </Pressable>
+              </View>
+            ))}
+          </ScrollView>
+        )
+      ) : tab === "analytics" ? (
         <AnalyticsPanel adminKey={key} ref={analyticsRef} />
       ) : loading ? (
         <View style={styles.centerFill}><ActivityIndicator size="large" color={colors.brandPrimary} /></View>
@@ -729,6 +831,33 @@ const styles = StyleSheet.create({
   topFeud: { borderWidth: 2, borderColor: colors.border, padding: spacing.sm, backgroundColor: colors.surface, gap: spacing.xs },
   topCat: { fontSize: font.sizes.xs, letterSpacing: 2, color: colors.brandPrimary },
   topTitle: { fontSize: font.sizes.base, color: colors.onSurface, lineHeight: 18 },
+  hiddenRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceSecondary,
+    marginBottom: spacing.sm,
+    borderRadius: 8,
+  },
+  hiddenRestoreBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 8,
+    backgroundColor: colors.brandSecondary,
+    borderRadius: 6,
+    minHeight: 44,
+  },
+  hiddenRestoreTxt: {
+    color: colors.onBrandSecondary,
+    fontWeight: "800",
+    fontSize: font.sizes.xs,
+    letterSpacing: 1,
+  },
   topSplit: { flexDirection: "row", height: 20, borderWidth: 2, borderColor: colors.border, marginTop: 4 },
   topHalf: { justifyContent: "center", alignItems: "center" },
   topHalfTxt: { color: colors.onBrandPrimary, fontSize: font.sizes.xs, fontWeight: "500", letterSpacing: 0.5 },

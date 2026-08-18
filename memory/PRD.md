@@ -45,3 +45,26 @@ When a user is anonymous and signs up (fresh email), logs in (existing email), o
 ## Deferred
 - Real ad banners targeted per category (AdMob requires native build).
 - Push notifications for new daily feuds.
+
+## Founder-admin controls (iter123)
+The email `carlofarinapayme@gmail.com` unlocks moderation actions on every
+feud detail screen (RBAC hardcoded — no generic `is_admin` flag):
+- Edit title/question/category (`PATCH /api/feuds/{id}`).
+- Soft-hide (`DELETE /api/feuds/{id}`) — the feud vanishes from all public
+  feeds (live/hype/archive/search/hashtag/favorites) but remains visible
+  to the admin with a "FAIDA NASCOSTA" banner and a Restore action.
+- Restore (`POST /api/feuds/{id}/restore`) — flips visibility back on.
+- Admin tab "NASCOSTE" (`GET /api/admin/hidden-feuds`) lists every hidden
+  feud with a one-tap restore button.
+
+## Notification deep-link scroll (iter123)
+Push notifications for @-mention comments/replies already carry a
+`comment_id` inside the deeplink (`?comment=…&side=…`). The feud detail
+screen now:
+1. Activates the correct side tab based on the param (or auto-detects it).
+2. Auto-expands the reply thread of the target comment.
+3. Uses `measureLayout(ScrollView)` on the target row's View ref to
+   `scrollTo({ y })` precisely, retrying briefly while the layout
+   settles after the tab flip.
+4. Flashes a bright brand-secondary border on the target row for ~2.5s
+   so the user's eye is drawn to it immediately.
