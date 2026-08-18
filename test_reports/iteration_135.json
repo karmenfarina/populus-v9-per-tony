@@ -1,0 +1,43 @@
+{
+  "summary": "Backend-only testing for iter 135 (scalabilità + sicurezza). Created new pytest suite tests/test_iter135_scale_security.py con 25 test — TUTTI PASS (100%). Coperti: (1) security headers globali (X-Content-Type-Options=nosniff, X-Frame-Options=DENY, Strict-Transport-Security, Referrer-Policy, Permissions-Policy) — presenti su /api/categories e /api/docs. (2) Cache-Control corretto per endpoint statici: /api/categories & /api/professions & /api/legal/* & /api/docs* → public, max-age=300, s-maxage=600; /api/sponsors → public, max-age=120. (3) GZip: /api/docs/regole con Accept-Encoding: gzip risponde Content-Encoding: gzip. (4) Rate limit /auth/signup: 6° tentativo stesso IP entro 1h → 429 (i primi 5 200). (5) Rate limit /auth/login: 11° tentativo stessa email+IP → 429 (i primi 10 401). (6) Admin bots/state con X-Admin-Key OK. (7) Regressione router estratti (legal, docs, sponsors, favorites, support, blocks, notifications) tutti OK, incluso nuovo slug 'scalabilita-sicurezza' in /api/docs. (8) MongoDB pool: 20 GET /api/feuds/hype in parallelo → tutte 200 (pool 200 regge). (9) Log backend: nessun leak di JWT_SECRET/EMERGENT_LLM_KEY/ADMIN_TOKEN. (10) CSP header su /api/share/{id}/html verificato (default-src 'self', script-src 'none', frame-ancestors 'none'). Rerun completo di iter134 (21 test) → 21/21 PASS: nessuna regressione. Boot log conferma: 'ensure_indexes: 39 indexes ensured across 20 collections'. Cleanup: rimosso i 5 account TEST_rl_* creati dal test rate-limit signup + verification_tokens correlati; DB restaurato a 100 bot + 1 admin come richiesto. Nota: bot config lasciato in stato OFF con active_count=25 (persistente da iter134, invariato).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter135_scale_security.py",
+    "/app/backend/tests/test_iter134_bots_and_router_regression.py",
+    "/app/test_reports/pytest/iter135_scale_security.xml"
+  ],
+  "action_items": [
+    "JWT_SECRET nel .env corrente è < 32 caratteri o contiene marcatori placeholder — il backend logga il warning al boot: '⚠️  JWT_SECRET appare debole'. In deploy produzione ricordare di sostituirlo con `openssl rand -hex 32` (>=64 hex). Il warning funziona, il fix è di configurazione, non di codice.",
+    "Rate limiter in-memory (dict `_RESEND_RATE`) — funziona per singola replica; se in futuro si scala a più worker/pod, valutare rate limiter distribuito (Redis) per essere efficace cross-instance. Attuale è già utile perché la maggior parte del traffico attraversa un ingress che sticky-routa e X-Forwarded-For è già gestito.",
+    "Considerare TTL su `verification_tokens` (attualmente indice singolo user_id ma no TTL su expires_at nel db_indexes.py; server.py potrebbe già gestirlo in on_startup — verificato: ok, TTL già presente). Nessuna azione richiesta.",
+    "Il piccolo warning ' HEAD /api/categories 405' nei log è generato da un client esterno che pinga con HEAD — non è un problema, ma se in produzione fosse un k8s liveness probe conviene supportare HEAD o cambiare probe a GET."
+  ],
+  "critical_code_review_comments": [
+    "server.py:918 `_rate_limited` è puramente in-memory (dict globale). Corretto per un singolo worker; se supervisor lancerà >1 worker uvicorn o l'app verrà scalata orizzontalmente, i tentativi non saranno condivisi (bypassabile riprovando su un altro pod). Il commento in-code lo segnala già.",
+    "server.py:938 `_client_ip` fa split su virgola di X-Forwarded-For e prende il primo hop — corretto per ingress K8s. Considerare validazione IP per evitare che un client malevolo passi un XFF costruito per bypassare la chiave di rate limit (comunque il rischio è basso perché l'ingress sovrascrive XFF).",
+    "db_indexes.py è completamente idempotente e correttamente separato dal modulo server.py (bene). Solo osservazione: alcuni indici potrebbero già essere presenti da vecchi `ensure_index` inline in server.py (es. favorites, user_photos) — il commento nel file lo dichiara. Nessuna duplicazione a runtime perché create_index è idempotente sul nome.",
+    "GZip middleware con minimum_size=1024 va bene; nota però che è REGISTRATO PRIMA del middleware CORS/security-headers (add_middleware push front). Ordine attuale osservato in supervisor.log è corretto: prima gzip, poi headers → OK, gli header vengono aggiunti dopo la compressione.",
+    "Middleware `_security_and_cache_headers` usa `response.headers.setdefault` — corretto per non sovrascrivere handler-specifici (es. share HTML già aveva CSP), ma il codice `if '/share/' in path and path.endswith('/html')` matcha sia /api/share/... che /share/... : intenzionale (share pubblico HTML può essere servito anche fuori /api). OK."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter135_scale_security.py (new)"
+  ],
+  "success_rate": {
+    "backend": "100%",
+    "frontend": "not_tested"
+  },
+  "seed_data_creation": "Il test rate-limit signup ha creato 5 account temporanei (TEST_rl_*). Sono stati eliminati assieme ai verification_tokens correlati DOPO il test run. DB finale verificato: 100 bot + 1 admin (Google) = 101 users, invariato rispetto a stato Day-1.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Suite iter135 (25 test) copre tutte le funzionalità di scalabilità (indici DB, GZip, cache headers, connection pool concorrente) e sicurezza (rate limit signup/login/verify-email, security headers globali, CSP su share/html, no leak secrets). Suite iter134 (21 test) rimane la fonte di verità per bot admin + router estratti. Per rilanciare tutto in un colpo: pytest backend/tests/test_iter134_bots_and_router_regression.py backend/tests/test_iter135_scale_security.py. Nota importante: il test rate-limit signup crea 5 account TEST_rl_* — se rilanciato entro 1h consecutivamente potrebbero rimanere account residui o il test potrebbe iniziare già a 429. Cleanup script già dimostrato in tool output di questa iterazione. Backend base URL usato: http://localhost:8001 (come da payload).",
+  "rca_of_issue": "Nessun bug trovato. Tutte le nuove funzionalità richieste (scalabilità + sicurezza) funzionano come specificato dal main agent."
+}

@@ -65,6 +65,7 @@ from fastapi import FastAPI, APIRouter, Header, HTTPException, Depends, Request,
 from fastapi.responses import HTMLResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
+from starlette.middleware.gzip import GZipMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
@@ -127,7 +128,19 @@ ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
 mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
+# Connection pool ottimizzato per alto carico. Motor default: maxPoolSize=100.
+# Aumentiamo per gestire migliaia di connessioni concorrenti in fase di picco
+# (feed refresh + WS + notifiche parallele). Timeout più aggressivo così una
+# richiesta "lenta" non blocca il pool.
+client = AsyncIOMotorClient(
+    mongo_url,
+    maxPoolSize=200,           # up from default 100
+    minPoolSize=10,            # tieni sempre 10 socket caldi
+    waitQueueTimeoutMS=5000,   # 5s max wait per prendere una connection
+    serverSelectionTimeoutMS=5000,  # 5s max per trovare il primary
+    connectTimeoutMS=5000,
+    retryWrites=True,          # retry idempotente su transient errors
+)
 db = client[os.environ['DB_NAME']]
 
 JWT_SECRET = os.environ.get('JWT_SECRET', 'dev-secret-change')
@@ -135,6 +148,20 @@ JWT_ALG = 'HS256'
 JWT_TTL_DAYS = 7
 EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY')
 ADMIN_TOKEN = os.environ.get('ADMIN_TOKEN', '')
+
+# ─────────────────────────────────────────────────────────────────
+# Security bootstrap warnings — logged at startup, non-fatal.
+# ─────────────────────────────────────────────────────────────────
+_INSECURE_JWT_MARKERS = ("change", "dev-secret", "secret", "placeholder", "test", "changeme")
+if len(JWT_SECRET) < 32 or any(m in JWT_SECRET.lower() for m in _INSECURE_JWT_MARKERS):
+    logging.getLogger("security").warning(
+        "⚠️  JWT_SECRET appare debole (<32 caratteri o contiene marcatori placeholder). "
+        "In produzione settare un secret casuale di almeno 32 byte hex."
+    )
+if not ADMIN_TOKEN or ADMIN_TOKEN in ("", "changeme", "admin", "placeholder"):
+    logging.getLogger("security").warning(
+        "⚠️  ADMIN_TOKEN vuoto o triviale. Endpoint /api/admin/* aperti a chi indovina la chiave."
+    )
 # Email delivery (Resend) — usato sia per verification email che per ticket support.
 RESEND_API_KEY = os.environ.get('RESEND_API_KEY', '')
 SUPPORT_EMAIL = os.environ.get('SUPPORT_EMAIL', '')
@@ -899,11 +926,41 @@ def _rate_limited(key: str, max_hits: int = 3, window_sec: int = 3600) -> bool:
     return False
 
 
+def _client_ip(request: Request) -> str:
+    """Estrae l'IP client rispettando X-Forwarded-For (ingress Kubernetes).
+
+    In produzione dietro un proxy/load balancer, `request.client.host` è
+    l'IP del proxy. Il vero IP è nel header `x-forwarded-for` (primo hop).
+    """
+    xff = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+    if xff:
+        return xff
+    return (request.client.host if request.client else "unknown") or "unknown"
+
+
+def _guard_rate(request: Request, bucket: str, max_hits: int, window_sec: int, key_extra: str = "") -> None:
+    """Rate-limit guard riusabile. Raise 429 se superato.
+
+    `bucket`: nome della family (es. "login", "signup").
+    `key_extra`: parte aggiuntiva della chiave (es. l'email per login).
+    """
+    ip = _client_ip(request)
+    key = f"{bucket}|{ip}|{key_extra}".lower()
+    if _rate_limited(key, max_hits=max_hits, window_sec=window_sec):
+        raise HTTPException(
+            status_code=429,
+            detail="Troppi tentativi. Riprova più tardi.",
+        )
+
+
 @api_router.post('/auth/verify-email')
-async def verify_email(body: VerifyEmailBody):
+async def verify_email(body: VerifyEmailBody, request: Request):
     """Consume a verification token. Idempotent-ish: token is single-use, once
     the user is verified subsequent calls return 200 (already verified).
     """
+    # Rate limit brute-force sui token: max 20 verify/IP/ora (token è 32 char hex,
+    # comunque il ceiling è ridondante rispetto all'entropia, ma riduce load).
+    _guard_rate(request, 'verify-email', max_hits=20, window_sec=3600)
     if not body.token:
         raise HTTPException(status_code=400, detail='Token mancante')
     token_hash = _hashlib.sha256(body.token.encode('utf-8')).hexdigest()
@@ -954,7 +1011,9 @@ async def resend_verification(body: ResendVerificationBody, request: Request):
 
 
 @api_router.post('/auth/signup')
-async def signup(body: SignupBody, authorization: Optional[str] = Header(None)):
+async def signup(body: SignupBody, request: Request, authorization: Optional[str] = Header(None)):
+    # Rate limit anti-spam accounts: max 5 signup/IP/ora.
+    _guard_rate(request, 'signup', max_hits=5, window_sec=3600)
     # Enforce Instagram-style nickname rules (no spaces/emoji/punctuation).
     normalized_nick = _normalize_and_validate_nickname(body.nickname)
     email_lc = body.email.lower()
@@ -1039,7 +1098,10 @@ async def signup(body: SignupBody, authorization: Optional[str] = Header(None)):
 
 
 @api_router.post('/auth/login')
-async def login(body: LoginBody, authorization: Optional[str] = Header(None)):
+async def login(body: LoginBody, request: Request, authorization: Optional[str] = Header(None)):
+    # Rate limit anti brute-force: max 10 tentativi per (IP+email) all'ora.
+    # Il 429 blocca l'enumerazione + rallenta la forza bruta.
+    _guard_rate(request, 'login', max_hits=10, window_sec=3600, key_extra=body.email.lower())
     user = await db.users.find_one({'email': body.email.lower()}, {'_id': 0})
     if not user or user.get('auth_provider') != 'email':
         raise HTTPException(status_code=401, detail='Credenziali non valide')
@@ -5171,6 +5233,8 @@ async def seed_if_empty():
 
 @app.on_event('startup')
 async def on_startup():
+    # Indici core storicamente qui — restano per retro-compat (idempotenti).
+    # Il grosso degli indici è ora in `db_indexes.ensure_indexes(db)`.
     await db.users.create_index('email', unique=False, sparse=True)
     await db.users.create_index('user_id', unique=True)
     await db.user_sessions.create_index('session_token', unique=True)
@@ -5189,6 +5253,14 @@ async def on_startup():
     # TTL index: expired verification tokens are removed automatically.
     await db.verification_tokens.create_index([('token_hash', 1)], unique=True)
     await db.verification_tokens.create_index('expires_at', expireAfterSeconds=0)
+
+    # Ensure indexes for scalability (notifications, messages, stories, ecc.).
+    # Modulo idempotente: safe a ogni boot.
+    try:
+        from db_indexes import ensure_indexes as _ensure_indexes
+        await _ensure_indexes(db)
+    except Exception as e:
+        logger.warning(f"db_indexes bootstrap failed: {e}")
     # Grandfather: existing email users without the new flag are marked as
     # verified so the new login-block doesn't lock them out.
     try:
@@ -7685,6 +7757,65 @@ app.add_middleware(
     CORSMiddleware, allow_credentials=True, allow_origins=['*'],
     allow_methods=['*'], allow_headers=['*'],
 )
+
+# ─────────────────────────────────────────────────────────────────
+# Scalability & security middleware
+# ─────────────────────────────────────────────────────────────────
+# GZip: comprime risposte >1KB. Riduce banda ~70% su JSON payload feed.
+# Zero rischio di regressione: applicato solo se il client invia
+# `Accept-Encoding: gzip`.
+app.add_middleware(GZipMiddleware, minimum_size=1024)
+
+
+@app.middleware("http")
+async def _security_and_cache_headers(request, call_next):
+    """Aggiunge:
+      • Header di sicurezza standard su ogni risposta.
+      • Cache-Control aggressivo su endpoint statici (categories, legal, docs,
+        professions, sponsors, share/*/html): riducono carico DB al crescere
+        del traffico.
+    """
+    response = await call_next(request)
+    # Security headers — safe defaults per API JSON + HTML share pages.
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    # HTTPS enforcement (rispettato dai browser che parlano già in HTTPS).
+    response.headers.setdefault(
+        "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
+    )
+    # Permissions-Policy: disabilita API browser sensibili di default.
+    response.headers.setdefault(
+        "Permissions-Policy",
+        "camera=(), microphone=(), geolocation=(), payment=()",
+    )
+    # CSP applicata SOLO all'HTML share (pagina renderizzata nel browser).
+    # Le API JSON non renderizzano HTML → non serve CSP che rallenterebbe
+    # il client mobile senza motivo.
+    path = request.url.path
+    if "/share/" in path and path.endswith("/html"):
+        response.headers.setdefault(
+            "Content-Security-Policy",
+            "default-src 'self'; "
+            "img-src 'self' https: data:; "
+            "style-src 'self' 'unsafe-inline'; "
+            "script-src 'none'; "  # Nessun JS: nostra HTML è statica
+            "frame-ancestors 'none'; "
+            "base-uri 'self'; "
+            "form-action 'self'",
+        )
+    # Cache headers — solo per GET pubblici read-only stabili nel tempo.
+    if request.method == "GET":
+        # Statici lunghi (5 min edge cache + revalidation)
+        if path in ("/api/categories", "/api/professions") or path.startswith("/api/legal/") or path.startswith("/api/docs"):
+            response.headers.setdefault("Cache-Control", "public, max-age=300, s-maxage=600")
+        # Semi-statici (sponsors ruotano raramente)
+        elif path == "/api/sponsors":
+            response.headers.setdefault("Cache-Control", "public, max-age=120")
+        # Share HTML condivisibile — ok cachare 5 min
+        elif "/share/" in path and path.endswith("/html"):
+            response.headers.setdefault("Cache-Control", "public, max-age=300")
+    return response
 
 
 @app.on_event('shutdown')

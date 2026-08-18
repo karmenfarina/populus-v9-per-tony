@@ -11,6 +11,7 @@ il progetto.
 | **[POPULUS_REGOLE_APP.md](./POPULUS_REGOLE_APP.md)** | Regole di funzionamento dell'app: voto, faide, commenti, storie, cerchia, DM, notifiche, admin, moderazione. |
 | **[POPULUS_ALGORITMO_AI.md](./POPULUS_ALGORITMO_AI.md)** | Algoritmi AI: selezione notizie, generazione faide, fact-checker, moderazione, bot fleet, prompt, soglie. |
 | **[POPULUS_ARCHITETTURA.md](./POPULUS_ARCHITETTURA.md)** | Mappa file/cartelle, schema DB MongoDB, comandi utili, debugging rapido. |
+| **[POPULUS_SCALABILITA_SICUREZZA.md](./POPULUS_SCALABILITA_SICUREZZA.md)** | Indici DB, connection pool, cache, rate limit, header sicurezza, checklist deploy. |
 
 ## Come mantenerli aggiornati
 

@@ -39,6 +39,7 @@ _DOCS_MAP = {
     "regole": "POPULUS_REGOLE_APP.md",
     "algoritmo-ai": "POPULUS_ALGORITMO_AI.md",
     "architettura": "POPULUS_ARCHITETTURA.md",
+    "scalabilita-sicurezza": "POPULUS_SCALABILITA_SICUREZZA.md",
 }
 
 
