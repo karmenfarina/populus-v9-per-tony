@@ -8,7 +8,7 @@ import pytest
 import requests
 import websockets
 
-BASE_URL = os.environ.get('EXPO_PUBLIC_BACKEND_URL') or 'https://resilient-app.preview.emergentagent.com'
+BASE_URL = os.environ.get('EXPO_PUBLIC_BACKEND_URL') or 'https://skeleton-cache-build.preview.emergentagent.com'
 BASE_URL = BASE_URL.rstrip('/')
 WS_URL = BASE_URL.replace('https://', 'wss://').replace('http://', 'ws://') + '/api/ws/messages'
 

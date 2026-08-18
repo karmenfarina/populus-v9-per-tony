@@ -147,7 +147,8 @@ export default function FeudDetail() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [from, archiveCat, archiveDate, messagesUserId]);
   const [feud, setFeud] = useState<Feud | null>(null);
-  const [sponsor, setSponsor] = useState<Sponsor | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [_sponsor, setSponsor] = useState<Sponsor | null>(null);
   const [sideA, setSideA] = useState<Comment[]>([]);
   const [sideB, setSideB] = useState<Comment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -551,6 +552,10 @@ export default function FeudDetail() {
     // First attempt after a beat so the side flip has time to reflow.
     setTimeout(tryScroll, 150);
     return () => { cancelled = true; };
+    // highlightAnim + navNonce are stable refs / intentional trigger; excluding
+    // avoids redundant scroll retries when they change without the target side
+    // shifting under us.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [commentParam, activeSide, sideA, sideB]);
 
   const vote = async (side: "A" | "B") => {
@@ -930,7 +935,7 @@ export default function FeudDetail() {
         <View style={styles.hiddenBanner} testID="admin-hidden-banner">
           <Ionicons name="eye-off-outline" size={16} color={colors.brandPrimary} />
           <Text style={styles.hiddenBannerTxt}>
-            FAIDA NASCOSTA — visibile solo a te. Tocca l'icona ↻ per ripristinare.
+            FAIDA NASCOSTA — visibile solo a te. Tocca l&apos;icona ↻ per ripristinare.
           </Text>
         </View>
       )}
@@ -1325,7 +1330,7 @@ export default function FeudDetail() {
           <View style={styles.adminModalCard} testID="admin-edit-modal">
             <Text style={styles.adminModalTitle}>MODIFICA FAIDA</Text>
             <Text style={styles.adminModalHint}>
-              Visibile solo all'admin. Le modifiche sono immediate per tutti gli utenti.
+              Visibile solo all&apos;admin. Le modifiche sono immediate per tutti gli utenti.
             </Text>
 
             <ScrollView

@@ -17,7 +17,7 @@ import uuid
 import pytest
 import requests
 
-BASE_URL = os.environ.get('EXPO_PUBLIC_BACKEND_URL', 'https://resilient-app.preview.emergentagent.com').rstrip('/')
+BASE_URL = os.environ.get('EXPO_PUBLIC_BACKEND_URL', 'https://skeleton-cache-build.preview.emergentagent.com').rstrip('/')
 ADMIN_KEY = 'populus-admin-42b8f3'
 
 

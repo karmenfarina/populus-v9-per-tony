@@ -25,7 +25,6 @@ import { resolveBannerUnitId } from "@/src/ads/config";
 // on iOS/Android and to `mobileAds.web.ts` (a harmless stub) on web.
 // This is what allows us to `import ... from` unconditionally at
 // the top of the file without breaking the web bundler.
-// eslint-disable-next-line import/no-unresolved -- resolved via .native.ts / .web.ts platform extensions
 import { BannerAd, BannerAdSize } from "@/src/ads/mobileAds";
 
 // Detect Expo Go vs a real native build. In Expo Go the AdMob native

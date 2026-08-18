@@ -4,7 +4,7 @@ import uuid
 import pytest
 import requests
 
-BASE_URL = "https://resilient-app.preview.emergentagent.com"
+BASE_URL = "https://skeleton-cache-build.preview.emergentagent.com"
 ADMIN_KEY = "populus-admin-42b8f3"
 
 

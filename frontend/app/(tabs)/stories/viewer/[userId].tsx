@@ -341,7 +341,7 @@ export default function StoriesViewer() {
       // otherwise we'd stomp on the CURRENT user's view.
       if (myToken !== loadTokenRef.current) return;
       const rows: Story[] = r?.stories || [];
-      const order = ((feed?.groups || []) as Array<{ user_id: string }>).map((g) => g.user_id);
+      const order = ((feed?.groups || []) as { user_id: string }[]).map((g) => g.user_id);
       setFeedOrder(order);
       cacheRef.current.set(uid, rows);
       if (!rows.length) {
@@ -568,7 +568,7 @@ export default function StoriesViewer() {
         });
       }, TICK_MS);
       return () => clearInterval(timer);
-    }, [initialLoading, stories.length, closeViewer, jumpToUser]),
+    }, [initialLoading, stories.length, jumpToUser]),
   );
 
   // Track which story image is fully loaded. Until then the auto-

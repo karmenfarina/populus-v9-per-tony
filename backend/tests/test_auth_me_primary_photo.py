@@ -20,7 +20,7 @@ import requests
 
 BASE_URL = os.environ.get(
     "EXPO_PUBLIC_BACKEND_URL",
-    "https://resilient-app.preview.emergentagent.com",
+    "https://skeleton-cache-build.preview.emergentagent.com",
 ).rstrip("/")
 
 USER_A = {"email": "chat_a@test.it", "password": "test123"}

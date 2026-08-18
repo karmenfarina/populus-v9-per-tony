@@ -10,7 +10,7 @@ import pytest
 import requests
 from pymongo import MongoClient
 
-BASE_URL = os.environ.get("EXPO_PUBLIC_BACKEND_URL", "https://resilient-app.preview.emergentagent.com").rstrip("/")
+BASE_URL = os.environ.get("EXPO_PUBLIC_BACKEND_URL", "https://skeleton-cache-build.preview.emergentagent.com").rstrip("/")
 API = f"{BASE_URL}/api"
 ADMIN_KEY = os.environ.get("ADMIN_TOKEN", "populus-admin-42b8f3")
 

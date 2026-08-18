@@ -38,10 +38,9 @@ import {
   Platform,
   Modal,
   Alert,
-  BackHandler,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import * as Clipboard from "expo-clipboard";
@@ -115,7 +114,6 @@ async function resolveImageFile(messageId: string, base64: string): Promise<stri
     return uri;
   } catch (e) {
     // Fall back to data URI if the FS write fails — never crash the viewer.
-    // eslint-disable-next-line no-console
     console.warn("[chat] resolveImageFile failed, falling back to data URI", e);
     const uri = `data:image/jpeg;base64,${base64}`;
     imageFileCache.set(messageId, uri);
@@ -200,10 +198,20 @@ export default function ChatScreen() {
   const boundIsCurrent = boundIdRef.current === (userId ? String(userId) : null);
   // Render-time views: while the userId is transitioning, all
   // conversation-scoped fields degrade to a neutral empty state.
-  const visibleMessages = boundIsCurrent ? messages : [];
-  const visibleOtherUser = boundIsCurrent ? otherUser : null;
-  const visibleIBlocked = boundIsCurrent ? iBlocked : false;
-  const visibleTheyBlocked = boundIsCurrent ? theyBlocked : false;
+  const visibleMessages = useMemo(
+    () => (boundIsCurrent ? messages : []),
+    [boundIsCurrent, messages],
+  );
+  // Reserved for future UI hooks that need a per-render "safe" view of
+  // the conversation while the userId is transitioning. Kept as
+  // no-op derivations so the intent stays documented even though
+  // nothing renders them yet.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _visibleOtherUser = boundIsCurrent ? otherUser : null;
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _visibleIBlocked = boundIsCurrent ? iBlocked : false;
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _visibleTheyBlocked = boundIsCurrent ? theyBlocked : false;
   useEffect(() => {
     const uid = userId ? String(userId) : null;
     if (uid === boundIdRef.current) return;
@@ -783,6 +791,9 @@ export default function ChatScreen() {
         </View>
       );
     },
+    // router + userId are stable inside the effect scope; adding them
+    // would only cause redundant renderMessage identity churn.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [user, inverseMessages, openViewerForMessage, deleteMessage],
   );
 

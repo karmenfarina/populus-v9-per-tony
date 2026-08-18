@@ -12,7 +12,7 @@ import requests
 
 BASE_URL = os.environ.get(
     "EXPO_BACKEND_URL",
-    "https://resilient-app.preview.emergentagent.com",
+    "https://skeleton-cache-build.preview.emergentagent.com",
 ).rstrip("/")
 API = f"{BASE_URL}/api"
 
