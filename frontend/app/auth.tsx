@@ -327,7 +327,14 @@ export default function AuthScreen() {
                 placeholder="Nickname (solo lettere, numeri, . e _)"
                 placeholderTextColor={colors.muted}
                 value={nickname}
-                onChangeText={(t) => setNickname(sanitizeNicknameInput(t))}
+                onChangeText={(t) => {
+                  // Sanitize on every keystroke so the input only ever
+                  // holds a valid nickname AND clear any stale error the
+                  // previous submit may have surfaced (otherwise the
+                  // user sees a red banner even while typing).
+                  setNickname(sanitizeNicknameInput(t));
+                  if (error) setError(null);
+                }}
                 autoCapitalize="none"
                 autoCorrect={false}
                 maxLength={NICKNAME_MAX}

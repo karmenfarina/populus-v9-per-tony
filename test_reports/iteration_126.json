@@ -1,0 +1,30 @@
+{
+  "summary": "All 4 bugs verified as fixed. Backend regression: 8/8 pytest tests pass on /api/auth/anonymous and /api/users/me/accept-terms (terms+NDA in single call). Frontend E2E on mobile viewport (390x844): (BUG1) badge card on /user/[id] now visibly rounded (borderRadius: 20 confirmed in code and rendered); (BUG2) 'public-scroll-to-top-btn' testID appears when scrolling deep past STORICO VOTI on another user's profile, and clicking it scrolls back to the section header; (BUG3) /auth ANONIMO tab: empty submit surfaces 'Inserisci un nickname.' error, first keystroke clears it, valid nickname logs in and redirects to /terms; (BUG4) /terms subtitle is now the single sentence 'Per usare Populus devi accettare due documenti.' (second sentence removed), button label is always 'ACCETTO E CONTINUO' both before and after ticking checkboxes, disabled via opacity 0.4 → 1 after both checks, POST /api/users/me/accept-terms {version:'v1', nda_version:'v1'} returns terms_accepted:true and redirects to /.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter126_bugs.py",
+    "/app/test_reports/pytest/iter126_bugs.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Console warnings on web: 'shadow*'/'textShadow*' style props deprecated, 'props.pointerEvents' deprecated, and useNativeDriver missing (Animated falls back to JS). Not blocking but should be cleaned in a future pass."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter126_bugs.py (new)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "seed_data_creation": "Two throw-away anonymous users created via POST /api/auth/anonymous during E2E (nickname prefix 'testanon'/'tanon'); no cleanup needed — device_id not provided so no duplication risk.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "All four iter126 bugs fixed and verified end-to-end. Public profile scroll-to-top uses testID 'public-scroll-to-top-btn' and appears only after scrolling ~500px past STORICO VOTI header (verified with chat_a whose profile has 22 votes). Anon login flow requires accepting Terms+NDA (single-screen /terms) before landing on home.",
+  "rca_of_issue": "N/A — all fixes verified working. Original BUG3 root cause was that setError was never cleared on nickname input change in the ANON tab; fix now calls setError(null) inside onChangeText when a stale error exists. Original BUG4 root cause was cosmetic copy + dynamic button label — both cleaned up. Original BUG1 fix was adding borderRadius:20 to styles.badgeCard. Original BUG2 fix wired historyYRef via onLayout and rendered ScrollToTopButton with testID 'public-scroll-to-top-btn'."
+}

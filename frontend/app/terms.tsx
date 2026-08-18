@@ -110,8 +110,7 @@ export default function TermsScreen() {
           <Ionicons name="shield-checkmark" size={32} color={colors.brandPrimary} />
           <Text style={styles.title}>Prima di iniziare</Text>
           <Text style={styles.subtitle}>
-            Per usare Populus devi accettare due documenti. Puoi accettarli senza leggerli, oppure toccare
-            ogni card per aprirla e leggere il testo integrale.
+            Per usare Populus devi accettare due documenti.
           </Text>
         </View>
 
@@ -157,9 +156,7 @@ export default function TermsScreen() {
           {accepting ? (
             <ActivityIndicator size="small" color={colors.onBrandPrimary} />
           ) : (
-            <Text style={styles.acceptBtnTxt}>
-              {allAccepted ? "ACCETTO E CONTINUO" : "SPUNTA ENTRAMBI I DOCUMENTI"}
-            </Text>
+            <Text style={styles.acceptBtnTxt}>ACCETTO E CONTINUO</Text>
           )}
         </Pressable>
         <Pressable onPress={onDecline} disabled={accepting} style={styles.declineBtn} testID="terms-decline-btn" hitSlop={8}>

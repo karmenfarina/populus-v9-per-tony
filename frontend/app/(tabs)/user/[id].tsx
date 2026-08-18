@@ -12,6 +12,7 @@ import { useSmartBack } from "@/src/utils/useSmartBack";
 import { scrollMemory } from "@/src/utils/scrollMemory";
 import { PhotoGalleryViewer } from "@/src/components/PhotoGalleryViewer";
 import CategoryBadgesModal from "@/src/components/CategoryBadgesModal";
+import { ScrollToTopButton } from "@/src/components/ScrollToTopButton";
 
 const SOCIAL_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
   instagram: "logo-instagram",
@@ -66,6 +67,12 @@ export default function UserPublicScreen() {
   const [refreshingH, setRefreshingH] = useState(false);
   const loadingH = refreshingH && !historyCache[filter];
   const [historyExpanded, setHistoryExpanded] = useState(false);
+  // Floating "back to top" pill — mirrors the /profile page behaviour so
+  // the user can jump back to the FIRST entry of the voting history on
+  // long profiles. Visibility is gated on scroll offset AND the presence
+  // of history rows so the pill never appears on a rowless profile.
+  const [showTopBtn, setShowTopBtn] = useState(false);
+  const historyYRef = useRef(0);
   const [menuOpen, setMenuOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const [reportText, setReportText] = useState("");
@@ -553,7 +560,15 @@ export default function UserPublicScreen() {
           pendingScrollYRef.current = null;
         }}
         onScroll={(e) => {
-          scrollMemory.setY(scrollKey, e.nativeEvent.contentOffset.y);
+          const y = e.nativeEvent.contentOffset.y;
+          scrollMemory.setY(scrollKey, y);
+          // Show the "back to top" pill only when the user has scrolled
+          // ~500 px past the STORICO VOTI section header. Mirrors the
+          // /profile screen so the affordance is consistent across the
+          // two profile variants.
+          const hy = historyYRef.current;
+          const threshold = hy > 0 ? hy + 500 : 1200;
+          setShowTopBtn(y > threshold);
         }}
         scrollEventThrottle={16}
         onContentSizeChange={() => {
@@ -770,7 +785,11 @@ export default function UserPublicScreen() {
             </View>
           )}
 
-          <View style={styles.section} testID="public-history-section">
+          <View
+            style={styles.section}
+            testID="public-history-section"
+            onLayout={(e) => { historyYRef.current = e.nativeEvent.layout.y; }}
+          >
             <Pressable
               onPress={() => setHistoryExpanded((v) => !v)}
               testID="public-history-toggle"
@@ -911,6 +930,18 @@ export default function UserPublicScreen() {
           </View>
         </View>
       </ScrollView>
+
+      <ScrollToTopButton
+        visible={showTopBtn}
+        onPress={() => {
+          const target = Math.max(0, historyYRef.current - 8);
+          scrollRef.current?.scrollTo({ y: target, animated: true });
+          setTimeout(() => {
+            try { scrollRef.current?.scrollTo({ y: target, animated: false }); } catch { /* noop */ }
+          }, 350);
+        }}
+        testID="public-scroll-to-top-btn"
+      />
 
       {/* Menu (block / report) */}
       <Modal visible={menuOpen} transparent animationType="fade" onRequestClose={() => setMenuOpen(false)}>
@@ -1156,7 +1187,16 @@ const styles = StyleSheet.create({
   badge: { alignSelf: "flex-start", paddingHorizontal: spacing.sm, paddingVertical: 4, borderWidth: 2, borderColor: colors.border, fontSize: font.sizes.xs, letterSpacing: 2, fontWeight: "500" },
   badgeRed: { backgroundColor: colors.brandPrimary, color: colors.onBrandPrimary },
   badgeYellow: { backgroundColor: colors.brandSecondary, color: colors.onBrandSecondary },
-  badgeCard: { flexDirection: "row", alignItems: "center", gap: spacing.sm, padding: spacing.md, borderWidth: 2, borderColor: colors.border, marginTop: spacing.sm },
+  badgeCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    padding: spacing.md,
+    borderWidth: 2,
+    borderColor: colors.border,
+    marginTop: spacing.sm,
+    borderRadius: 20,
+  },
   badgeCardRed: { backgroundColor: colors.brandPrimary },
   badgeCardYellow: { backgroundColor: colors.brandSecondary },
   badgeIconWrap: {
