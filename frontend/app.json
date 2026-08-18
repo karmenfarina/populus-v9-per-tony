@@ -37,6 +37,7 @@
       "backgroundColor": "#000000",
       "edgeToEdgeEnabled": true,
       "package": "com.emergent.teampick.bfsfcz",
+      "googleServicesFile": "./google-services.json",
       "permissions": [
         "CAMERA",
         "READ_EXTERNAL_STORAGE",
