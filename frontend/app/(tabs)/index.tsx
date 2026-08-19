@@ -71,16 +71,13 @@ export default function HomeFeed() {
       5000,
       () => api.feuds(category)
     );
-    let list: Feud[] = res.feuds;
-    if (category === "all") {
-      const favs = user?.favorite_categories || [];
-      if (favs.length > 0) {
-        const favSet = new Set(favs);
-        list = list.filter((f) => favSet.has(f.category));
-      }
-    }
-    setFeuds(list);
-  }, [user?.favorite_categories]);
+    // NB: nessun filtro client-side sulle categorie preferite. Il backend
+    // gia' rispetta `favorite_categories` dell'utente quando category === "all":
+    // un secondo filtro client svuotava la home se il batch server non
+    // matchava (bug osservato su APK dopo ~1min di uso, in combinazione
+    // col 401 fasullo di SecureStore).
+    setFeuds(res.feuds);
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -350,7 +347,6 @@ export default function HomeFeed() {
           refreshControl={<RefreshControl refreshing={pullRefreshing} onRefresh={onRefresh} tintColor={colors.brandSecondary} colors={[colors.brandSecondary]} />}
           onScroll={handleScroll}
           scrollEventThrottle={100}
-          removeClippedSubviews
           ListEmptyComponent={EmptyList}
           renderItem={renderItem}
         />

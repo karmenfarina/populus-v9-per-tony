@@ -23,5 +23,5 @@
   "seed_data_creation": "One TEST_ user created per pytest run (test_vote_still_populates_snapshot). No manual seed data required — DB already had feuds with YouTube media populated by scheduler.",
   "retest_needed": false,
   "should_main_agent_self_test": false,
-  "context_for_next_testing_agent": "YouTube feud in DB used for testing: feud_d0312abf93bc (media.video_id=NLojaMrZrrQ, channel=BuzzItalia, provenance=youtube_search). No-media feud: feud_806bd75af7d1. Admin token in /app/memory/test_credentials.md. Backend at localhost:8001, frontend at https://bot-burst-fix.preview.emergentagent.com."
+  "context_for_next_testing_agent": "YouTube feud in DB used for testing: feud_d0312abf93bc (media.video_id=NLojaMrZrrQ, channel=BuzzItalia, provenance=youtube_search). No-media feud: feud_806bd75af7d1. Admin token in /app/memory/test_credentials.md. Backend at localhost:8001, frontend at https://feud-governance.preview.emergentagent.com."
 }

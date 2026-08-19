@@ -1,0 +1,39 @@
+{
+  "summary": "Backend + frontend validation of the SecureStore race-condition fix in /app/frontend/src/api.ts (retry 3x + short-circuit only on `_isLoggedOut && requiresAuth(path)`). Backend: 23/23 pytest assertions PASS. Verified login/signup/anonymous all work, /auth/anonymous can be called twice back-to-back (post-logout scenario), and feeds/archive/hashtag/categories all tolerate calls without an Authorization header (either 200 optional-auth or well-formed 401 — NO 5xx). Comment/reply DELETE (owner branch) confirmed functional after the api.ts refactor. Frontend: launched mobile viewport 390x844, verified auth screen renders with EMAIL/GOOGLE/ANONIMO tabs (regression #1 clear), anonymous login navigates to Terms/NDA screen, terms+NDA acceptance transitions to Home feed with 6 feud cards + 11 category chips rendered, and FlashList content persists after a 30s idle wait (no cascade-empty regression). Archive screen loads with 82 items on 'IERI' + feuds visible — no removeClippedSubviews regression observed. One latent code-review finding: PUBLIC_PATH_PREFIXES is missing '/auth/signup' and '/auth/resend-verification', which means a user who logs out then tries to signup/resend WITHOUT restarting the app would hit the frontend short-circuit. This is a pre-existing edge case, unrelated to today's race fix, but worth flagging.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/auth/signup", "issue": "Signup returns {requires_verification: true, ...} without a token when email verification is enabled. Not a bug — expected behaviour; the frontend handles the branching. Documented here for future test authors."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter143_secure_store_race_fix.py",
+    "/app/test_reports/pytest/iter143_race_fix.xml"
+  ],
+  "action_items": [
+    "LATENT BUG (unrelated to today's fix, worth patching in the same PR): PUBLIC_PATH_PREFIXES in /app/frontend/src/api.ts is missing '/auth/signup' and '/auth/resend-verification'. Impact: after an explicit logout (`_isLoggedOut=true`), if the user taps 'Registrati' or 'Reinvia email' in the SAME session (no app restart), the client short-circuits with ApiError(401, 'Sessione terminata') before the request ever leaves the device — signup and resend-verification are effectively blocked post-logout until process restart. Fix: add '/auth/signup' and '/auth/resend-verification' to the PUBLIC_PATH_PREFIXES array (line 85 of api.ts). No backend change required.",
+    "Cosmetic: the console emits deprecation warnings on every mount — 'shadow*' style props deprecated, 'textShadow*' style props deprecated, 'props.pointerEvents is deprecated'. These are not introduced by this fix but keep leaking noise. Consider a sweep to migrate to `boxShadow`/`textShadow`/`style.pointerEvents`."
+  ],
+  "critical_code_review_comments": [
+    "api.ts: `requiresAuth(path)` gate on the `_isLoggedOut` short-circuit is CORRECT and preserves the login-after-logout flow — the previous fix that broke APK login had removed this gate, this iteration reinstates it. Verified /auth/login, /auth/anonymous, /auth/google-session, /auth/firebase-session all match the PUBLIC_PATH_PREFIXES list.",
+    "api.ts: the 3-retry SecureStore read (immediate + 100ms + 300ms) is bounded and cheap (<= 400ms worst case) — no risk of blocking the UI thread on cold start. Good backoff.",
+    "api.ts: dropping the client-side 401 on null token means the backend now decides. Public endpoints (categories/professions/legal/feuds/archive/hashtags) all return 200 without a token (verified in 23 tests), so the feed no longer empties on a transient SecureStore null. Correct call.",
+    "api.ts: PUBLIC_PATH_PREFIXES uses `startsWith`, but '/auth/signup' does NOT startsWith '/auth/register' (see action_items). This is a bug latent since the endpoint was renamed signup→register at some point in history. Same for '/auth/resend-verification' vs '/auth/verify' (the latter matches '/auth/verify-email' but not resend).",
+    "index.tsx / archive.tsx / top.tsx / notifications.tsx: removeClippedSubviews removal verified on live web preview — FlashList still renders 6 home cards + 82 archive cards without any clipping/blanking anomalies in a 30s idle window. FlashList's default recycling behaviour is enough for these list sizes."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter143_secure_store_race_fix.py (new, 23 tests)"
+  ],
+  "success_rate": {"backend": "100% (23/23)", "frontend": "100% of exercised flows (auth screen load, anonymous login, terms/NDA accept, home feed render, 30s idle persistence, archive screen render)"},
+  "seed_data_creation": "Creates ephemeral anonymous users via /api/auth/anonymous (no persistence beyond the test module). Creates one TEST_-prefixed comment + one TEST_-prefixed reply on a random feud and deletes them within the same test — no residual data.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "The race-condition bug being fixed manifests ONLY on Android APK / mobile browser deployed builds after ~60s of continuous use — expo-secure-store transient null on getToken(). It CANNOT be reliably reproduced in web preview, so we validate the FIX by contract: (a) backend tolerates no-Authorization on all list endpoints (23-test suite pins this down), (b) the client-side 401 short-circuit only fires on explicit logout, (c) all auth paths in PUBLIC_PATH_PREFIXES actually match the endpoints the api client calls. If reproducing on APK, watch for a stale `_isLoggedOut=true` after a manual logout — the fix keeps the requiresAuth() gate so login/anonymous still go through.",
+  "rca_of_issue": "Prior code short-circuited request() with ApiError(401) whenever getToken() returned null. On Android, expo-secure-store has a transient write-behind window where getToken() can return null for tens of milliseconds even after a successful setToken(). During background polling (Notifications/Messaging tick every 30s), a null-token read would produce a fake 401. Consumers catch and setFeuds([]) → all lists empty in cascade. Fix retries getToken() up to 3x with 0/100/300ms backoff before deciding — and only bails out on the explicit `_isLoggedOut` flag. Backend now decides the auth outcome (200 optional-auth or real 401), which the 23-test suite has pinned down."
+}

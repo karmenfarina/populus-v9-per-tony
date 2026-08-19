@@ -84,6 +84,7 @@ function friendlyValidation(item: any): string {
 // screen during logout).
 const PUBLIC_PATH_PREFIXES = [
   '/auth/login',
+  '/auth/signup',
   '/auth/register',
   '/auth/anonymous',
   '/auth/google',
@@ -91,6 +92,7 @@ const PUBLIC_PATH_PREFIXES = [
   '/auth/firebase',
   '/auth/session',
   '/auth/verify',
+  '/auth/resend-verification',
   '/health',
   '/categories',
   '/professions',
@@ -101,24 +103,37 @@ function requiresAuth(path: string): boolean {
 }
 
 async function request<T = any>(path: string, opts: RequestInit = {}): Promise<T> {
-  const token = await getToken();
-  // Logout short-circuit — never hit the network with a stale/absent
-  // token FOR AUTHENTICATED PATHS. Public paths (login/signup/anon/
-  // legal/health…) must ALWAYS be allowed to fire even without a
-  // token, otherwise a user who just logged out (or was booted by a
-  // 401) cannot log back in — the `_isLoggedOut` flag would raise
-  // "Sessione terminata" for `/auth/anonymous` too. So the guard
-  // now checks `requiresAuth(path)` in both branches.
+  // Retry SecureStore fino a 3 volte con backoff (0/100/300ms). Su
+  // Android SecureStore ha race di write-behind + null transienti dopo
+  // ~1min di uso continuativo: getToken() puo' ritornare null
+  // MOMENTANEAMENTE anche se il token e' persistito correttamente.
+  // Se short-circuitassimo un 401 su questo null fasullo, i consumer
+  // (feed home, archivio, hashtag, categorie) catcherebbero e
+  // farebbero setFeuds([]) — svuotando tutte le liste in cascata dopo
+  // ~1 min di sessione. Bug riproducibile SOLO su APK Android e su
+  // mobile browser deployed, non su preview web desktop.
+  let token = await getToken();
+  if (!token && !_isLoggedOut) {
+    for (const delay of [100, 300]) {
+      await _sleep(delay);
+      token = await getToken();
+      if (token) break;
+    }
+  }
+  // Short-circuit SOLO su logout esplicito. NON piu' su "token null":
+  // se dopo i retry il token e' ancora null MA l'utente non ha fatto
+  // logout esplicito, si procede COMUNQUE senza header Authorization.
+  // Il backend decidera' (401 reale se serve token, dati anonimi se
+  // l'endpoint e' optional-auth). Questo elimina il 401 fasullo che
+  // svuotava le liste sull'APK.
   //
-  // Two conditions we still want to short-circuit:
-  //   1. Explicit logout in flight (`_isLoggedOut === true`) AND the
-  //      path is authenticated. Prevents background pollers
-  //      (notifications/messaging every 30 s) from hitting the
-  //      backend with a bare header during teardown.
-  //   2. No token in storage AND the path is authenticated. Same
-  //      protection, different trigger (fresh cold start, expired
-  //      session, etc.).
-  if ((_isLoggedOut || !token) && requiresAuth(path)) {
+  // NB: il gate `requiresAuth(path)` resta OBBLIGATORIO anche qui:
+  // senza di esso, un utente che ha appena fatto logout esplicito
+  // non potrebbe piu' fare login (perche' /auth/login e' pubblico ma
+  // `_isLoggedOut` sarebbe true — se togliessimo il gate, lancerebbe
+  // "Sessione terminata" anche sul login stesso, rompendo l'accesso
+  // in APK come nel fix precedente).
+  if (_isLoggedOut && requiresAuth(path)) {
     throw new ApiError(401, 'Sessione terminata');
   }
   const headers: Record<string, string> = {

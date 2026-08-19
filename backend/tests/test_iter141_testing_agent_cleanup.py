@@ -26,7 +26,7 @@ MONGO_URL = os.environ["MONGO_URL"]
 DB_NAME = os.environ["DB_NAME"]
 BASE_URL = os.environ.get(
     "EXPO_PUBLIC_BACKEND_URL",
-    "https://bot-burst-fix.preview.emergentagent.com",
+    "https://feud-governance.preview.emergentagent.com",
 ).rstrip("/")
 
 # Sentinel identifiers for this test run — unique so we can clean up if needed.

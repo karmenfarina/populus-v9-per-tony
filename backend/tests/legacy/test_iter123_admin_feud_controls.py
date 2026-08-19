@@ -27,7 +27,7 @@ from dotenv import load_dotenv
 load_dotenv('/app/backend/.env')
 
 BASE_URL = os.environ['EXPO_PUBLIC_BACKEND_URL'].rstrip('/') if os.environ.get('EXPO_PUBLIC_BACKEND_URL') else \
-    'https://bot-burst-fix.preview.emergentagent.com'
+    'https://feud-governance.preview.emergentagent.com'
 JWT_SECRET = os.environ['JWT_SECRET']
 API = f"{BASE_URL}/api"
 

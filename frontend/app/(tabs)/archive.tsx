@@ -300,7 +300,6 @@ export default function ArchiveScreen() {
               scrollLockRef.current = false;
             }}
             scrollEventThrottle={120}
-            removeClippedSubviews
             ListEmptyComponent={ArchiveEmpty}
             renderItem={({ item }) => (
               <FeudCard

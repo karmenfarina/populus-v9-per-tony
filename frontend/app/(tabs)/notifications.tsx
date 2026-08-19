@@ -134,7 +134,6 @@ export default function NotificationsScreen() {
           ItemSeparatorComponent={NotifSeparator}
           onScroll={(e) => setShowTopBtn(e.nativeEvent.contentOffset.y > 500)}
           scrollEventThrottle={120}
-          removeClippedSubviews
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.brandSecondary} />}
           renderItem={({ item }) => {
             const iconName = ICONS[item.type] || "notifications";

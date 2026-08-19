@@ -141,7 +141,6 @@ export default function TopScreen() {
           ItemSeparatorComponent={Separator}
           onScroll={handleScroll}
           scrollEventThrottle={120}
-          removeClippedSubviews
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
