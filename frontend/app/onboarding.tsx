@@ -8,7 +8,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "@/src/api";
 import { useAuth } from "@/src/auth/AuthContext";
-import { colors, spacing, font } from "@/src/theme";
+import { colors, spacing, font, radius } from "@/src/theme";
 import { cachedGet } from "@/src/utils/clientCache";
 import { sanitizeNicknameInput, validateNickname, NICKNAME_HINT, NICKNAME_MAX } from "@/src/utils/nickname";
 
@@ -429,7 +429,7 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.surface },
   header: { padding: spacing.lg, borderBottomWidth: 2, borderColor: colors.border, backgroundColor: colors.surfaceInverse },
   progressRow: { flexDirection: "row", gap: spacing.xs, marginBottom: spacing.md },
-  progressDot: { flex: 1, height: 6, backgroundColor: colors.surfaceTertiary, borderWidth: 2, borderColor: colors.border },
+  progressDot: { flex: 1, height: 6, backgroundColor: colors.surfaceTertiary, borderWidth: 2, borderColor: colors.border, borderRadius: radius.sm },
   progressDotOn: { backgroundColor: colors.brandSecondary },
   brand: { fontSize: font.sizes.xxxl, fontWeight: "500", letterSpacing: 1, color: colors.onSurfaceInverse },
   tagline: { fontSize: font.sizes.sm, letterSpacing: 2, color: colors.brandSecondary, marginTop: spacing.xs },
@@ -440,35 +440,35 @@ const styles = StyleSheet.create({
   hintTiny: { fontSize: font.sizes.xs, color: colors.muted, letterSpacing: 1 },
   nickInputWrap: {
     flexDirection: "row", alignItems: "center", borderWidth: 2, borderColor: colors.border,
-    backgroundColor: colors.surfaceSecondary, paddingHorizontal: spacing.md,
+    backgroundColor: colors.surfaceSecondary, paddingHorizontal: spacing.md, borderRadius: radius.md,
   },
   nickAt: { fontSize: font.sizes.xxl, color: colors.brandPrimary, marginRight: 4, fontWeight: "500" },
   nickInput: { flex: 1, paddingVertical: spacing.md, fontSize: font.sizes.lg, color: colors.onSurface },
-  selectAllRow: { alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 6, borderWidth: 2, borderColor: colors.border, paddingHorizontal: spacing.sm, paddingVertical: 6, backgroundColor: colors.surfaceSecondary },
+  selectAllRow: { alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 6, borderWidth: 2, borderColor: colors.border, paddingHorizontal: spacing.sm, paddingVertical: 6, backgroundColor: colors.surfaceSecondary, borderRadius: radius.pill },
   selectAllTxt: { fontSize: font.sizes.xs, letterSpacing: 1, fontWeight: "500", color: colors.onSurface },
   catsGrid: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
-  catChip: { flexDirection: "row", alignItems: "center", gap: 8, borderWidth: 2, borderColor: colors.border, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, backgroundColor: colors.surfaceSecondary },
+  catChip: { flexDirection: "row", alignItems: "center", gap: 8, borderWidth: 2, borderColor: colors.border, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, backgroundColor: colors.surfaceSecondary, borderRadius: radius.pill },
   catChipOn: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
   catTxt: { fontSize: font.sizes.base, color: colors.onSurface, fontWeight: "500" },
   catTxtOn: { color: colors.onBrandPrimary },
   fieldLabel: { fontSize: font.sizes.xs, letterSpacing: 2, color: colors.muted },
-  input: { borderWidth: 2, borderColor: colors.border, padding: spacing.md, fontSize: font.sizes.lg, color: colors.onSurface, backgroundColor: colors.surfaceSecondary, marginTop: 4 },
+  input: { borderWidth: 2, borderColor: colors.border, padding: spacing.md, fontSize: font.sizes.lg, color: colors.onSurface, backgroundColor: colors.surfaceSecondary, marginTop: 4, borderRadius: radius.md },
   sexRow: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, marginTop: 4 },
-  sexBtn: { borderWidth: 2, borderColor: colors.border, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, backgroundColor: colors.surfaceSecondary },
+  sexBtn: { borderWidth: 2, borderColor: colors.border, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, backgroundColor: colors.surfaceSecondary, borderRadius: radius.pill },
   sexBtnOn: { backgroundColor: colors.brandSecondary, borderColor: colors.brandSecondary },
   sexTxt: { fontSize: font.sizes.base, color: colors.onSurface },
   sexTxtOn: { color: colors.onBrandSecondary, fontWeight: "500" },
-  regionBtn: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", borderWidth: 2, borderColor: colors.border, padding: spacing.md, backgroundColor: colors.surfaceSecondary },
+  regionBtn: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", borderWidth: 2, borderColor: colors.border, padding: spacing.md, backgroundColor: colors.surfaceSecondary, borderRadius: radius.md },
   regionBtnTxt: { fontSize: font.sizes.lg, color: colors.onSurface },
-  error: { color: colors.error, borderWidth: 2, borderColor: colors.error, padding: spacing.sm, fontSize: font.sizes.base },
+  error: { color: colors.error, borderWidth: 2, borderColor: colors.error, padding: spacing.sm, fontSize: font.sizes.base, borderRadius: radius.md },
   footer: { flexDirection: "row", gap: spacing.sm, padding: spacing.lg, borderTopWidth: 2, borderColor: colors.border, backgroundColor: colors.surface },
-  backBtn: { flexDirection: "row", alignItems: "center", gap: 4, borderWidth: 2, borderColor: colors.border, paddingVertical: spacing.md, paddingHorizontal: spacing.lg, backgroundColor: colors.surfaceSecondary },
+  backBtn: { flexDirection: "row", alignItems: "center", gap: 4, borderWidth: 2, borderColor: colors.border, paddingVertical: spacing.md, paddingHorizontal: spacing.lg, backgroundColor: colors.surfaceSecondary, borderRadius: radius.pill },
   backTxt: { fontSize: font.sizes.base, letterSpacing: 2, fontWeight: "500", color: colors.onSurface },
-  cta: { flex: 1, backgroundColor: colors.brandPrimary, borderWidth: 2, borderColor: colors.border, paddingVertical: spacing.md, alignItems: "center", justifyContent: "center" },
+  cta: { flex: 1, backgroundColor: colors.brandPrimary, borderWidth: 2, borderColor: colors.border, paddingVertical: spacing.md, alignItems: "center", justifyContent: "center", borderRadius: radius.pill },
   ctaFull: { flex: 1 },
   ctaTxt: { color: colors.onBrandPrimary, fontSize: font.sizes.lg, letterSpacing: 2, fontWeight: "500" },
   modalBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" },
-  modalSheet: { backgroundColor: colors.surface, borderTopWidth: 2, borderColor: colors.border, maxHeight: "75%" },
+  modalSheet: { backgroundColor: colors.surface, borderTopWidth: 2, borderColor: colors.border, maxHeight: "75%", borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, overflow: "hidden" },
   modalHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: spacing.lg, borderBottomWidth: 2, borderColor: colors.border, backgroundColor: colors.surfaceInverse },
   modalTitle: { color: colors.onSurfaceInverse, fontSize: font.sizes.xl, letterSpacing: 2, fontWeight: "500" },
   regionItem: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: spacing.md, borderBottomWidth: 1, borderColor: colors.border },
