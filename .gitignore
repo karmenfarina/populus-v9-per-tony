@@ -80,9 +80,20 @@ memory/test_credentials.md
 
 # Mobile development
 android-sdk/
-.env
-.env.*
-*.env
+# Env files NOT ignored: Emergent deploy pipeline needs backend/.env and
+# frontend/.env at build time to inject secrets. Store only placeholder
+# values in the tracked .env; real production secrets are injected via
+# the Emergent secret panel and override the placeholders at runtime.
 credentials.json
 *.key
 .credentials
+
+# Firebase service account (NEVER commit)
+# In production, inject via env var FIREBASE_SERVICE_ACCOUNT_JSON from the
+# secret panel. For local dev, keep the file OUT of the repo at all times.
+firebase-service-account.json
+backend/firebase-service-account.json
+**/firebase-service-account*.json
+# iOS Firebase config (also treated as secret)
+GoogleService-Info.plist
+**/GoogleService-Info.plist

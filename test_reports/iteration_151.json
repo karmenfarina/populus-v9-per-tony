@@ -1,0 +1,44 @@
+{
+  "summary": "Iter 151 — Validated the two deployment health-check follow-ups. (1) BLOCKER 'verify-email relativo' in _send_verification_email (server.py:858): when FRONTEND_BASE_URL is empty, the function now generates+persists the token, logs the exact warning 'FRONTEND_BASE_URL missing — verification email NOT sent' and returns early WITHOUT calling Resend or building a relative link. Verified via both HTTP end-to-end (signup → user created unverified, warning appears in supervisor log, no Resend call, /auth/login returns 403 email_not_verified as before, /auth/resend-verification returns generic 200) AND in-process with mocked httpx.AsyncClient. (2) When FRONTEND_BASE_URL is set, the function still reaches the Resend POST branch and builds an ABSOLUTE link 'https://<base>/verify-email?token=<raw>' — asserted via mocked httpx client capturing the outbound payload. (3) verify-email regression: seeded a token directly in Mongo, POST /api/auth/verify-email returns 200 with JWT + user, flips email_verified=True and consumes the token. Invalid token returns 400. (4) resend-verification returns the generic-success payload even when base is missing (matches account-enumeration mitigation). (5) Frontend lockfile hygiene: package-lock.json confirmed removed; yarn.lock present + non-empty; Expo dev server RUNNING (supervisor). Total: 15 HTTP + 4 in-process = 19 tests PASS. Also re-ran iter149 + iter150 harness for full regression: 45/45 PASS. Backend + Expo services healthy.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter151_verify_email_missing_base.py",
+    "/app/backend/tests/test_iter151_send_email_branches.py",
+    "/app/test_reports/pytest/iter151.xml",
+    "/app/test_reports/pytest/iter151_branches.xml",
+    "/app/test_reports/pytest/iter151_full.xml"
+  ],
+  "action_items": [
+    "Optional: once the deployment env sets FRONTEND_BASE_URL (or exports EXPO_PUBLIC_BACKEND_URL into the backend process — currently it only lives in frontend/.env), an unverified user can hit /auth/resend-verification and finally receive the email. Consider surfacing FRONTEND_BASE_URL as an explicit env var in supervisor's [program:backend] environment= or backend/.env so ops can spot it at a glance (right now the constant reads EXPO_PUBLIC_BACKEND_URL but that variable is NOT exposed to the backend supervisor entry).",
+    "Optional UX hint (client-side): today signup returns { requires_verification: True } even when the backend didn't actually send an email. On the client the user is told 'Ti abbiamo inviato una email di conferma' which is misleading when FRONTEND_BASE_URL is empty. Consider adding a diagnostic flag in the response (e.g. email_dispatch_deferred: true) so the sign-up screen can render 'Attivazione temporaneamente non disponibile — riprova in seguito con Reinvia email' instead of promising an email that never lands.",
+    "Carry-over from iter149/150 (owner-only, still pending): rotate Firebase service account + drop the on-disk JSON path, purge repo history."
+  ],
+  "critical_code_review_comments": [
+    "server.py:884-898 — Guard is correct and idempotent: token is still generated/persisted BEFORE the base check so a subsequent resend (with base configured) will find no stale token in the way. Warning message is explicit and mentions the remediation ('Set FRONTEND_BASE_URL to your deployed Expo web origin'). Good.",
+    "server.py:856 — FRONTEND_BASE_URL = os.environ.get('EXPO_PUBLIC_BACKEND_URL') or os.environ.get('FRONTEND_BASE_URL') or '' — note that EXPO_PUBLIC_BACKEND_URL is a Metro-injected client-side var that lives in frontend/.env, not backend/.env. The backend process (supervisor env + backend/.env) has NEITHER var set, so in the current preview the constant resolves to '' and every signup deliberately skips email dispatch. This is the intended fail-safe but the ordering of env vars implies the deployer only needs to set one — worth documenting.",
+    "server.py:1007-1026 — resend-verification correctly returns the generic message and rate-limits per (email, IP). The internal _send_verification_email failure is swallowed so a caller can't distinguish 'sent' from 'aborted-due-to-missing-base' — this is desirable from a security POV (no enumeration).",
+    "frontend/package.json — packageManager field is 'yarn@...' and yarn.lock is the single source of truth. Verified package-lock.json is absent; npm install would resurrect one on a dev machine — worth adding 'engines.npm: \"never\"' or an .npmrc { engine-strict, package-manager-strict } if we want to enforce this."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter151_verify_email_missing_base.py (NEW — 15 HTTP-level tests)",
+    "/app/backend/tests/test_iter151_send_email_branches.py (NEW — 4 in-process branch tests mocking httpx/db)"
+  ],
+  "success_rate": {
+    "backend": "100% (19/19 iter151 + 45/45 iter151+iter150+iter149 regression)",
+    "frontend": "not tested (backend-only iteration per review request); Expo service confirmed RUNNING under supervisor and http://localhost:3000 responds 200"
+  },
+  "seed_data_creation": "None persistent. Tests create ephemeral email accounts (TEST_iter151_missing_*@example.com, TEST_iter151_verify_*@example.com) and a synthetic verification_tokens row; all are deleted by the cleanup steps at the end of each class.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "iter151 has TWO test files. `test_iter151_verify_email_missing_base.py` drives the running backend via HTTP + reads /var/log/supervisor/backend.err.log to assert the warning is emitted — if you re-run outside preview, adjust the log path. `test_iter151_send_email_branches.py` imports server.py in-process to exercise the three branches (missing base / base+key / base+no-key) with a mocked httpx AsyncClient; it patches server_mod.db as a MagicMock because attribute-patching on Motor collections doesn't intercept __getattr__ dispatch (Motor uses dynamic method lookup). The 'FRONTEND_BASE_URL missing' warning assertion depends on the current backend process NOT having EXPO_PUBLIC_BACKEND_URL / FRONTEND_BASE_URL set — verified via `grep` on backend/.env and supervisor conf. If future ops export FRONTEND_BASE_URL to the backend, the first-class test 'test_module_reads_base_url_on_import' will fail; flip the assertion to `!= ''` or make it env-conditional.",
+  "rca_of_issue": "Not a bug fix regression this iteration; the fix (empty-base guard + package-lock removal) was already applied by main agent. Testing agent confirmed correctness of the new branch via both black-box HTTP and in-process white-box tests. Reproduction of the previously-broken behaviour: pre-fix, `_send_verification_email` built `link = '/verify-email?token=<raw>'` when base was '' and passed it to Resend which happily delivered an email with an unclickable relative URL — email clients treat the anchor as a relative link to their own domain (Gmail, etc.), so the user could never verify. New behaviour: same input path aborts with a WARN log, the account stays in requires_verification state, and the user can resend once ops configure FRONTEND_BASE_URL."
+}

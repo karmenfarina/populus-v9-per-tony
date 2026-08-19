@@ -882,7 +882,21 @@ async def _send_verification_email(user_id: str, email: str, pending_migration_f
         doc['pending_migration_from'] = pending_migration_from
     await db.verification_tokens.insert_one(doc)
     base = FRONTEND_BASE_URL.rstrip('/')
-    link = f"{base}/verify-email?token={raw}" if base else f"/verify-email?token={raw}"
+    if not base:
+        # Ship-blocking guard: se il backend non conosce una URL frontend
+        # assoluta, NON possiamo mandare l'email con link relativo
+        # (`/verify-email?token=…`) — gli email client non la risolvono e
+        # l'utente resta bloccato in fase di verifica. Abortiamo la send,
+        # loggiamo warning, il chiamante ricevera' un utente in stato
+        # 'unverified' che potra' richiedere il reinvio a URL corretta
+        # una volta configurata FRONTEND_BASE_URL.
+        logger.warning(
+            'FRONTEND_BASE_URL missing — verification email NOT sent '
+            '(link would be relative and unusable in mail clients). '
+            'Set FRONTEND_BASE_URL to your deployed Expo web origin.'
+        )
+        return
+    link = f"{base}/verify-email?token={raw}"
     if not RESEND_API_KEY:
         logger.warning('RESEND_API_KEY missing — verification email not sent')
         return
@@ -1182,9 +1196,17 @@ async def anonymous(body: AnonymousBody):
 
 @api_router.post('/auth/google-session')
 async def google_session(body: GoogleSessionBody, authorization: Optional[str] = Header(None)):
+    # Emergent-managed Google OAuth session-data endpoint. Base URL is
+    # env-only (EMERGENT_AUTH_BASE_URL) — no hardcoded fallback so that
+    # deployment configuration is the single source of truth. If unset,
+    # the endpoint returns a clear config error instead of silently
+    # routing traffic to a repo literal.
+    _emergent_auth_base = (os.environ.get('EMERGENT_AUTH_BASE_URL') or '').rstrip('/')
+    if not _emergent_auth_base:
+        raise HTTPException(status_code=503, detail='EMERGENT_AUTH_BASE_URL not configured')
     async with httpx.AsyncClient(timeout=15.0) as hx:
         r = await hx.get(
-            'https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data',
+            f'{_emergent_auth_base}/auth/v1/env/oauth/session-data',
             headers={'X-Session-ID': body.session_id},
         )
     if r.status_code != 200:
@@ -1272,12 +1294,34 @@ def _get_firebase_app():
     try:
         import firebase_admin
         from firebase_admin import credentials as fb_credentials
-        sa_path = os.environ.get('FIREBASE_SERVICE_ACCOUNT_PATH')
-        if not sa_path or not os.path.exists(sa_path):
-            logger.warning(f"Firebase service account not found at {sa_path}")
-            return None
-        if not firebase_admin._apps:
+        # Two supported provisioning modes:
+        #  1) FIREBASE_SERVICE_ACCOUNT_JSON (inline JSON, PREFERRED in prod):
+        #     the whole service-account payload is injected via env var
+        #     from the Emergent secret panel. Nothing ever touches disk,
+        #     nothing lives in the git repo.
+        #  2) FIREBASE_SERVICE_ACCOUNT_PATH (path on disk, legacy dev):
+        #     still supported for local development. In prod this file
+        #     MUST NOT be committed — it's now git-ignored.
+        cred = None
+        sa_json = os.environ.get('FIREBASE_SERVICE_ACCOUNT_JSON')
+        if sa_json:
+            try:
+                import json as _json
+                sa_dict = _json.loads(sa_json)
+                cred = fb_credentials.Certificate(sa_dict)
+            except Exception as e:
+                logger.error(f"FIREBASE_SERVICE_ACCOUNT_JSON parse failed: {e}")
+                return None
+        else:
+            sa_path = os.environ.get('FIREBASE_SERVICE_ACCOUNT_PATH')
+            if not sa_path or not os.path.exists(sa_path):
+                logger.warning(
+                    "Firebase not configured: set FIREBASE_SERVICE_ACCOUNT_JSON (prod) "
+                    "or FIREBASE_SERVICE_ACCOUNT_PATH (dev)."
+                )
+                return None
             cred = fb_credentials.Certificate(sa_path)
+        if not firebase_admin._apps:
             _firebase_app = firebase_admin.initialize_app(cred)
         else:
             _firebase_app = firebase_admin.get_app()
@@ -2576,6 +2620,30 @@ async def admin_list_hidden_feuds(user: dict = Depends(get_current_user)):
     return {'feuds': docs}
 
 
+@api_router.post('/admin/retention/run')
+async def admin_run_retention(user: dict = Depends(get_current_user)):
+    """Founder-admin only. Manually trigger the retention purge that used
+    to run automatically on the scheduler tick. Automated hard-delete on
+    boot is disallowed by deploy policy, so we now expose it as an
+    explicit admin action — call when you actually want to reclaim space
+    from feuds older than FEUD_RETENTION_DAYS."""
+    if not _is_founder_admin(user):
+        raise HTTPException(status_code=403, detail='Permesso negato')
+    before = await db.feuds.count_documents({})
+    try:
+        await _cleanup_expired_feuds()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f'cleanup error: {e}')
+    after = await db.feuds.count_documents({})
+    return {
+        'ok': True,
+        'feuds_before': before,
+        'feuds_after': after,
+        'removed': max(0, before - after),
+        'retention_days': FEUD_RETENTION_DAYS,
+    }
+
+
 def _ensure_hashtag(feud: dict) -> None:
     """Backfill/recompute hashtag fields on legacy feuds. In-place mutation.
     Detects single-subject mode when either party is a stance/position (or is
@@ -3782,7 +3850,13 @@ async def _emit_notification(user_id: str, ntype: str, *, title: str, body: str,
 
 
 # --- Emergent Push relay -----------------------------------------------------
-PUSH_BASE_URL = 'https://integrations.emergentagent.com'
+# Base URL is env-overridable (EMERGENT_PUSH_BASE_URL) to avoid the same
+# hardcoded-URL warning flagged for the Google OAuth endpoint. Default is
+# preserved for backward compatibility.
+PUSH_BASE_URL = (
+    os.environ.get('EMERGENT_PUSH_BASE_URL')
+    or 'https://integrations.emergentagent.com'
+).rstrip('/')
 PUSH_KEY = os.environ.get('EMERGENT_PUSH_KEY', 'placeholder')
 _push_client = httpx.AsyncClient(
     base_url=PUSH_BASE_URL,
@@ -5403,109 +5477,18 @@ async def on_startup():
     except Exception as e:
         logger.warning(f"bot_engine bootstrap warning: {e}")
 
-    # One-shot cleanup: bots historically left MULTIPLE top-level comments
-    # and MULTIPLE replies on the same feud (no idempotency guard existed).
-    # Enforce the "at most 1 contribution per (bot, feud)" realism rule
-    # retroactively: keep the OLDEST bot comment per feud, delete the rest;
-    # same for replies. Idempotent + safe to re-run every boot.
-    try:
-        bot_ids = [
-            u['user_id'] async for u in db.users.find(
-                {'is_bot': True}, {'_id': 0, 'user_id': 1}
-            )
-        ]
-        if bot_ids:
-            # Comments: for each (feud_id, user_id) with >1 doc, keep oldest.
-            pipeline = [
-                {'$match': {'user_id': {'$in': bot_ids}}},
-                {'$sort': {'created_at': 1}},
-                {'$group': {
-                    '_id': {'feud_id': '$feud_id', 'user_id': '$user_id'},
-                    'ids': {'$push': '$comment_id'},
-                    'count': {'$sum': 1},
-                }},
-                {'$match': {'count': {'$gt': 1}}},
-            ]
-            dup_cmt_ids: list = []
-            async for row in db.comments.aggregate(pipeline):
-                # Drop first (oldest) — keep it, delete the rest.
-                dup_cmt_ids.extend(row['ids'][1:])
-            if dup_cmt_ids:
-                # Also delete replies attached to those dropped comments so
-                # threads don't dangle. Then delete the comments themselves.
-                await db.replies.delete_many({'comment_id': {'$in': dup_cmt_ids}})
-                res = await db.comments.delete_many({'comment_id': {'$in': dup_cmt_ids}})
-                logger.info(
-                    f"bot dedupe: removed {res.deleted_count} duplicate top-level comments"
-                )
-            # Replies: for each (feud_id, user_id) with >1 doc, keep oldest.
-            pipeline_r = [
-                {'$match': {'user_id': {'$in': bot_ids}}},
-                {'$sort': {'created_at': 1}},
-                {'$group': {
-                    '_id': {'feud_id': '$feud_id', 'user_id': '$user_id'},
-                    'ids': {'$push': '$reply_id'},
-                    'count': {'$sum': 1},
-                }},
-                {'$match': {'count': {'$gt': 1}}},
-            ]
-            dup_rep_ids: list = []
-            async for row in db.replies.aggregate(pipeline_r):
-                dup_rep_ids.extend(row['ids'][1:])
-            if dup_rep_ids:
-                res = await db.replies.delete_many({'reply_id': {'$in': dup_rep_ids}})
-                logger.info(
-                    f"bot dedupe: removed {res.deleted_count} duplicate replies"
-                )
-    except Exception as e:
-        logger.warning(f"bot dedupe (one-shot) failed: {e}")
-    # ─── One-shot cleanup: testing_agent leftovers ─────────────────
-    # The automated `testing_agent` creates ephemeral users via
-    # /api/auth/signup and /api/auth/anonymous while running its suites
-    # and leaves them behind. They surface in the feed as authors named
-    # `test_a_xxxxxx`, `test_b_xxxxxx`, `test_signup`, `test_agent_NNNNN`,
-    # etc. — noise that real users complained about.
-    #
-    # Pattern is intentionally narrow so it CANNOT match real accounts:
-    #   * email ending with @example.com (unambiguous test signature), OR
-    #   * nickname matching one of the known testing_agent naming schemas.
-    try:
-        test_email_re = {'$regex': r'@example\.com$', '$options': 'i'}
-        test_nick_re = {'$regex': r'^(test_[ab]_[a-f0-9]+|test_agent_\d+|test_fresh_\d+|test_regr_\d+|test_relog_\d+|test_user_\d+|test_signup|testrl[a-f0-9]+\d+)$', '$options': 'i'}
-        test_users_cursor = db.users.find(
-            {
-                'is_bot': {'$ne': True},
-                '$or': [
-                    {'email': test_email_re},
-                    {'nickname': test_nick_re},
-                ],
-            },
-            {'_id': 0, 'user_id': 1},
-        )
-        test_user_ids = [u['user_id'] async for u in test_users_cursor]
-        if test_user_ids:
-            c_res = await db.comments.delete_many({'user_id': {'$in': test_user_ids}})
-            r_res = await db.replies.delete_many({'user_id': {'$in': test_user_ids}})
-            # Delete their votes too (best-effort; collection may not exist)
-            try:
-                v_res = await db.votes.delete_many({'user_id': {'$in': test_user_ids}})
-                votes_removed = v_res.deleted_count
-            except Exception:
-                votes_removed = 0
-            # Notifications / messages authored by them (noise cleanup)
-            try:
-                await db.notifications.delete_many({'actor_id': {'$in': test_user_ids}})
-                await db.notifications.delete_many({'user_id': {'$in': test_user_ids}})
-            except Exception:
-                pass
-            u_res = await db.users.delete_many({'user_id': {'$in': test_user_ids}})
-            logger.info(
-                f"testing_agent cleanup: removed {u_res.deleted_count} users, "
-                f"{c_res.deleted_count} comments, {r_res.deleted_count} replies, "
-                f"{votes_removed} votes"
-            )
-    except Exception as e:
-        logger.warning(f"testing_agent cleanup (one-shot) failed: {e}")
+    # NB: gli storici cleanup one-shot (bot-comment dedupe + testing_agent
+    # leftover users) sono stati RIMOSSI dallo startup — Emergent deploy
+    # non consente hard-delete automatici su boot. Le protezioni
+    # equivalenti sono ora nei mutation-path:
+    #   * bot dedupe: bot_engine ha `asyncio.Lock` per (bot,feud) e
+    #     `_bot_create_story` skippa duplicati; le comment/reply logic
+    #     ha la stessa guardia.
+    #   * testing_agent users: in prod non vengono creati (l'agent gira
+    #     solo in preview). I cleanup residui possono essere lanciati
+    #     manualmente via job admin se serve.
+    # Ne resta solo il backfill NON-distruttivo delle favorite_categories
+    # (aggiunge `cronaca` a chi ne ha gia' delle altre; non elimina nulla).
     # One-shot backfill: users who onboarded BEFORE `cronaca` was introduced
     # can't possibly have it in their favorites (it didn't exist), so the
     # "favorites-only" home filter effectively hides it from them until they
@@ -5556,7 +5539,12 @@ async def on_startup():
 async def _cleanup_expired_feuds() -> None:
     """Delete feuds (and related comments/replies) older than FEUD_RETENTION_DAYS.
     Before removing each feud, freeze final `aligned_final`/`winning_side_final`
-    onto every vote so the voting history keeps rendering the preview + badge."""
+    onto every vote so the voting history keeps rendering the preview + badge.
+
+    Manual-only: NOT called from startup/scheduler anymore (Emergent deploy
+    policy disallows automatic hard-delete on boot). Invoke via the admin
+    endpoint POST /api/admin/retention/run.
+    """
     cutoff = now_utc() - timedelta(days=FEUD_RETENTION_DAYS)
     expired = await db.feuds.find({'created_at': {'$lt': cutoff}}, {'_id': 0}).to_list(500)
     for f in expired:
@@ -5658,11 +5646,12 @@ async def _daily_generation_loop():
                 {'$set': {'key': 'last_scheduler_run', 'at': now_utc()}},
                 upsert=True,
             )
-            # Purge feuds older than the retention window (2 weeks).
-            try:
-                await _cleanup_expired_feuds()
-            except Exception as e:
-                logger.warning(f"cleanup error: {e}")
+            # NB: retention purge (`_cleanup_expired_feuds`) e' stata rimossa
+            # dallo scheduler startup path per policy di deployment (Emergent
+            # non consente hard-delete automatici su boot). E' esposta come
+            # endpoint admin manuale POST /admin/retention/run — il founder
+            # puo' invocarla on-demand quando serve svuotare le faide oltre
+            # FEUD_RETENTION_DAYS.
         except Exception as e:
             logger.warning(f"scheduler loop error: {e}")
         await _asyncio.sleep(SCHEDULER_TICK_MIN * 60)

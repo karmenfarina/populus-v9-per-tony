@@ -1,0 +1,41 @@
+{
+  "summary": "Iter 150 — Validated the boot-hygiene fixes on the live preview backend. (1) ENV_MALFORMED: FIREBASE_SERVICE_ACCOUNT_PATH (backend/.env) and METRO_CACHE_ROOT (frontend/.env) now quoted; python-dotenv strips quotes so paths still resolve — firebase-session returns 401 (SA loaded) on invalid token, never 500. (2) DESTRUCTIVE_DB_STARTUP: `bot dedupe one-shot` and `testing_agent leftover users cleanup` blocks REMOVED from startup (verified: latest supervisor boot has ZERO 'bot dedupe: removed' / 'testing_agent cleanup: removed' log lines). (3) `_cleanup_expired_feuds` is now GATED on `AUTO_CLEANUP_ENABLED` (unset in current env → early-return no-op); feuds count is preserved (176 feuds still present, matching pre-fix boot log). (4) All iter149 auth+feed regressions still green (firebase-session graceful, google-session env-override, /api/auth/{me,anonymous,signup,login}). (5) iter148 feed dedupe (19 tests) + admin comment moderation (12 tests) still green. TOTAL: 57/57 backend tests PASS. Backend service healthy under supervisor, no crashes at boot after the destructive-block removal.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter150_boot_cleanup_gated.py",
+    "/app/test_reports/pytest/iter150.xml",
+    "/app/test_reports/pytest/iter150_full.xml"
+  ],
+  "action_items": [
+    "Manual key rotation (still pending from iter149 — OWNER ONLY): rotate Firebase service account on Firebase Console → upload new JSON as FIREBASE_SERVICE_ACCOUNT_JSON env var via Emergent secret panel → delete /app/backend/firebase-service-account.json from disk and remove the FIREBASE_SERVICE_ACCOUNT_PATH line from backend/.env once JSON var is live. Then `git rm --cached backend/firebase-service-account.json` + `git commit` to purge from repo history (BFG or filter-repo recommended for old commits).",
+    "Optional cleanup ops: since `_cleanup_expired_feuds` is now opt-in, if the owner ever wants to trim old feuds, they must set AUTO_CLEANUP_ENABLED=true env var (temporarily or via admin job) — currently the scheduler still calls it every X minutes but it no-ops. Consider a one-off admin endpoint (/api/admin/feuds/cleanup-expired) instead of leaving the scheduler wiring hot but silent.",
+    "Optional: mirror the env-override pattern for PUSH_BASE_URL (server.py:3815, still hardcoded 'https://integrations.emergentagent.com')."
+  ],
+  "critical_code_review_comments": [
+    "server.py:5442-5453 — Comment block documenting the removed one-shots is well-written and preserves the historical context for future maintainers. Good practice.",
+    "server.py:5501-5512 — _cleanup_expired_feuds gate is correct: uses os.environ.get with strip+lower and a set of accepted truthy values. Early-return AFTER the docstring means the function is a clean no-op when unset. Note: the scheduler at line 5616 STILL calls it on every tick — this is fine (no-op is cheap) but consider removing the call altogether if the opt-in path is via a manual admin trigger.",
+    "backend/.env:11 — FIREBASE_SERVICE_ACCOUNT_PATH quoting is a non-functional change (dotenv strips quotes), but Emergent's env-var validator apparently required it. Confirmed no side-effect: SA still loads at boot (firebase-session returns 401 on bad token, not 503).",
+    ".gitignore rules for .env / .env.* / *.env removed as noted: Emergent deploy needs .env files in repo to bake secrets at build time. Verified via `grep -n` — no such rules present. Risk trade-off is documented (owner-only manual key rotation still pending)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter150_boot_cleanup_gated.py (NEW — 15 tests, 14 executable + 1 endpoint-shape-dependent)"
+  ],
+  "success_rate": {
+    "backend": "100% (57/57 across iter150 + iter149 + iter148 + admin_comment_moderation)",
+    "frontend": "not tested (backend-only iteration per review request)"
+  },
+  "seed_data_creation": "None persistent. Tests create ephemeral anon users (nickname prefix tst150_) and unverified email signups (iter150_*@example.com); no long-lived accounts.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "iter150 test file is a boot-hygiene regression harness. The 'no destructive log lines' tests rely on tail-ing /var/log/supervisor/backend.err.log and splitting at the LAST 'Started reloader process' marker — if supervisor rotates logs or you restart the backend during a test session, re-run the whole file (not individual tests) to keep the log window consistent. The 'test_bot_count_still_100' test hits GET /api/admin/bots/state which returns the fleet state; expects total==100 (upserted at every boot by bot_engine.init()). Note: the FIREBASE_SERVICE_ACCOUNT_JSON env-override branch of _get_firebase_app was tested in iter149 (test_firebase_session_invalid_token_no_crash accepts both 401 and 503) — iter150 assumes the CURRENT preview env still uses the PATH branch and asserts 401 is returned, which is stricter and validates the env-var quoting fix. If preview switches to JSON-env, that specific assertion may need to relax to (401, 503).",
+  "rca_of_issue": "N/A — regression validation of an already-applied fix. Reproduction path (for future reference): boot backend fresh → tail supervisor log → confirm the strings 'bot dedupe: removed', 'testing_agent cleanup: removed', 'feud retention: removed' do NOT appear in the log window since 'Started reloader process'. All three were verified absent in the last boot at 21:06:48."
+}
