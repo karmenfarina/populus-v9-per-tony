@@ -47,6 +47,16 @@ export default function HomeFeed() {
   // Ref + visibility flag driving the floating "back to top" pill on the feed.
   const feedListRef = useRef<FlashListRef<Feud>>(null);
   const [showTopBtn, setShowTopBtn] = useState(false);
+  // Scroll offset SEPARATO per categoria: sfogliando "gossip" e tornando su
+  // "tutte" volevamo che la home riaprisse alla posizione dove l'avevamo
+  // lasciata in "tutte" (non a quella di "gossip"). La FlashList di per se'
+  // mantiene un solo offset globale perche' e' la stessa istanza a mostrare
+  // dataset diversi; qui memorizziamo un offset per chip e lo ripristiniamo
+  // esplicitamente al cambio categoria. `selectedRef` serve a `handleScroll`
+  // per scrivere sempre nella chiave corretta senza dipendere da closure
+  // vecchie.
+  const scrollByCategoryRef = useRef<Record<string, number>>({});
+  const selectedRef = useRef<string>((params.category as string) || "all");
   const { width: winW } = useWindowDimensions();
   const centerChip = useCallback((id: string, animated = true) => {
     const l = chipLayouts.current[id];
@@ -54,7 +64,7 @@ export default function HomeFeed() {
     const target = Math.max(0, l.x - winW / 2 + l.w / 2);
     chipScrollRef.current.scrollTo({ x: target, animated });
   }, [winW]);
-  useEffect(() => { centerChip(selected); }, [selected, centerChip]);
+  useEffect(() => { centerChip(selected); selectedRef.current = selected; }, [selected, centerChip]);
 
   const load = useCallback(async (category: string) => {
     // TTL 60s: latenza percepita sul cambio chip era il bug #1 in APK
@@ -143,11 +153,22 @@ export default function HomeFeed() {
   }, [load, prefetchCategories, user?.favorite_categories]);
 
   const onSelect = async (id: string) => {
+    if (id === selected) return;
+    // NB: `handleScroll` ha gia' salvato l'offset corrente per la categoria
+    // che stiamo lasciando (aggiornato ad ogni scroll event). Cambiamo chip e
+    // ripristiniamo l'offset salvato per la NUOVA categoria (0 la prima volta).
     setSelected(id);
     setSearchOpen(false); setSearchQ("");
-    // Silent refresh on category switch — no indicator, previous list stays
-    // visible until the new data arrives.
-    try { await load(id); } catch { /* keep the old list */ }
+    try {
+      await load(id);
+      const saved = scrollByCategoryRef.current[id] ?? 0;
+      // 1 frame perche' React renderizzi FlashList con i nuovi feuds prima
+      // dello scrollToOffset — altrimenti l'offset scatta su una lista che
+      // deve ancora aggiornarsi.
+      requestAnimationFrame(() => {
+        try { feedListRef.current?.scrollToOffset({ offset: saved, animated: false }); } catch { /* silent */ }
+      });
+    } catch { /* keep the old list */ }
   };
 
   const onRefresh = async () => {
@@ -263,6 +284,11 @@ export default function HomeFeed() {
     const y = e.nativeEvent.contentOffset.y;
     scrollAtTopRef.current = y <= 4;
     setShowTopBtn(y > 600);
+    // Memorizzo l'offset sotto la categoria correntemente selezionata cosi'
+    // che al prossimo `onSelect(...)` possiamo tornarci esattamente. Uso il
+    // ref (non `selected`) per evitare closure vecchie: la callback e'
+    // memoizzata con dep vuoto.
+    scrollByCategoryRef.current[selectedRef.current] = y;
   }, []);
   const ItemSeparator = useMemo(() => {
     const Sep = () => <View style={{ height: spacing.lg }} />;

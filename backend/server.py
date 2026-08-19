@@ -2067,7 +2067,55 @@ async def _list_feuds_impl(category: Optional[str], user: Optional[dict]):
     q['created_at'] = {'$gte': now_utc() - timedelta(hours=24)}
     # Never surface admin-hidden (soft-deleted) feuds in the live feed.
     q['is_hidden'] = {'$ne': True}
-    docs = await db.feuds.find(q, {'_id': 0}).sort('created_at', -1).to_list(200)
+    raw = await db.feuds.find(q, {'_id': 0}).sort('created_at', -1).to_list(400)
+    # ── Deduplicazione live-feed ──────────────────────────────────────────
+    # Bug osservato in APK: coppie di faide quasi identiche (es. "Ranucci
+    # querela la magistrata Forleo per un post Facebook" vs "... un post
+    # su Facebook", "Google Pixel 11 ..." x2, "Palio di ..." x2). Sono
+    # entrate in DB legittimamente (ingestion RSS + bot che scrivono
+    # sullo stesso soggetto in parallelo), ma il feed live NON deve
+    # mostrarle in cascata: la piu' recente vince, le altre restano
+    # accessibili via archivio e ricerca.
+    #
+    # Signature = prime 2 parole "significative" del titolo (lower, no
+    # punteggiatura, no stopword italiane, no parole <2 char). Fallback
+    # al subject se il titolo non produce >=2 parole utili. E' il
+    # segnale piu' robusto: `subject` variava fra le 3 coppie osservate
+    # (subject AI-generato per soggetto specifico) mentre l'incipit del
+    # titolo restava identico, permettendo il match.
+    _STOP_IT = {
+        'la','il','le','lo','gli','i','un','una','uno','di','a','al','allo',
+        'alla','del','della','dei','delle','degli','e','o','ma','con','su',
+        'per','tra','fra','in','da','ne','ci','vi','che','chi','cui','se',
+        'come','quando','dove','mentre','vs','contro','ha','ho','hai',
+    }
+    _punct_re = re.compile(r"[^\w\s]", flags=re.UNICODE)
+
+    def _sig(d: dict) -> str:
+        title = (d.get('title') or '').strip().lower()
+        title = _punct_re.sub(' ', title)
+        words = [w for w in title.split() if w and w not in _STOP_IT and len(w) >= 2]
+        if len(words) >= 2:
+            return ' '.join(words[:2])
+        subj = (d.get('subject') or '').strip().lower()
+        if subj and len(subj) >= 3:
+            return subj
+        return words[0] if words else ''
+
+    docs: list = []
+    seen_sigs: set = set()
+    for d in raw:
+        sig = _sig(d)
+        if not sig:
+            docs.append(d)
+            continue
+        if sig in seen_sigs:
+            continue
+        seen_sigs.add(sig)
+        docs.append(d)
+        if len(docs) >= 200:
+            break
+    # ──────────────────────────────────────────────────────────────────────
     voted_map: dict = {}
     if user and docs:
         voted_map = await _user_voted_ids(user['user_id'], [d['feud_id'] for d in docs])

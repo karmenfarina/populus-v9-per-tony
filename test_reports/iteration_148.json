@@ -1,0 +1,35 @@
+{
+  "summary": "Iter 148 — validated Task 1 (per-category scroll offset persistence in /app/frontend/app/(tabs)/index.tsx) via code review + UI smoke, and Task 2 (server-side live-feed dedupe in _list_feuds_impl) via 19 pytest tests over the public URL. All 19 backend tests PASS. Historical duplicate pairs (Ranucci/Forleo, Google Pixel 11, Palio) each appear at most ONCE in the live feed. Archive continues to include duplicates (dedupe correctly scoped to _list_feuds_impl only). /api/feuds/{id} still works, payload shape (my_vote, percentuali, hashtags) preserved. Login/signup/anonymous + /api/stories/feed + admin gate regressions OK. Frontend scroll persistence logic is correctly implemented (scrollByCategoryRef + selectedRef + requestAnimationFrame + scrollToOffset), but reliable end-to-end scroll simulation on FlashList's virtualized web preview is not feasible — visual verification should be done on the APK / mobile client.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter148_feed_dedupe.py",
+    "/app/test_reports/pytest/iter148.xml"
+  ],
+  "action_items": [
+    "Task 1 scroll persistence: on the next APK build, manually verify: scroll 'gossip' to ~500px, switch to 'tutte', scroll 'tutte' to ~200px, switch to 'gossip' → should snap back to 500px; switch back to 'tutte' → should snap back to 200px. Web preview cannot reliably drive FlashList virtual scroller.",
+    "Optional hardening for Task 2: signature currently uses first 2 significant words; consider adding a subject-based fallback that ALWAYS checks (not only when title has <2 significant words) so near-duplicates whose first-two words happen to differ (rare) are also caught."
+  ],
+  "critical_code_review_comments": [
+    "server.py::_list_feuds_impl (~L2062-2128): dedupe is well-scoped, batch expanded to 400 with cap at 200, stopword list is reasonable. Signature computation is O(n) over feuds. Anon cache TTL 10s means dedupe changes propagate within 10s.",
+    "index.tsx (L58-59, 155-172, 283-292): scrollByCategoryRef + selectedRef pattern is correct and closure-safe (handleScroll is memoized with []). requestAnimationFrame gives FlashList one frame to reconcile new data before scrollToOffset — matches best-practice for FlashList/FlatList imperative scroll after data swap.",
+    "Note: onSelect awaits load(id) but load() reads from cachedGet — if cache hit, restore is effectively synchronous (still safe under rAF); if cache miss, load resolves before scroll restore. Good."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter148_feed_dedupe.py (NEW)"
+  ],
+  "success_rate": {"backend": "100% (19/19)", "frontend": "smoke only — home loads, chips render, gossip FlashList scrolls; full scroll-persistence UX not testable in web preview"},
+  "seed_data_creation": "None. Tests create ephemeral anonymous + email accounts prefixed with 'tst_'/test_*@example.com; the email signup only requires verification so no long-lived users are created.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend live-feed dedupe test is in /app/backend/tests/test_iter148_feed_dedupe.py — reuse it as a regression harness for any future feed changes. The `_sig()` helper mirrors the backend logic exactly. If future changes alter signature semantics, update the helper here to stay in sync.",
+  "rca_of_issue": "N/A — this iteration is a fix-verification. Both fixes verified to work: (1) frontend scroll ref logic reviewed and correct; (2) backend dedupe verified via 19 tests including specific historical duplicate patterns from user report."
+}
