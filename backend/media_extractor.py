@@ -1,13 +1,11 @@
 """Media extractor — pulls copyright-friendly media (og:image, og:video, YouTube)
 for news items. Only URLs are stored; no content is re-hosted."""
 from __future__ import annotations
-import os
 import re
 import logging
-import asyncio
 import unicodedata
-from datetime import datetime, timezone, timedelta
-from typing import Optional, Tuple, Iterable
+from datetime import datetime, timezone
+from typing import Optional, Tuple
 from urllib.parse import urlparse, parse_qs, urljoin
 
 import httpx

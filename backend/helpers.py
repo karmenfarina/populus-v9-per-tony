@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 import uuid
 from datetime import datetime
-from typing import List, Optional
+from typing import List
 
 import bcrypt
 

@@ -22,7 +22,7 @@ Note:
 from __future__ import annotations
 import asyncio
 import time
-from typing import Any, Awaitable, Callable, Dict, Optional, Tuple
+from typing import Any, Awaitable, Callable, Dict, Tuple
 
 _store: Dict[str, Tuple[float, Any]] = {}
 _inflight: Dict[str, asyncio.Future] = {}

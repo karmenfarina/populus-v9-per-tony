@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from typing import Optional, List
 
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends
 from pydantic import BaseModel, Field
 
 import bot_engine

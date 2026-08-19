@@ -46,7 +46,7 @@ import statistics
 from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Dict, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi import APIRouter, Depends, HTTPException
 
 logger = logging.getLogger(__name__)
 
