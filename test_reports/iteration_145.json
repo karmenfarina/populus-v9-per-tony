@@ -1,0 +1,34 @@
+{
+  "summary": "Iter145 — Task 2 visibility fix follow-up. ALL 13/13 backend tests PASS. The `_story_is_visible_to` bypass for `is_bot=True` (server.py:7285-7300) is correctly implemented and closes the Task 2 gap without introducing regressions on real-user stories. Verified end-to-end: (1) admin + fresh non-admin users both now see bot authors in /api/stories/feed (bucket ≤8 confirmed, order deterministic per UTC day, no duplicates with circle); (2) /api/stories/user/{bot_id} returns the bot's stories to any real caller (admin + fresh user); (3) non-bot users OUT of the caller's circle stay invisible in both /feed and /user/{id} endpoints — Cerchia gate intact; (4) positive control confirmed: non-bot user IN circle becomes visible; (5) story_hidden_viewers still blocks, tested both for bot authors (viewer added to bot's hidden list → NOT visible) and for non-bot authors even WITH friendship edge; (6) hot_news fanout regression from Task 3 still working (admin gets notification, 0 bots receive it). No new issues found.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter145_task2_visibility.py",
+    "/app/test_reports/pytest/iter145_task2.xml"
+  ],
+  "action_items": [
+    "None from Task 2 follow-up — fix is complete and correctly implemented. Main agent can close this iteration.",
+    "LOW (carried from iter144) — cosmetic RN deprecation warnings (shadow*/textShadow*/pointerEvents) still present; not blocking."
+  ],
+  "critical_code_review_comments": [
+    "server.py::_story_is_visible_to — implementation is clean and matches the recommended patch exactly: (a) self-view short-circuit first, (b) single DB read pulling only is_bot + story_hidden_viewers, (c) hidden_viewers check runs BEFORE the bot bypass so hidden takes precedence over the broadcast rule (correct precedence for both bots and non-bots), (d) friendship edge check only for real-user authors. Inline comment block (lines 7285-7291) documents the product intent clearly.",
+    "The single-read + set-membership check for hidden_viewers is efficient — no extra DB round-trip for the common bot case (no friendships lookup happens at all when is_bot=True and viewer not hidden)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter145_task2_visibility.py (new, 13 tests, all pass)"
+  ],
+  "success_rate": {"backend": "100% (13/13 passed)", "frontend": "not tested (backend-only request)"},
+  "seed_data_creation": "One ephemeral email/pwd user per run (test_iter145_<hex>@populus-it.co) created via /api/auth/signup, then email_verified flipped to True in DB before token minting. Ephemeral non-bot authors (TEST_iter145_author_<hex>, TEST_iter145_friend_<hex>, TEST_iter145_hidauth_<hex>) inserted with their own stories to test circle-gate and hidden-viewers regressions; all cleaned up in test finally blocks. One TEST_-prefixed feud + 3 comments for hot_news fanout, cleaned up. Bot authors' story_hidden_viewers list mutated briefly then rolled back with $pull. Admin's favorite_categories/push_notifications set to include 'gossip' (idempotent). No bot user_id created or deleted.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Task 2 (bot stories visibility) is fully closed as of iter145. Fix lives at server.py:7285-7300 and correctly bypasses friendship for is_bot=True authors while honoring story_hidden_viewers and keeping real-user stories gated. Test suite at backend/tests/test_iter145_task2_visibility.py covers all 5 regression scenarios listed in the request; reuse it if any future change touches _story_is_visible_to, stories_feed's bot bucket, or /api/stories/user/{id}. Note: previous iteration's gotchas still apply — notifications use `type` (not `kind`), lock collection is `notification_locks` with key format `{user_id}:{kind}:{YYYY-MM-DD}`.",
+  "rca_of_issue": "N/A — no bug found this iteration. Previous iter144 RCA: friendship gate in _story_is_visible_to was dropping bot stories after the query stage. Fix in iter145 adds a 3-line bypass (is_bot=True → return True) placed AFTER the hidden_viewers check so hiding still takes precedence. Regression tests confirm real users out of circle are still gated. All 13 test cases exercise the exact permutations: (self, bot, real-in-circle, real-out-of-circle) × (hidden, not-hidden)."
+}

@@ -57,18 +57,20 @@ export default function HomeFeed() {
   useEffect(() => { centerChip(selected); }, [selected, centerChip]);
 
   const load = useCallback(async (category: string) => {
-    // Categorie sono immutabili nella sessione: la cache client 10min evita
-    // di richiamare più volte /categories nella navigazione tra tab.
-    // Per il feed usiamo cache 5s: la focus-effect già ha un throttle di 3s,
-    // ma questo protegge da re-mount rapido (es. cambio orientamento).
+    // TTL 60s: latenza percepita sul cambio chip era il bug #1 in APK
+    // (~1s+ per rispuntare la lista). 60s copre il caso tipico dello
+    // "sfoglio a bruciapelo" senza far invecchiare troppo il contenuto
+    // — pull-to-refresh invalida comunque immediatamente. Le liste
+    // /feuds e /feuds/hype sono quelle che vengono rifornite dal
+    // backend molto piu' frequentemente di ogni singolo utente.
     if (category === "hype") {
-      const res = await cachedGet(`feuds:hype`, 5000, () => api.feudsHype());
+      const res = await cachedGet(`feuds:hype`, 60_000, () => api.feudsHype());
       setFeuds(res.feuds);
       return;
     }
     const res = await cachedGet(
       `feuds:${category}`,
-      5000,
+      60_000,
       () => api.feuds(category)
     );
     // NB: nessun filtro client-side sulle categorie preferite. Il backend
@@ -77,6 +79,33 @@ export default function HomeFeed() {
     // matchava (bug osservato su APK dopo ~1min di uso, in combinazione
     // col 401 fasullo di SecureStore).
     setFeuds(res.feuds);
+  }, []);
+
+  // Prefetch silenzioso in background: scalda la cache per le categorie
+  // preferite (+ hype) subito dopo aver caricato la selezione iniziale.
+  // Cosi' il primo tap su una chip nel giro di ~1min restituisce dati
+  // istantanei dalla cache, invece di aspettare una round-trip di rete.
+  // Fire-and-forget: nessun setState finche' l'utente non seleziona
+  // davvero quella chip. Concorrenza limitata a 3 in parallelo per non
+  // saturare la rete su APK Android/3G.
+  const prefetchCategories = useCallback(async (ids: string[]) => {
+    const uniq = Array.from(new Set(ids.filter((id) => id && id !== 'all')));
+    const CONCURRENCY = 3;
+    let idx = 0;
+    const worker = async () => {
+      while (idx < uniq.length) {
+        const my = idx++;
+        const id = uniq[my];
+        try {
+          if (id === 'hype') {
+            await cachedGet(`feuds:hype`, 60_000, () => api.feudsHype());
+          } else {
+            await cachedGet(`feuds:${id}`, 60_000, () => api.feuds(id));
+          }
+        } catch { /* silent: prefetch failure never blocks UI */ }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, uniq.length) }, worker));
   }, []);
 
   useEffect(() => {
@@ -106,9 +135,12 @@ export default function HomeFeed() {
         setSelected("all");
         await load("all");
         lastLoadAtRef.current = Date.now();
+        // Non-blocking prefetch of Hype + favorite chips: warms
+        // `cachedGet` so subsequent taps are instant. Never awaited.
+        prefetchCategories(['hype', ...favs]);
       } finally { setLoading(false); }
     })();
-  }, [load, user?.favorite_categories]);
+  }, [load, prefetchCategories, user?.favorite_categories]);
 
   const onSelect = async (id: string) => {
     setSelected(id);

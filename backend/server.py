@@ -76,6 +76,7 @@ import httpx
 import json
 import re
 import time
+import random
 import html as html_lib
 import re as _re
 import feedparser
@@ -3884,12 +3885,23 @@ async def _fanout_hot_news(feud: dict) -> None:
     cat = fresh.get('category')
     if not cat:
         return
+    # Recipient filter:
+    #  • must have `cat` in `favorite_categories`
+    #  • not anonymous, not a bot
+    #  • push enabled or unset (default is enabled)
+    #
+    # NB: intentionally NO filter on `is_dev_account`. That flag turned
+    # out to be set on ALL bots (redundant with `is_bot`) AND on the
+    # founder-admin himself + a couple of test emails owned by the
+    # founder — i.e. exactly the users that MUST receive the push.
+    # `is_bot` already excludes automated accounts; the extra flag was
+    # silently swallowing every real-user hot_news notification (0/54
+    # feuds that hit the threshold ever emitted a push). Removed.
     users = await db.users.find(
         {
             'favorite_categories': cat,
             'is_anonymous': {'$ne': True},
             'is_bot': {'$ne': True},
-            'is_dev_account': {'$ne': True},
             '$or': [{'push_notifications': True}, {'push_notifications': {'$exists': False}}],
         },
         {'_id': 0, 'user_id': 1},
@@ -7270,20 +7282,28 @@ async def _story_is_visible_to(story: dict, viewer_id: Optional[str]) -> bool:
         return True
     if not viewer_id:
         return False
-    # Viewer must have the author in their friendships (i.e. Cerchia).
+    # Bot authors bypass the friendship gate: bots publish stories about
+    # feuds they "get hit by" (see bot_engine._bot_create_story) and the
+    # product intent is that these stories surface to every real user
+    # via the "featured bot bucket" in stories_feed. Real user stories
+    # remain gated by the Cerchia — bots are the ONLY circle-free
+    # authors. Hidden-viewers list still applies (bots don't hide
+    # anyone today but the check is cheap and future-proof).
+    author = await db.users.find_one(
+        {'user_id': author_id},
+        {'_id': 0, 'is_bot': 1, 'story_hidden_viewers': 1},
+    ) or {}
+    hidden = set(author.get('story_hidden_viewers') or [])
+    if viewer_id in hidden:
+        return False
+    if author.get('is_bot'):
+        return True
+    # Real-user authors: viewer must have them in their friendships (Cerchia).
     edge = await db.friendships.find_one(
         {'user_id': viewer_id, 'friend_id': author_id},
         {'_id': 0, 'user_id': 1},
     )
     if not edge:
-        return False
-    # Author must not have hidden this viewer.
-    author = await db.users.find_one(
-        {'user_id': author_id},
-        {'_id': 0, 'story_hidden_viewers': 1},
-    )
-    hidden = set((author or {}).get('story_hidden_viewers') or [])
-    if viewer_id in hidden:
         return False
     return True
 
@@ -7524,8 +7544,40 @@ async def stories_feed(user: dict = Depends(get_current_user)):
     ).to_list(500)
     circle_ids = [r['friend_id'] for r in circle_rows if r.get('friend_id')]
 
-    # Collect all authors we may show: self + circle.
-    author_ids = list({me, *circle_ids})
+    # Collect all authors we may show: self + circle + a rotating mix
+    # of bot authors. Bot stories exist in the DB (created by the bot
+    # engine when a bot "gets hit" by a feud — see
+    # bot_engine._bot_create_story) but WITHOUT this bot bucket they'd
+    # be invisible in-app: the story feed used to only show self+circle,
+    # and no real user adds bots to their circle. We now pick a stable
+    # random slice of bot authors (deterministic per calling user +
+    # UTC day so the top strip doesn't reshuffle on every pull-to-
+    # refresh, but rotates day-to-day for variety).
+    circle_set = set(circle_ids)
+    bot_authors_with_active_story = await db.stories.distinct(
+        'user_id',
+        {'expires_at': {'$gt': now}},
+    )
+    bot_only = []
+    if bot_authors_with_active_story:
+        # Filter to actual bots and NOT in caller circle (circle bots
+        # would already be included above).
+        bot_rows = await db.users.find(
+            {'user_id': {'$in': bot_authors_with_active_story}, 'is_bot': True},
+            {'_id': 0, 'user_id': 1},
+        ).to_list(1000)
+        bot_only = [b['user_id'] for b in bot_rows if b['user_id'] not in circle_set and b['user_id'] != me]
+    # Stable shuffle: seed = hash(caller + YYYY-MM-DD). Same user +
+    # same day → same order → no visual jitter across the day.
+    import hashlib as _hashlib
+    seed_src = f"{me}:{now.strftime('%Y-%m-%d')}"
+    seed_int = int(_hashlib.md5(seed_src.encode('utf-8')).hexdigest(), 16)
+    rng = random.Random(seed_int)
+    rng.shuffle(bot_only)
+    # Cap the bot bucket to keep the top strip manageable — 8 authors
+    # is plenty and matches the count real users typically curate.
+    bot_only = bot_only[:8]
+    author_ids = list({me, *circle_ids, *bot_only})
     cur = db.stories.find(
         {'user_id': {'$in': author_ids}, 'expires_at': {'$gt': now}},
         {'_id': 0},

@@ -1,0 +1,44 @@
+{
+  "summary": "Iter144 — validated 3 fixes + regression sweep. RESULT: 13/16 backend tests PASS, 2 SKIPPED (anon-restriction expected), 1 FAILED — Task 2 (bot stories in /api/stories/feed) fix is INCOMPLETE. Task 1 (frontend TTL 60s + prefetch): frontend loads cleanly, login screen intact (EMAIL/GOOGLE/ANONIMO tabs render), no red-screen error, home /api/feuds + /api/feuds/hype + per-category endpoints all healthy. Task 2 (bot stories bucket): PARTIALLY BROKEN — bots are correctly pulled into the initial DB query (`author_ids` union), but the subsequent visibility loop calls `_story_is_visible_to()` which REQUIRES a `friendships` edge from viewer→author for any non-self author; bots have no such edge, so all bot-authored stories get discarded → /api/stories/feed still returns 0 groups for the admin (confirmed via direct API call: 55 distinct bot story authors in DB, 0 in the response). Task 3 (hot_news fanout): FIX VERIFIED end-to-end — after removing the `is_dev_account` filter, admin now receives hot_news notifications when a feud crosses the threshold; bots correctly do NOT receive them (guarded by `is_bot: {$ne: True}`). Query shape confirmed to match exactly the 3 real dev-account users (carlofarinapayme, gli.ispettori, carloilmissatore).",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "GET /api/stories/feed",
+        "issue": "Task 2 fix is INCOMPLETE. The new 'random bot bucket' in stories_feed() (lines 7539-7572) correctly adds up to 8 bot authors to `author_ids` and pulls their stories in the primary query at line 7573. However, the visibility loop at lines 7581-7587 calls `_story_is_visible_to(s, me)` for every non-self story, and that helper (lines 7267-7300) hard-requires a `friendships` edge {user_id: viewer, friend_id: author} — which no bot has (real users never add bots to their circle). Effect: every bot story is silently dropped inside the loop and the endpoint still returns 0 groups for real users (verified live via direct API call to /api/stories/feed as admin: 55 distinct bot story authors in DB, 0 in response). FIX: in the loop, skip the visibility check when the author is one of the bot-bucket entries (or short-circuit `_story_is_visible_to` to return True when the author `is_bot: True` — bot stories are public by design). Reference: /app/backend/server.py:7581-7587 + /app/backend/server.py:7267-7300.",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter144_three_bugs.py",
+    "/app/test_reports/pytest/iter144_three_bugs.xml"
+  ],
+  "action_items": [
+    "HIGH — Fix Task 2 (bot stories not surfacing). Two clean options: (A) in `_story_is_visible_to` return True when `author.is_bot is True` (bot stories are broadcast, no circle gate); or (B) inside stories_feed's grouping loop, wrap the visibility check with `if author_id in bot_only_set: visible = True`. Option A is 3 lines and also unlocks /api/stories/user/{author_id} and mark_story_viewed for bots (both call the same helper). Recommend (A). Test to run after fix: `pytest backend/tests/test_iter144_three_bugs.py::TestStoriesFeedBotBucket -v`.",
+    "LOW — Cosmetic: RN console still logs `shadow*`/`textShadow*`/`props.pointerEvents deprecated` warnings on every mount. Unchanged from iter143 report, worth a follow-up sweep."
+  ],
+  "critical_code_review_comments": [
+    "server.py::stories_feed — bot-bucket idea is right (deterministic md5+random.Random per (me, UTC day) is a clean, dependency-free stable-shuffle) but the grouping loop still gates every non-self story through `_story_is_visible_to`, which requires a friendships edge — so no bot ever passes. The fix DOES NOT actually surface bot stories. Missed integration point.",
+    "server.py::_fanout_hot_news — is_dev_account filter removal is correct and end-to-end verified (admin now receives). The comment explaining WHY is exemplary and prevents regressions. Note: the query still filters `is_anonymous: {$ne: True}`, which is fine (anon users shouldn't get pushes), and `is_bot: {$ne: True}`, which correctly excludes the 100 bots. Preview DB confirmed 3 matching users exactly as documented.",
+    "server.py::_daily_lock — collection is `notification_locks` (not `daily_locks`) — future test authors, note this. Key format is `{user_id}:{kind}:{YYYY-MM-DD}`.",
+    "server.py::_emit_notification — persists field as `type` (not `kind`); future test authors querying notifications must use `type: 'hot_news'` not `kind: 'hot_news'`.",
+    "frontend/app/(tabs)/index.tsx::prefetchCategories — concurrency=3 fire-and-forget prefetch is correct and non-blocking. TTL 60s in `cachedGet` matches. No lint errors introduced. `useEffect` dep array `[load, prefetchCategories, user?.favorite_categories]` is fine because both callbacks are memoized with stable deps.",
+    "clientCache.ts — stale-while-error (5min) is a nice safety net for the exact APK bug being fixed, since a transient network dip on a chip switch will now serve the last-known list instead of emptying the FlashList."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter144_three_bugs.py (new, 16 tests)"
+  ],
+  "success_rate": {"backend": "81% (13/16 passed, 2 legitimate skips, 1 real failure)", "frontend": "100% of smoke checks (login screen loads, 3 auth tabs visible, no red-screen)"},
+  "seed_data_creation": "One ephemeral email/pwd user per run (TEST_iter144_<hex>@populus-it.co) via /api/auth/signup — flagged with TEST_ prefix. Admin user (carlofarinapayme@gmail.com) is upserted directly to db.users if not already present (upsert pattern from iter142). One TEST_-prefixed feud (`TEST_iter144_<hex>`) + 3 TEST_ comments created to exercise hot_news threshold, cleaned up in the test's finally block. Admin's favorite_categories set to include 'gossip' and any existing notification_locks with prefix `{admin_id}:hot_news:` wiped before the fanout test to make the assertion deterministic. No bot data touched.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Task 2 bot-stories fix is broken at the visibility-check level, not at the query level. If the main agent applies the recommended patch (short-circuit _story_is_visible_to when author.is_bot), rerun `pytest backend/tests/test_iter144_three_bugs.py::TestStoriesFeedBotBucket -v`. All 5 tests in that class should pass; specifically `test_admin_feed_contains_bot_authors` must go green and `test_bot_bucket_capped_at_8` will de-skip (currently skips because the feed is empty). Task 1 & Task 3 are done. Note collection/field gotchas in the code-review comments above (notification `type` not `kind`; `notification_locks` not `daily_locks`).",
+  "rca_of_issue": "Task 2 root cause: two-stage filter. Stage 1 (author_ids query at server.py:7573) correctly includes bot authors from the new `bot_only` bucket. Stage 2 (visibility loop at server.py:7581) applies `_story_is_visible_to(s, me)` to every non-self story, which unconditionally returns False when there's no friendships edge from viewer to author. The author→viewer friendship check was designed for the ORIGINAL feed rule (self+circle only) — the new bot bucket was bolted onto stage 1 without adjusting stage 2, so bot stories are pulled from the DB then dropped in-memory. Mitigation: either (A) treat is_bot=True as a public-broadcast bypass inside _story_is_visible_to, or (B) build a `bot_only_set` in stories_feed and skip the visibility check for members of that set. Option A also fixes /api/stories/user/{author_id} and /api/stories/{story_id}/view for the same authors, which otherwise 403 for the same reason."
+}
