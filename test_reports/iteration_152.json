@@ -1,0 +1,39 @@
+{
+  "summary": "Iter 152 — Firebase service-account key rotation validated. New key (project_id=populus-1f567, client_email=firebase-adminsdk-fbsvc@populus-1f567.iam.gserviceaccount.com) is loaded by the running backend via FIREBASE_SERVICE_ACCOUNT_PATH=/app/backend/firebase-service-account.json. /api/auth/firebase-session with a bogus token returns HTTP 401 with detail 'Token Firebase non valido: Illegal Firebase custom token...' — this is a SDK-level rejection (not 503/500) proving Firebase Admin SDK initialized correctly with the new credentials. Missing/empty body returns 422 (Pydantic validation). Supervisor backend log (post last boot marker) contains ZERO occurrences of 'Firebase init failed', 'FIREBASE_SERVICE_ACCOUNT_JSON parse failed' or 'Firebase not configured'. Regression: email/password login, signup (requires_verification path), anonymous session, google-session (bogus session → 4xx not 5xx), /api/feuds, /api/stories/feed, /api/notifications, admin gate (no token → 401/403, with X-Admin-Key populus-admin-42b8f3 → <500), retention endpoints correctly rejecting unauthenticated POSTs. Iter150/151 guarantees re-verified: no destructive-startup log entries, verify-email requires token / rejects garbage, resend-verification returns generic 200, package-lock.json absent. Total: 21 new (iter152) + 41 regression (iter149+iter150+iter151) = 62/62 PASS in 8.8s.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter152_firebase_rotation.py",
+    "/app/test_reports/pytest/iter152.xml",
+    "/app/test_reports/pytest/iter152_regression.xml"
+  ],
+  "action_items": [
+    "Optional (owner-only, still pending from iter149-151): consider migrating from FIREBASE_SERVICE_ACCOUNT_PATH (file on disk) to FIREBASE_SERVICE_ACCOUNT_JSON (env var) in production so the rotated service-account payload never lives in the container filesystem. _get_firebase_app() already prefers _JSON over _PATH when both are set — only the ops config needs to change.",
+    "Optional: purge git history of the previous firebase-service-account.json commit if it was ever checked in (the file is now in .gitignore per iter149 but the old key may still be reachable via `git log`)."
+  ],
+  "critical_code_review_comments": [
+    "server.py:1290-1331 — _get_firebase_app() dual-mode is idempotent (globals cache the initialized app) and correctly returns None on parse failure so /firebase-session gracefully degrades to 503 rather than crashing the whole route. Confirmed working with the rotated key on the file-path branch.",
+    "server.py:1338-1347 — 401 message includes the raw firebase-admin exception ('Token Firebase non valido: ...'). This leaks the SDK's internal error string to the client (e.g. 'Illegal Firebase custom token: Wrong number of segments'). Acceptable for a 4xx (helps client-side debugging), but consider truncating in production if you don't want to reveal SDK internals.",
+    "backend/.env:11-12 — FIREBASE_SERVICE_ACCOUNT_PATH and FIREBASE_PROJECT_ID (populus-1f567) match the JSON payload. FIREBASE_PROJECT_ID is not read by _get_firebase_app() itself (firebase-admin infers it from the cert) — it's set only for reference/future use. No functional impact."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter152_firebase_rotation.py (NEW — 21 tests)"
+  ],
+  "success_rate": {
+    "backend": "100% (21/21 iter152 + 41/41 iter149+150+151 regression = 62/62)",
+    "frontend": "not tested (backend-only iteration per review request); Expo service confirmed RUNNING under supervisor"
+  },
+  "seed_data_creation": "None persistent. Ephemeral TEST_iter152_*@example.com signup + iter152anon* anonymous users are created via /auth/signup and /auth/anonymous — flagged as dev accounts via existing DEV_ACCOUNT_EMAILS logic if pattern matches (not here). No production data touched.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "The new Firebase service-account key (populus-1f567) is loaded from /app/backend/firebase-service-account.json via FIREBASE_SERVICE_ACCOUNT_PATH in backend/.env. If the main agent later switches to FIREBASE_SERVICE_ACCOUNT_JSON env-var mode, re-run test_iter152_firebase_rotation.py::TestBackendBootHealth::test_service_account_file_valid — that specific test will need to be adjusted (or skipped when path is unset). All firebase-session tests are token-shape only; verifying a REAL Firebase-issued ID token requires a live iOS/Android device or the Firebase Auth REST emulator (out of scope for this container). BASE_URL fallback in tests: EXPO_BACKEND_URL → EXPO_PUBLIC_BACKEND_URL → https://feud-governance.preview.emergentagent.com.",
+  "rca_of_issue": "Not a bug this iteration. Main agent rotated the Firebase service-account key + shipped a new GoogleService-Info.plist. Testing agent validated the rotation by: (1) parsing the on-disk JSON to confirm project_id/client_email match the announced new values, (2) exercising /api/auth/firebase-session with a bogus token and confirming the response comes from the firebase-admin SDK verifier (401 with 'Token Firebase non valido: ...') rather than the pre-verifier guard (503 'Firebase non configurato'), (3) grep'ing the supervisor log after the last 'Started server process' boot marker for any 'Firebase init failed' / 'parse failed' entries — none found. Combined, these three signals prove the new key was accepted by firebase-admin at initialize_app() time. Regression suite confirms the rotation didn't disturb any other auth path or public read endpoint."
+}

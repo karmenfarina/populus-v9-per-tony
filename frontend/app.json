@@ -12,6 +12,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.emergent.teampick.bfsfcz",
+      "googleServicesFile": "./GoogleService-Info.plist",
       "infoPlist": {
         "UIStatusBarStyle": "UIStatusBarStyleLightContent",
         "UIViewControllerBasedStatusBarAppearance": false,
