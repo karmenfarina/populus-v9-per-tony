@@ -1,0 +1,33 @@
+{
+  "summary": "Validated the new on-startup `testing_agent` cleanup block (server.py L5385-5431). Created /app/backend/tests/test_iter141_testing_agent_cleanup.py with 3 pytest test functions covering all 5 requirements from the review request. All 3/3 tests PASSED. The cleanup: (a) removes leftover ephemeral users created via API (verified test_a_deadbeef via POST /api/auth/anonymous → restart → user + comment gone; stale JWT rejected with 401), (b) removes users whose nickname matches every documented pattern (test_[ab]_hex, test_agent_N, test_fresh_N, test_regr_N, test_relog_N, test_user_N, test_signup, testrl<hex>N) including UPPERCASE variants (case-insensitive), (c) removes users whose email ends with @example.com (case-insensitive, verified with `Someone_Iter141@Example.COM`), (d) DOES NOT touch legitimate users (realuser_iter141_alpha@gmail.com, mario_rossi_iter141, protest_a_deadbeef anchoring test, test_c_xxxxxx), (e) cascade-deletes associated comments/replies/votes for removed users while preserving them for kept users, (f) preserves the seeded admin (carlofarinapayme@gmail.com) and the 100 bots (is_bot: True) exactly (count 100→100), (g) emits the expected info log `testing_agent cleanup: removed N users, M comments, K replies, V votes` (confirmed in /var/log/supervisor/backend.out.log across 3 restarts).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter141_testing_agent_cleanup.py",
+    "/app/test_reports/pytest/iter141_cleanup.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Cleanup regex is properly anchored with ^...$ so nicknames that merely CONTAIN a test pattern (e.g. `protest_a_deadbeef`) are correctly preserved — verified.",
+    "The `is_bot: {$ne: True}` guard on the users query ensures bots are never targeted even if someone accidentally named one to match a test pattern — good defensive design.",
+    "Cascade cleanup covers users/comments/replies/votes/notifications; consider extending to `messages`, `follows`, `blocks`, `photos`, and `flagged_comments` in a future iteration if noise persists there. Not blocking for this fix.",
+    "The block is wrapped in try/except and only logs a warning on failure, so a bad regex or transient DB error won't crash startup — correct."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter141_testing_agent_cleanup.py (new)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "N/A (backend-only test)"},
+  "seed_data_creation": "Seeded ~16 matrix users + 1 API-created anonymous user + 1 log-check user directly in `test_database` via pymongo. Every seed row carries `_iter141_seed: True` (though the users themselves are removed by the cleanup as designed). All seed data was consumed/removed during the tests; no residual TEST_ rows remain.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "The cleanup block is idempotent and runs on EVERY backend startup — if a future test creates users matching the test_* patterns or with @example.com emails and then restarts backend for any reason, they will vanish. This is by design. Bot invariant (iter140) was intentionally NOT re-tested per instructions. If you need to inspect the cleanup logic, see server.py L5385-5431. Regex: `^(test_[ab]_[a-f0-9]+|test_agent_\\d+|test_fresh_\\d+|test_regr_\\d+|test_relog_\\d+|test_user_\\d+|test_signup|testrl[a-f0-9]+\\d+)$` (case-insensitive).",
+  "rca_of_issue": "N/A — this iteration is a verification of a fix, not a bug hunt. Observed log samples confirming behaviour: `testing_agent cleanup: removed 13 users, 2 comments, 1 replies, 6 votes` / `removed 1 users, 1 comments, 0 replies, 0 votes` / `removed 12 users, 12 comments, 12 replies, 12 votes`."
+}

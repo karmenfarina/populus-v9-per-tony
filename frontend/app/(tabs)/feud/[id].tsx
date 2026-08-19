@@ -1262,6 +1262,7 @@ export default function FeudDetail() {
                     canReply={!!feud.my_vote}
                     onDeleteComment={() => deleteOwnComment(c.comment_id)}
                     onDeleteReply={(rid) => deleteOwnReply(c.comment_id, rid)}
+                    isAdmin={isAdmin}
                     onRegisterRef={(node) => {
                       // Store/clear the ref so the deep-link scroll effect
                       // above can call measureLayout on the exact row.
@@ -1455,7 +1456,7 @@ export default function FeudDetail() {
 
 function CommentItem({
   c, meId, expanded, onToggle, onExpand, replyingTo, setReplyingTo, replyText, setReplyText,
-  onSubmitReply, canReply, onDeleteComment, onDeleteReply, onRegisterRef, highlighted, highlightAnim,
+  onSubmitReply, canReply, onDeleteComment, onDeleteReply, isAdmin, onRegisterRef, highlighted, highlightAnim,
 }: {
   c: Comment; meId: string | null; expanded?: Reply[]; onToggle: () => void;
   /** Forces the reply thread OPEN (idempotent — no-op if already expanded).
@@ -1467,6 +1468,12 @@ function CommentItem({
   onSubmitReply: () => void; canReply: boolean;
   onDeleteComment: () => void;
   onDeleteReply: (replyId: string) => void;
+  /** When true, the caller is the founder admin — allows deleting ANY
+   * comment/reply for moderation (backend enforces the same rule). The
+   * trash icon renders in red when the target is NOT the admin's own
+   * content, so moderation actions are visually distinct from "delete
+   * my own comment". */
+  isAdmin?: boolean;
   /** Registers/unregisters this row's outer View so the parent's deep-link
    *  effect can measure and scroll to it. */
   onRegisterRef?: (node: View | null) => void;
@@ -1539,14 +1546,18 @@ function CommentItem({
             {c.created_at ? (
               <Text style={cs.time} numberOfLines={1}>{formatRelative(c.created_at)}</Text>
             ) : null}
-            {isMine ? (
+            {isMine || isAdmin ? (
               <Pressable
                 onPress={confirmDeleteComment}
                 hitSlop={8}
                 testID={`comment-delete-${c.comment_id}`}
                 style={cs.delBtn}
               >
-                <Ionicons name="trash-outline" size={16} color={colors.muted} />
+                <Ionicons
+                  name="trash-outline"
+                  size={16}
+                  color={!isMine && isAdmin ? colors.error : colors.muted}
+                />
               </Pressable>
             ) : null}
           </View>
@@ -1611,13 +1622,17 @@ function CommentItem({
                       <Pressable onPress={() => router.push(`/user/${r.user_id}`)}>
                         <Text style={[cs.nick, { color: rAccent, fontSize: font.sizes.xs }]}>@{r.nickname}</Text>
                       </Pressable>
-                      {replyMine ? (
+                      {replyMine || isAdmin ? (
                         <Pressable
                           onPress={() => confirmDeleteReply(r.reply_id)}
                           hitSlop={8}
                           testID={`reply-delete-${r.reply_id}`}
                         >
-                          <Ionicons name="trash-outline" size={14} color={colors.muted} />
+                          <Ionicons
+                            name="trash-outline"
+                            size={14}
+                            color={!replyMine && isAdmin ? colors.error : colors.muted}
+                          />
                         </Pressable>
                       ) : null}
                     </View>
@@ -1652,12 +1667,27 @@ function CommentItem({
         )}
       </View>
       {/* Shared themed confirmation modal — replaces window.confirm /
-          Alert.alert with a rounded, on-brand dialog. */}
+          Alert.alert with a rounded, on-brand dialog. When the caller
+          is the founder admin acting on someone else's content, the
+          copy is rephrased as a moderation action so the intent is
+          unambiguous. */}
       <ConfirmModal
         visible={confirm !== null}
-        title={confirm?.kind === "reply" ? "Elimina risposta" : "Elimina commento"}
+        title={
+          isAdmin && !isMine && confirm?.kind === "comment"
+            ? "Modera commento"
+            : isAdmin && confirm?.kind === "reply"
+            ? "Modera risposta"
+            : confirm?.kind === "reply"
+            ? "Elimina risposta"
+            : "Elimina commento"
+        }
         body={
-          confirm?.kind === "reply"
+          isAdmin && !isMine
+            ? confirm?.kind === "reply"
+              ? "Stai eliminando la risposta di un altro utente come admin. L'azione è definitiva."
+              : "Stai eliminando il commento di un altro utente come admin. Il commento e tutte le sue risposte verranno rimossi definitivamente."
+            : confirm?.kind === "reply"
             ? "La risposta verrà eliminata definitivamente."
             : "Il commento e tutte le sue risposte verranno eliminati."
         }

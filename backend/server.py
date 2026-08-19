@@ -3507,28 +3507,45 @@ async def delete_comment(comment_id: str, user: dict = Depends(get_current_user)
     """Delete a comment authored by the current user.
 
     Cascades the delete to the comment's replies so orphan replies never
-    linger. Returns 403 if the caller is not the comment's author.
+    linger. The founder admin (see `_is_founder_admin`) can delete ANY
+    comment for moderation purposes; other users get 403 unless they
+    authored it.
     """
     doc = await db.comments.find_one({'comment_id': comment_id}, {'_id': 0})
     if not doc:
         raise HTTPException(status_code=404, detail='Commento non trovato')
-    if doc.get('user_id') != user['user_id']:
+    is_admin = _is_founder_admin(user)
+    if doc.get('user_id') != user['user_id'] and not is_admin:
         raise HTTPException(status_code=403, detail='Puoi eliminare solo i tuoi commenti')
     await db.replies.delete_many({'comment_id': comment_id})
     await db.comments.delete_one({'comment_id': comment_id})
-    return {'ok': True}
+    if is_admin and doc.get('user_id') != user['user_id']:
+        logger.info(
+            f"admin moderation: {user.get('email')} deleted comment {comment_id} "
+            f"authored by {doc.get('user_id')} on feud {doc.get('feud_id')}"
+        )
+    return {'ok': True, 'moderated': is_admin and doc.get('user_id') != user['user_id']}
 
 
 @api_router.delete('/replies/{reply_id}')
 async def delete_reply(reply_id: str, user: dict = Depends(get_current_user)):
-    """Delete a reply authored by the current user."""
+    """Delete a reply authored by the current user.
+
+    Founder admin can delete ANY reply for moderation.
+    """
     doc = await db.replies.find_one({'reply_id': reply_id}, {'_id': 0})
     if not doc:
         raise HTTPException(status_code=404, detail='Risposta non trovata')
-    if doc.get('user_id') != user['user_id']:
+    is_admin = _is_founder_admin(user)
+    if doc.get('user_id') != user['user_id'] and not is_admin:
         raise HTTPException(status_code=403, detail='Puoi eliminare solo le tue risposte')
     await db.replies.delete_one({'reply_id': reply_id})
-    return {'ok': True}
+    if is_admin and doc.get('user_id') != user['user_id']:
+        logger.info(
+            f"admin moderation: {user.get('email')} deleted reply {reply_id} "
+            f"authored by {doc.get('user_id')} on feud {doc.get('feud_id')}"
+        )
+    return {'ok': True, 'moderated': is_admin and doc.get('user_id') != user['user_id']}
 
 
 @api_router.get('/comments/{comment_id}/replies')
@@ -5382,6 +5399,53 @@ async def on_startup():
                 )
     except Exception as e:
         logger.warning(f"bot dedupe (one-shot) failed: {e}")
+    # ─── One-shot cleanup: testing_agent leftovers ─────────────────
+    # The automated `testing_agent` creates ephemeral users via
+    # /api/auth/signup and /api/auth/anonymous while running its suites
+    # and leaves them behind. They surface in the feed as authors named
+    # `test_a_xxxxxx`, `test_b_xxxxxx`, `test_signup`, `test_agent_NNNNN`,
+    # etc. — noise that real users complained about.
+    #
+    # Pattern is intentionally narrow so it CANNOT match real accounts:
+    #   * email ending with @example.com (unambiguous test signature), OR
+    #   * nickname matching one of the known testing_agent naming schemas.
+    try:
+        test_email_re = {'$regex': r'@example\.com$', '$options': 'i'}
+        test_nick_re = {'$regex': r'^(test_[ab]_[a-f0-9]+|test_agent_\d+|test_fresh_\d+|test_regr_\d+|test_relog_\d+|test_user_\d+|test_signup|testrl[a-f0-9]+\d+)$', '$options': 'i'}
+        test_users_cursor = db.users.find(
+            {
+                'is_bot': {'$ne': True},
+                '$or': [
+                    {'email': test_email_re},
+                    {'nickname': test_nick_re},
+                ],
+            },
+            {'_id': 0, 'user_id': 1},
+        )
+        test_user_ids = [u['user_id'] async for u in test_users_cursor]
+        if test_user_ids:
+            c_res = await db.comments.delete_many({'user_id': {'$in': test_user_ids}})
+            r_res = await db.replies.delete_many({'user_id': {'$in': test_user_ids}})
+            # Delete their votes too (best-effort; collection may not exist)
+            try:
+                v_res = await db.votes.delete_many({'user_id': {'$in': test_user_ids}})
+                votes_removed = v_res.deleted_count
+            except Exception:
+                votes_removed = 0
+            # Notifications / messages authored by them (noise cleanup)
+            try:
+                await db.notifications.delete_many({'actor_id': {'$in': test_user_ids}})
+                await db.notifications.delete_many({'user_id': {'$in': test_user_ids}})
+            except Exception:
+                pass
+            u_res = await db.users.delete_many({'user_id': {'$in': test_user_ids}})
+            logger.info(
+                f"testing_agent cleanup: removed {u_res.deleted_count} users, "
+                f"{c_res.deleted_count} comments, {r_res.deleted_count} replies, "
+                f"{votes_removed} votes"
+            )
+    except Exception as e:
+        logger.warning(f"testing_agent cleanup (one-shot) failed: {e}")
     # One-shot backfill: users who onboarded BEFORE `cronaca` was introduced
     # can't possibly have it in their favorites (it didn't exist), so the
     # "favorites-only" home filter effectively hides it from them until they
