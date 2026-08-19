@@ -860,17 +860,34 @@ async def _generate_reply(
 async def _bot_create_story(bot: Dict[str, Any], feud: Dict[str, Any]) -> None:
     """Post a 'feud' story (24 h TTL) sharing this feud on the bot's
     profile. Optional 1-line caption via LLM.
+
+    Two guardrails prevent the historical over-production of bot stories:
+      1) Anti-duplicate: at most ONE active story per (bot, feud). If
+         the bot already has an unexpired story about this feud we
+         skip — no need to spam multiple takes on the same topic.
+      2) Daily quota: at most 1 active story per bot in any 24 h
+         rolling window (down from 3). With ~100 bots this caps the
+         featured-bot bucket to a sane background hum instead of the
+         hundreds of stories we were previously accumulating.
     """
-    # Respect story quota (5/day by default)
-    since = _now() - timedelta(hours=_STORY_TTL_HOURS)
+    now = _now()
+    # (1) Anti-duplicate: same bot + same feud + still-active TTL.
+    dup = await _db.stories.find_one({
+        "user_id": bot["user_id"],
+        "feud_id": feud["feud_id"],
+        "expires_at": {"$gt": now},
+    })
+    if dup:
+        return
+    # (2) 1/24h quota per bot.
+    since = now - timedelta(hours=_STORY_TTL_HOURS)
     recent = await _db.stories.count_documents({
         "user_id": bot["user_id"],
         "created_at": {"$gte": since},
     })
-    if recent >= 3:
+    if recent >= 1:
         return
     caption = await _generate_story_caption(_rehydrate_persona(bot))
-    now = _now()
     doc = {
         "story_id": f"story_bot_{bot['user_id']}_{feud['feud_id']}_{int(now.timestamp())}",
         "user_id": bot["user_id"],

@@ -508,7 +508,16 @@ const styles = StyleSheet.create({
     lineHeight: 13,
   },
   scrollBody: {
-    paddingHorizontal: spacing.md,
+    // Padding asimmetrico: paddingLeft standard (spacing.md), ma a
+    // destra riserviamo spazio in piu' per NON far mai finire l'ultimo
+    // cerchio sotto la freccetta di collasso (`collapseChip`), che e'
+    // absolute-positioned a top:2/right:6 con hitSlop=10. Senza questo
+    // padding, scrollando all'estrema destra l'ultima storia rimane
+    // graficamente sovrapposta al chevron. La freccetta NON viene
+    // spostata — la posizione (top:2, right:6) rimane invariata, solo
+    // lo scroll si ferma piu' a sinistra.
+    paddingLeft: spacing.md,
+    paddingRight: 36,
     alignItems: "center",
     gap: spacing.md,
     paddingBottom: 2,

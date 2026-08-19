@@ -1,0 +1,34 @@
+{
+  "summary": "Iter146 — Task 1 (bot story anti-duplicate + quota 1/24h) and Task 2 (StoriesBar scrollBody padding) verified. 7/7 backend tests PASS. Task 1a: `_bot_create_story` correctly skips a second call for the SAME (bot, feud) when an active story already exists (count stays at 1). Task 1b: after 1 story creation on feud A, a second call with a different feud B within 24h is silently skipped (quota `recent >= 1` gate). Task 1c: an OLD story (>24h ago, expired) does NOT block a new creation. Task 1d: story doc shape intact — kind='feud', comment (str), viewers=[], created_at + expires_at ~24h apart, story_id prefix `story_bot_`. Regression: GET /api/stories/feed returns 200 with valid groups structure for admin; GET /api/feuds still healthy; POST /api/auth/signup + /api/auth/anonymous still work. Task 2: /app/frontend/src/components/StoriesBar.tsx compiles cleanly (Metro bundled OK, no red screen, no runtime warnings tied to the change); the chevron collapse button retains testID='stories-bar-collapse-btn' at position top:2/right:6 as required; scrollBody now uses paddingLeft: spacing.md + paddingRight: 36 so the last circle no longer slides under the chevron on right-scroll. Visual verification is left to the user per the request note; layout is safe and non-breaking.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "StyleSheet warnings (carry-over)", "issue": "Console still logs 'shadow* deprecated', 'textShadow* deprecated', 'props.pointerEvents deprecated' on mount. Unchanged from iter144/145 — not introduced by this iteration. Reference: multiple components across /app/frontend/src/**"}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter146_bot_story_dedup.py",
+    "/app/test_reports/pytest/iter146_bot_story_dedup.xml"
+  ],
+  "action_items": [
+    "None blocking — Task 1 fix is correctly implemented and Task 2 is layout-only. Main agent can close this iteration.",
+    "LOW (carry-over from iter144/145): sweep deprecated RN style props (shadow*/textShadow*/pointerEvents) when convenient."
+  ],
+  "critical_code_review_comments": [
+    "bot_engine.py::_bot_create_story — anti-duplicate check uses `expires_at: {$gt: now}` which correctly ignores already-expired records (matches the ~24h TTL semantics). The daily-quota check filters by `created_at >= now - 24h` on this bot only. Both checks run BEFORE the LLM caption call, so no wasted LLM budget on skipped writes — good.",
+    "Note (informational, not a bug): the anti-duplicate query is not indexed on {user_id, feud_id, expires_at}. At current scale (100 bots × few active stories) this is fine, but if the fleet grows an index on {user_id: 1, feud_id: 1} would keep this hot-path cheap.",
+    "StoriesBar.tsx::scrollBody — the paddingRight: 36 value is a reasonable buffer: chevron width 20 + right:6 = 26 outer edge, +10 hitSlop = 36. Matches exactly the touch-target reserved space so the last circle stops right before the collapse button. Left padding remains spacing.md so the first circle keeps its original inset."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter146_bot_story_dedup.py (new, 7 tests — 4 for Task 1, 3 for regression)"
+  ],
+  "success_rate": {"backend": "100% (7/7 passed)", "frontend": "smoke OK (login screen renders, no red-screen, StoriesBar compiles)"},
+  "seed_data_creation": "Each Task 1 test cleans and recreates bot stories for the picked bot on 1–2 feuds via db.stories.delete_many + `_bot_create_story` (LLM caption is monkey-patched to a fixed string to avoid the real API). All test-created stories are wiped in `finally`. TestAuthRegression creates one ephemeral TEST_iter146_<hex>@populus-it.co user via /api/auth/signup + one anonymous nickname; not cleaned (matches previous iterations' pattern — TEST_ prefix is the cleanup marker).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Bot story anti-dup + 1/24h quota fixes are locked in at /app/backend/bot_engine.py:874-889. Reuse /app/backend/tests/test_iter146_bot_story_dedup.py for any regression involving stories creation by bots. Key mechanic: monkey-patching `be._generate_story_caption` avoids the LLM budget; motor client MUST be created inside the same event loop as asyncio.run (see `_wire_db` helper) — a module-scope motor fixture will break because asyncio.run creates a fresh loop per test. StoriesBar chevron/collapse button testID='stories-bar-collapse-btn' is stable and only the scrollBody padding changed for the visual overlap fix.",
+  "rca_of_issue": "N/A — bugs already fixed; this iteration only validates the fixes. Historical over-production RCA per E1: previous quota was `recent >= 3` and no anti-duplicate guard, so a bot could publish ≤3 stories per 24h and multiple takes on the same feud → observed ~186 stories over 3 days. Post-fix theoretical cap: 100 bots × 1 story/24h = 100 stories/day worst-case, and never more than 1 per (bot, feud). Anti-duplicate + quota checks are cheap DB reads placed before the LLM call, so also reduce LLM spend."
+}
