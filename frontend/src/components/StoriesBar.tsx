@@ -7,6 +7,7 @@ import {
   StyleSheet,
   ActivityIndicator,
   Modal,
+  Platform,
 } from "react-native";
 import { Image } from "expo-image";
 import { useRouter, useFocusEffect } from "expo-router";
@@ -444,15 +445,38 @@ const styles = StyleSheet.create({
     position: "relative",
   },
   collapseChip: {
+    // Freccetta di collasso della strip storie. Posizione originale
+    // top:2/right:6 CONSERVATA come richiesto: non si sposta.
+    //
+    // Fix sovrapposizione: uno sfondo OPACO (colors.surface) + bordo
+    // sottile + leggera elevazione fanno si' che, quando un cerchio
+    // storia scorre sotto durante lo scroll orizzontale, il chevron
+    // resti perfettamente leggibile e "copra" visivamente il cerchio
+    // invece di sovrapporglisi in modo confuso. Uno paddingRight
+    // aumentato non risolveva perche' i cerchi intermedi passavano
+    // comunque sotto durante lo scroll — solo lo sfondo opaco copre
+    // il cerchio in QUALSIASI posizione di scroll.
     position: "absolute",
     top: 2,
     right: 6,
-    width: 20,
-    height: 20,
-    borderRadius: 10,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "transparent",
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    zIndex: 10,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.15,
+        shadowRadius: 2,
+      },
+      android: { elevation: 3 },
+    }),
   },
   // -------- Collapsed card --------
   // Prominent full-width tap target — reads as a "collapsible section
@@ -508,16 +532,12 @@ const styles = StyleSheet.create({
     lineHeight: 13,
   },
   scrollBody: {
-    // Padding asimmetrico: paddingLeft standard (spacing.md), ma a
-    // destra riserviamo spazio in piu' per NON far mai finire l'ultimo
-    // cerchio sotto la freccetta di collasso (`collapseChip`), che e'
-    // absolute-positioned a top:2/right:6 con hitSlop=10. Senza questo
-    // padding, scrollando all'estrema destra l'ultima storia rimane
-    // graficamente sovrapposta al chevron. La freccetta NON viene
-    // spostata — la posizione (top:2, right:6) rimane invariata, solo
-    // lo scroll si ferma piu' a sinistra.
-    paddingLeft: spacing.md,
-    paddingRight: 36,
+    // Padding standard: la vera protezione contro la sovrapposizione
+    // freccetta-cerchio non e' piu' un paddingRight aumentato (che
+    // funzionava solo all'estrema destra), ma lo sfondo OPACO della
+    // `collapseChip` che copre visivamente qualsiasi cerchio finisca
+    // sotto durante lo scroll.
+    paddingHorizontal: spacing.md,
     alignItems: "center",
     gap: spacing.md,
     paddingBottom: 2,

@@ -1,0 +1,37 @@
+{
+  "summary": "Iter147 verification — cleanup + fanout + StoriesBar chevron. 10/10 backend tests pass. Task 1 (cleanup): 54 active bot stories \u2264 100 bots, 0 bots with >1 active story, 0 duplicate (bot,feud) pairs — cleanup effective. Task 1 (regression): _bot_create_story anti-dup guardrail still enforced (calling with existing (bot,feud) active story is a no-op). Task 3 (CRITICAL): direct call to _fanout_hot_news on a fresh synthetic feud with reset hot_notified flag correctly inserts an in-app 'hot_news' notification for admin (carlofarinapayme@gmail.com) and flips hot_notified to True atomically. Task 3 (regression): bots (is_bot) and anonymous users are excluded from the fanout recipient list — verified by walking every recipient user doc. Task 2 (frontend): StoriesBar.tsx lints clean; collapseChip has backgroundColor: colors.surface (OPAQUE), borderWidth 1 + borderColor, zIndex 10, position top:2/right:6 preserved, size 22x22, iOS shadow + Android elevation — all as required. testID 'stories-bar-collapse-btn' present at line 399. Login page loads without red-screen. General regression OK (/api/feuds 200, /api/stories/feed 401 unauth, /api/admin/bots/state 200).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter147_stories_fanout.py",
+    "/app/test_reports/pytest/iter147.xml"
+  ],
+  "action_items": [
+    "Optional: run the visual UI test with a logged-in user session (requires human Google OAuth). Static code review confirmed all required chevron style properties are in place."
+  ],
+  "critical_code_review_comments": [
+    "_fanout_hot_news relies on db.notifications field name 'type' (not 'kind') — historical `hot_notified` audit queries in the request note used 'kind:hot_news' which would return 0 spuriously; the actual field is 'type'. Not a bug — but worth flagging in case any monitoring dashboards use 'kind'.",
+    "EMERGENT_PUSH_KEY=placeholder in /app/backend/.env — push relay will 401 in preview as expected. In-app notifications correctly persisted regardless.",
+    "server.py uses deprecated on_event startup/shutdown — non-blocking but should migrate to lifespan events at some point."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter147_stories_fanout.py (created)"
+  ],
+  "success_rate": {
+    "backend": "100% (10/10)",
+    "frontend": "smoke-only (login page renders, StoriesBar not visually testable without logged-in user; static+lint verified)"
+  },
+  "seed_data_creation": "Ephemeral: synthetic feud + comments inserted with _iter147_test flag, called _fanout_hot_news, then deleted (including notifications for that feud) — no residual test data.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Test module at /app/backend/tests/test_iter147_stories_fanout.py exercises the fanout directly by importing server._fanout_hot_news and injecting a synthetic feud that meets HOT thresholds. If admin's favorite_categories change or is_bot flag drifts, adjust the fixtures. Notification collection uses field 'type' (not 'kind'). The daily lock key is `{user_id}:{kind}:{today}` in db.notification_locks — clear via regex on 'key' field.",
+  "rca_of_issue": "For the original hot_news bug (iter144): fanout was flagging feuds with hot_notified=True BEFORE emitting notifications for legacy reasons — a batch of 53 flagged feuds ended up with the flag set but zero notifications. The one-time DB reset of the flag on those 53 feuds now allows the next vote/comment/bot-tick to re-run fanout. Confirmed today: only 1 flagged feud remains without notifications (down from 53). Direct call test proves the fanout path works end-to-end when a fresh feud passes the threshold."
+}
