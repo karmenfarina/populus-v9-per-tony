@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="2" skipped="0" tests="11" time="174.939" timestamp="2026-08-18T22:26:44.843658+00:00" hostname="agent-env-20379763-e152-4297-8536-1af11c21c54f"><testcase classname="test_iter140_bot_one_contribution.TestStartupCleanup" name="test_no_duplicate_bot_comments" time="0.007" /><testcase classname="test_iter140_bot_one_contribution.TestStartupCleanup" name="test_no_duplicate_bot_replies" time="0.001" /><testcase classname="test_iter140_bot_one_contribution.TestStartupCleanup" name="test_bot_total_counts_sensible" time="0.002" /><testcase classname="test_iter140_bot_one_contribution.TestBotHasContributed" name="test_has_contributed_true_after_comment" time="0.005" /><testcase classname="test_iter140_bot_one_contribution.TestBotHasContributed" name="test_has_contributed_true_after_reply" time="0.003" /><testcase classname="test_iter140_bot_one_contribution.TestBotHasContributed" name="test_add_comment_guarded" time="0.003" /><testcase classname="test_iter140_bot_one_contribution.TestBotHasContributed" name="test_add_reply_guarded_when_comment_exists" time="0.003" /><testcase classname="test_iter140_bot_one_contribution.TestBurstInvariant" name="test_burst_endpoint_accepts_request" time="0.201" /><testcase classname="test_iter140_bot_one_contribution.TestBurstInvariant" name="test_burst_admin_key_required" time="0.139" /><testcase classname="test_iter140_bot_one_contribution.TestBurstInvariant" name="test_no_duplicate_bot_comments_after_burst" time="84.104"><failure message="AssertionError: After burst: 12 (bot,feud) pairs have &gt;1 comment. Sample: [('bot_005', 'feud_0f10c08cda73', 2), ('bot_002', 'feud_b142cbeb0cb1', 2), ('bot_011', 'feud_b142cbeb0cb1', 2), ('bot_023', 'feud_bf937e47f523', 2), ('bot_025', 'feud_18811c4e392b', 2)]&#10;assert [('bot_005', ...cb1', 2), ...] == []&#10;  &#10;  Left contains 12 more items, first extra item: ('bot_005', 'feud_0f10c08cda73', 2)&#10;  &#10;  Full diff:&#10;  - []&#10;  + [&#10;  +     (...&#10;  &#10;  ...Full output truncated (60 lines hidden), use '-vv' to show">tests/test_iter140_bot_one_contribution.py:385: in test_no_duplicate_bot_comments_after_burst
+    assert dup_c == [], (
+E   AssertionError: After burst: 12 (bot,feud) pairs have &gt;1 comment. Sample: [('bot_005', 'feud_0f10c08cda73', 2), ('bot_002', 'feud_b142cbeb0cb1', 2), ('bot_011', 'feud_b142cbeb0cb1', 2), ('bot_023', 'feud_bf937e47f523', 2), ('bot_025', 'feud_18811c4e392b', 2)]
+E   assert [('bot_005', ...cb1', 2), ...] == []
+E     
+E     Left contains 12 more items, first extra item: ('bot_005', 'feud_0f10c08cda73', 2)
+E     
+E     Full diff:
+E     - []
+E     + [
+E     +     (...
+E     
+E     ...Full output truncated (60 lines hidden), use '-vv' to show</failure></testcase><testcase classname="test_iter140_bot_one_contribution.TestBurstInvariant" name="test_concurrent_bursts_expose_race" time="90.264"><failure message="AssertionError: RACE: concurrent bursts produced 12 duplicate (bot,feud) comment pairs. Sample: [('bot_026', 'feud_b3fc172f546f', 3), ('bot_019', 'feud_7891042432aa', 3), ('bot_014', 'feud_bf937e47f523', 3), ('bot_001', 'feud_b8d79b325681', 3), ('bot_008', 'feud_3309b08b0483', 3)]. Fix suggestion: add a unique compound index on comments.(user_id, feud_id) for bot users, or convert the check-then-insert to an upsert with $setOnInsert.&#10;assert [('bot_026', ...13b', 3), ...] == []&#10;  &#10;  Left contains 12 more items, first extra item: ('bot_026', 'feud_b3fc172f546f', 3)&#10;  &#10;  Full diff:&#10;  - []&#10;  + [&#10;  +     (...&#10;  &#10;  ...Full output truncated (60 lines hidden), use '-vv' to show">tests/test_iter140_bot_one_contribution.py:454: in test_concurrent_bursts_expose_race
+    assert dups == [], (
+E   AssertionError: RACE: concurrent bursts produced 12 duplicate (bot,feud) comment pairs. Sample: [('bot_026', 'feud_b3fc172f546f', 3), ('bot_019', 'feud_7891042432aa', 3), ('bot_014', 'feud_bf937e47f523', 3), ('bot_001', 'feud_b8d79b325681', 3), ('bot_008', 'feud_3309b08b0483', 3)]. Fix suggestion: add a unique compound index on comments.(user_id, feud_id) for bot users, or convert the check-then-insert to an upsert with $setOnInsert.
+E   assert [('bot_026', ...13b', 3), ...] == []
+E     
+E     Left contains 12 more items, first extra item: ('bot_026', 'feud_b3fc172f546f', 3)
+E     
+E     Full diff:
+E     - []
+E     + [
+E     +     (...
+E     
+E     ...Full output truncated (60 lines hidden), use '-vv' to show</failure></testcase></testsuite></testsuites>

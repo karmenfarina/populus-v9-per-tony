@@ -1,146 +1,130 @@
-<analysis>**original_problem_statement**: 
-The user requested optimization of the overall app performance (reducing load times, latency, and resource consumption while improving fluidity). Subsequently, they requested improvements for handling unstable network connections to ensure a reliable experience even with slow or intermittent internet.
-PRODUCT REQUIREMENTS: 
-- A unified Terms of Service and NDA acceptance screen with explicit lockdown rules.
-- Hot feud notifications should only trigger based on real user activity.
-- Robust deep-linking to comment mentions.
-- Bot comments distributed realistically.
-- Scalable backend architecture.
-- Smooth mobile list rendering.
-- Robust offline/poor-network handling (retries, timeouts, and fallback caches).
+<analysis>**original_problem_statement**: The user originally requested overall app performance optimization and resilience. In this session, the user reported a bug where bots leave multiple comments on a single feud, which looks unrealistic. They requested limiting bots to one contribution (either a top-level comment or a reply) per feud. 
 
-**User's preferred language**: Italian (You MUST automatically detect the user's primary language from their messages inside the <trajectory> tag and INSTRUCT next agent to respond in the user's preferred language only)
+PRODUCT REQUIREMENTS:
+- Ensure a bot leaves a maximum of 1 contribution per feud.
+- Clean up existing duplicate bot comments/replies in the database.
+- Ensure the duplicate prevention logic holds up under concurrent/burst bot operations.
+
+**User's preferred language**: **Italian** (You MUST automatically detect the user's primary language from their messages inside the <trajectory> tag and INSTRUCT next agent to respond in the user's preferred language only. Proceed in **Italian**).
 
 **what currently exists?** 
-A full-stack Expo frontend and FastAPI backend social application (Populus). The backend has been optimized with in-memory TTL caching () to reduce database round-trips for core feeds (hype, categories). The frontend utilizes  for highly performant list rendering and  for disk/memory image caching. A robust network layer is implemented with fetch retries,  timeouts,  client-side fallback cache, and a global offline .
+A highly optimized full-stack Expo frontend and FastAPI backend social application (Populus). The app utilizes an AI bot engine () to generate activity on feuds. Application-level logic was added to restrict bots to one comment/reply per feud, and a startup cleanup script was executed to remove existing duplicates. However, a race condition exists during bot burst (concurrent) operations, allowing duplicates to still bypass the application-level check.
 
 **Last working item**:
-    - Last item agent was working: Implementing resilience for unstable network connections. This included adding GET request retries, request timeouts (12s GET / 20s write), a  client cache fallback, and a  to warn users when offline.
-    - Status: USER VERIFICATION PENDING
+    - Last item agent was working: Fixing the bot duplicate comment bug. The agent added application-level checks in  and  and cleaned the DB. However, the  reported that a race condition exists under burst usage, meaning the invariant does not hold concurrently. 
+    - Status: IN PROGRESS
     - Agent Testing Done: Y
-    - Which testing method agent to use?: both
+    - Which testing method agent to use?: backend testing agent (You MUST call the  to re-run the backend test suite after fixing the race condition).
     - User Testing Done: N
 
 **All Pending/In progress Issue list**:  
-  Issue 1: Ghost/Strange Bot Names Visible in Frontend (P0)
-     - Attempted fixes: Verified DB is clean (only 1 admin and 100 bots). Issue is local cache ( / Apollo) on the user's device.
-     - Next debug checklist: Await user confirmation if reloading/clearing cache resolved the issue. If it persists, instruct the user on how to fully wipe app data or clear  programmatically on next boot.
-     - Why fix this issue and what will be achieved with the fix? Ensures the user sees the accurate Day 1 clean state instead of stale local testing data.
+  Issue 1: Bot Multiple Comments Race Condition (P0)
+     - Attempted fixes: Added application-level  checks in Python. Failed because parallel async tasks during a burst bypass the check before the DB write completes.
+     - Next debug checklist: Check  startup indexes and . You need to implement a concurrency fix, such as adding a compound unique index in MongoDB for  for bot comments/replies, or implementing an async lock in the bot engine during burst actions.
+     - Why fix this issue and what will be achieved with the fix? Enforces the core requirement that bots cannot spam a single feud under heavy concurrent load.
+     - Status: IN PROGRESS
+     - Is recurring issue? Y (Failed  validation)
+     - Should Test frontend/backend/both after fix? Backend (via )
+     - Blocked on other issue: None
+
+  Issue 2: Ghost/Strange Bot Names Visible in Frontend (P1)
+     - Attempted fixes: Verified DB is clean in the previous fork. Issue is local cache ( / Apollo) on the user's device.
+     - Next debug checklist: Await user confirmation if reloading/clearing cache resolved the issue.
+     - Why fix this issue and what will be achieved with the fix? Ensures the user sees the accurate clean state.
      - Status: USER VERIFICATION PENDING
      - Is recurring issue? N
      - Should Test frontend/backend/both after fix? Frontend
      - Blocked on other issue: None
 
 **In progress Task List**: 
-  *(None active. Network optimizations were just completed.)*
+  *(None active)*
 
-**Upcoming and Future Tasks**:
+**Upcoming and Future Tasks**
   Task 1: Complete Frontend Refactoring (Phase 3 of Cleanup) (Priority P2)
      - Where to resume: , , 
-     - What will be achieved with this? Splitting massive files (>1000-2000 lines) into smaller, reusable components in . 
-     - *Note: Paused previously due to high risk of breaking deep linking. Proceed only if requested and with extreme caution.*
-  Task 2: Extend Client Cache to Other Endpoints (Priority P3)
-     - Where to resume: 
-     - What will be achieved with this? Apply cache to  and  for better perceived performance.
-  Task 3: Add UI Skeleton Loaders (Priority P3)
-     - Where to resume: , lists in 
-     - What will be achieved with this? Replacing standard  spinners with skeleton loaders for smoother perceived loading.
+     - What will be achieved with this? Splitting massive files into smaller, reusable components. 
+     - *Note: Paused previously due to high risk of breaking deep linking. Proceed ONLY if explicitly requested by the user.*
 
-**Completed work in this session**:
-- Backend Caching: Created  with TTL and stampede protection. Applied to , , and  (DONE).
-- DB Optimization: Fixed N+1 query issue in the hype feed, reducing DB round-trips to 1 (DONE).
-- Frontend Performance (Lists): Installed  and replaced  in , , , and  (DONE).
-- Frontend Performance (Images): Switched to  with  cache policy in , , and  (DONE).
-- Network Layer Resilience: Updated  with  timeouts, automatic retries for GET requests, and built  (DONE).
-- Offline UI: Added  and integrated it into the root  (DONE).
+**Completed work in this session**
+- Added application-level verification to prevent duplicate bot comments in  (DONE).
+- Created and executed a one-shot DB cleanup function in  to remove legacy duplicate comments (DONE).
 
-**Earlier issues found/mentioned but not fixed**:
-  *(None)*
+**Earlier issues found/mentioned but not fixed**
+   *(None)*
 
-**Known issue recurrence from previous fork**:
-  - Issue recurrence in previous fork: Deep link scrolling & mention logic.
+**Known issue recurrence from previous fork**
+  - Issue recurrence in previous fork: Deep link scrolling & mention logic inside .
   - Recurrence count: 3+
-  - Status: RESOLVED
-  Note: Be highly aware of the complex  chains managing  inside . DO NOT refactor this file without extreme caution.
+  - Status: RESOLVED (Do not touch unless explicitly requested).
 
-**Code Architecture**:
-- : FastAPI entry point with gzip, rate-limiting, and caching applied.
-- : Centralized in-memory cache logic.
-- : Centralized stale-while-revalidate client cache.
-- : Expo router screens (using FlashList).
-- : API wrapper with network resilience (timeouts/retries).
+**Code Architecture**
+- : Core logic for bot personas, AI text generation, and DB insertion for comments/replies.
+- : FastAPI entry point containing DB index creation, cleanup scripts, and core route registrations.
 
-**Key Technical Concepts**:
--  for large dataset rendering.
--  for high-performance image caching.
--  caching strategy.
-- FastAPI in-memory TTL caching.
+**Key Technical Concepts**
+- FastAPI async architecture interacting with MongoDB.
+- Race conditions: Async loops iterating over  and  concurrently can trigger multiple DB writes before the first read acknowledges the comment exists.
 
-**key DB schema**:
-- : Contains human users and 100 bots.
-- : Monitored by the  feed.
-- Indexes: 39+ custom indexes applied in the previous fork.
+**key DB schema**
+  -  / : Standard collections where bot interactions are stored. To strictly enforce 1 bot per feud, a unique constraint mechanism at the DB level is highly recommended over purely application-level logic.
 
-**changes in tech stack**:
-- Added .
-- Actively utilizing  across core components.
+**changes in tech stack**
+  - None.
 
-**All files of reference**:
--  (new)
--  (new)
--  (new)
-- 
-- 
-- 
+**All files of reference** 
+  -  (Updated to include duplicate checking logic)
+  -  (Updated to include a startup duplicate cleanup script)
+  -  (Created by testing_agent to validate the fix)
 
-**Areas that need refactoring**:
--  (Monolithic, handle with care)
-- 
+**Areas that need refactoring**: 
+  -  and  are massive and candidates for Phase 3 refactoring.
 
-**key api endpoints**:
--  (Highly optimized, anon cached)
--  (Highly optimized, cached)
+**key api endpoints**
+  - : Triggers mass concurrent bot actions.
 
-**Critical Info for New Agent**:
+**Critical Info for New Agent**
 - **Language Requirement:** MUST communicate with the user in **Italian**.
-- **Preview Environment Note:** When making changes, remind the user that native features (like background networking or specific push behaviors) might require a fresh native build and cannot be fully validated in the web preview or standard Expo Go.
-- **Client Cache Bug:** The user previously reported seeing weird bot names (chat_a). This is 100% a local cache issue on their device. If they bring it up again, instruct them to clear app data.
+- **OpenAI Quota:** During the session, the backend logs recorded . LLM bot generations might fail right now. Focus strictly on fixing the concurrency/database constraints so the tests pass, even if the LLM mocks the output.
+- **Testing Agent Feedback:** The  explicitly returned  because the race must be fixed for the invariant to actually hold under normal burst usage. Your first action must be addressing this DB index/lock issue.
 
-**documents and test reports created in this job**:
--  (Updated with Phase 1-3 completion metrics)
--  (19/19 tests passed)
+**documents and test reports created in this job** 
+  - 
+  - 
+  -  (Updated/Verified)
 
-**Last 10 User Messages and any pending HUMAN messages**:
-1. (User) vedo bot con nomi strani in chat nei commenti... (Pending verification if cache wipe fixed it).
-2. (User) ripulisci i commenti residui... 
-3. (User) no ci sono dei nomi strani tipo chat_a, ecc. quelli intendo
-4. (Agent) Explained it's a frontend cache issue, DB is wiped.
-5. (User) Please use ask_human tool and confirm your plan now.
-6. (User) Ottimizza le performance complessive dellapp riiducendo tempi di caricamento, latenza..." (Optimize overall app performance).
-7. (Agent) Asked if all 3 phases (Backend, Frontend, Network) should be done sequentially and if `expo-image` should be installed.
-8. (User) "Tutte e 3. come pensi sia meglio" (Do all 3 phases, install expo-image).
-9. (Agent) Completed performance optimizations and presented summary.
-10. (User) "Migliora la gestione delle connessioni instabili per garantire unesperienza affidabile anche con rete lenta o intermittente. (Improve unstable connection handling). -> *Agent completed this, status is USER VERIFICATION PENDING.*
+**Last 10 User Messages and any pending HUMAN messages** 
+ - (User) Please use ask_human tool and confirm your plan now. -> (Agent) Shared plan via tool. *(Completed)*
+ - (User) un bot non deve lasciare tanti commenti sotto una stessa faida come accade ora... (A bot shouldn't leave many comments under the same feud like it does now...) -> Agent applied code logic and cleanup scripts, but tests failed due to race conditions. *(IN PROGRESS - P0)*
 
-**Project Health Check**:
-- Frontend: Highly performant, FlashList integrated, network resilience active.
-- Backend: Scalable, N+1 fixed, TTL cached.
-- Integration: Intact.
+**Project Health Check:**
+- Broken: Concurrent bot bursts bypass duplicate comment limitations due to a race condition.
+- Mocked: None.
 
-**3rd Party Integrations**:
-- Emergent-managed Google Auth
-- Emergent LLM Key (Claude Haiku 4.5 for Bot Engine)
-- YouTube Data API (Media Extraction) - Internal Key
+**3rd Party Integrations** 
+	•	Emergent-managed Google Auth
+	•	OpenAI GPT Models — Uses Emergent LLM Key (Currently hitting rate limits)
+	•	Firebase (Android Push) — requires User 
+	•	Google Mobile Ads — requires AdMob keys
 
-**Testing status**:
-  - Testing agent used after significant changes: YES (Tested backend cache optimizations, 19/19 pass + 46 regression).
+**Testing status**
+  - Testing agent used after significant changes: YES
   - Troubleshoot agent used after agent stuck in loop: NO
   - Test files created: 
-  - Known regressions: None
+  - Known regressions: Race condition in duplicate comment logic.
 
-**Credentials to test flow**:
+**Credentials to test flow:**
 Check .
 Admin Email: 
 
-**What agent forgot to execute**:
-The agent did not forget, but intentionally postponed Phase 3 of the original frontend refactoring (splitting  and ) to avoid breaking the fragile deep-link scrolling logic unless explicitly requested.</analysis>
+**What agent forgot to execute**
+The agent correctly implemented the business logic check () but forgot to account for async race conditions when multiple bot tasks process concurrently during a burst. A database-level unique index (or a strict application-level lock) is required to pass the test suite.
+
+**Debugging checklist for current issue**
+    Issue: Bot Multiple Comments Race Condition (P0)
+
+    Backend files to check: 
+    -  (Line ~5268+ inside  to add a unique index to MongoDB).
+    -  (Review  and  to handle potential  exceptions gracefully).
+
+    Database to check:
+    - MongoDB collections where comments/replies are stored need an index ensuring  and  combination is strictly unique.</analysis>

@@ -9,7 +9,7 @@ import pytest
 import requests
 from pymongo import MongoClient
 
-BASE_URL = os.environ.get("EXPO_PUBLIC_BACKEND_URL", "https://skeleton-cache-build.preview.emergentagent.com").rstrip("/")
+BASE_URL = os.environ.get("EXPO_PUBLIC_BACKEND_URL", "https://bot-burst-fix.preview.emergentagent.com").rstrip("/")
 ADMIN_KEY = "populus-admin-42b8f3"
 CHAT_A_JWT = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyXzZlNjVlMTk1MjVkNSIsImlhdCI6MTc4NzAzNTk3NywiZXhwIjoxNzg3NjQwNzc3fQ.52EPU7tw2i7pu-b8d0UteJME8QI1CVGLHLdj8UnfQZQ"
 CHAT_A_UID = "user_6e65e19525d5"

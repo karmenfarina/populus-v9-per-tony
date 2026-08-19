@@ -5325,6 +5325,63 @@ async def on_startup():
         await _bot_engine.start_scheduler()
     except Exception as e:
         logger.warning(f"bot_engine bootstrap warning: {e}")
+
+    # One-shot cleanup: bots historically left MULTIPLE top-level comments
+    # and MULTIPLE replies on the same feud (no idempotency guard existed).
+    # Enforce the "at most 1 contribution per (bot, feud)" realism rule
+    # retroactively: keep the OLDEST bot comment per feud, delete the rest;
+    # same for replies. Idempotent + safe to re-run every boot.
+    try:
+        bot_ids = [
+            u['user_id'] async for u in db.users.find(
+                {'is_bot': True}, {'_id': 0, 'user_id': 1}
+            )
+        ]
+        if bot_ids:
+            # Comments: for each (feud_id, user_id) with >1 doc, keep oldest.
+            pipeline = [
+                {'$match': {'user_id': {'$in': bot_ids}}},
+                {'$sort': {'created_at': 1}},
+                {'$group': {
+                    '_id': {'feud_id': '$feud_id', 'user_id': '$user_id'},
+                    'ids': {'$push': '$comment_id'},
+                    'count': {'$sum': 1},
+                }},
+                {'$match': {'count': {'$gt': 1}}},
+            ]
+            dup_cmt_ids: list = []
+            async for row in db.comments.aggregate(pipeline):
+                # Drop first (oldest) — keep it, delete the rest.
+                dup_cmt_ids.extend(row['ids'][1:])
+            if dup_cmt_ids:
+                # Also delete replies attached to those dropped comments so
+                # threads don't dangle. Then delete the comments themselves.
+                await db.replies.delete_many({'comment_id': {'$in': dup_cmt_ids}})
+                res = await db.comments.delete_many({'comment_id': {'$in': dup_cmt_ids}})
+                logger.info(
+                    f"bot dedupe: removed {res.deleted_count} duplicate top-level comments"
+                )
+            # Replies: for each (feud_id, user_id) with >1 doc, keep oldest.
+            pipeline_r = [
+                {'$match': {'user_id': {'$in': bot_ids}}},
+                {'$sort': {'created_at': 1}},
+                {'$group': {
+                    '_id': {'feud_id': '$feud_id', 'user_id': '$user_id'},
+                    'ids': {'$push': '$reply_id'},
+                    'count': {'$sum': 1},
+                }},
+                {'$match': {'count': {'$gt': 1}}},
+            ]
+            dup_rep_ids: list = []
+            async for row in db.replies.aggregate(pipeline_r):
+                dup_rep_ids.extend(row['ids'][1:])
+            if dup_rep_ids:
+                res = await db.replies.delete_many({'reply_id': {'$in': dup_rep_ids}})
+                logger.info(
+                    f"bot dedupe: removed {res.deleted_count} duplicate replies"
+                )
+    except Exception as e:
+        logger.warning(f"bot dedupe (one-shot) failed: {e}")
     # One-shot backfill: users who onboarded BEFORE `cronaca` was introduced
     # can't possibly have it in their favorites (it didn't exist), so the
     # "favorites-only" home filter effectively hides it from them until they

@@ -53,6 +53,30 @@ _db = None
 _scheduler = None
 _llm_lock = asyncio.Lock()
 
+# Per-(bot_id, feud_id) locks that serialize the "check-if-already-contributed
+# → insert" critical section. Without this, a concurrent bot burst can race
+# two tasks past the existence check before either has committed its write,
+# producing duplicate contributions on the same feud. In-process only —
+# sufficient because the backend runs a single worker.
+_contribution_locks: Dict[Any, asyncio.Lock] = {}
+_contribution_locks_guard = asyncio.Lock()
+
+
+async def _get_contribution_lock(bot_id: str, feud_id: str) -> asyncio.Lock:
+    """Return (creating if needed) the lock guarding contributions of
+    `bot_id` on `feud_id`. Creation itself is guarded by a module-level
+    lock so two concurrent callers can't build separate Lock objects."""
+    key = (bot_id, feud_id)
+    lock = _contribution_locks.get(key)
+    if lock is not None:
+        return lock
+    async with _contribution_locks_guard:
+        lock = _contribution_locks.get(key)
+        if lock is None:
+            lock = asyncio.Lock()
+            _contribution_locks[key] = lock
+    return lock
+
 # Story TTL constant duplicated from server.py to avoid the import
 # cycle. Keep in sync if that value ever changes there.
 _STORY_TTL_HOURS = 24
@@ -623,35 +647,69 @@ def _guess_left_side(a: str, b: str) -> Optional[str]:
     return None
 
 
+async def _bot_has_contributed(bot_id: str, feud_id: str) -> bool:
+    """Return True if this bot already left a top-level comment OR a
+    reply on the given feud. Used to enforce the "one contribution per
+    feud per bot" realism rule — real users rarely spam multiple
+    comments on the same debate. See bug report: bots leaving many
+    comments under the same feud looked unnatural.
+    """
+    if not bot_id or not feud_id:
+        return False
+    existing_comment = await _db.comments.find_one(
+        {"feud_id": feud_id, "user_id": bot_id}, {"_id": 1}
+    )
+    if existing_comment:
+        return True
+    existing_reply = await _db.replies.find_one(
+        {"feud_id": feud_id, "user_id": bot_id}, {"_id": 1}
+    )
+    return existing_reply is not None
+
+
 async def _bot_add_comment(
     bot: Dict[str, Any], feud: Dict[str, Any], side: str
 ) -> None:
     """Generate a natural short Italian comment via Claude Haiku 4.5
     and insert it into `comments`. Skips analytics + notifications.
+
+    Enforces one-contribution-per-feud: if this bot already commented
+    OR replied on this feud we skip silently (realism guard). The
+    check-and-insert critical section is protected by a per-(bot, feud)
+    asyncio lock so concurrent bot bursts cannot race duplicates
+    through the existence check.
     """
-    persona_full = _rehydrate_persona(bot)
-    llm_text = await _generate_comment(persona_full, feud, side)
-    if not llm_text:
-        return
-    # Basic length safety + cleanup
-    llm_text = _clean_comment(llm_text)
-    if not llm_text:
-        return
-    now = _now()
-    doc = {
-        "comment_id": f"cmt_bot_{bot['user_id']}_{feud['feud_id']}_{int(now.timestamp())}",
-        "feud_id": feud["feud_id"],
-        "user_id": bot["user_id"],
-        "nickname": bot.get("nickname"),
-        "side": side,
-        "text": llm_text,
-        "mentions": [],
-        "created_at": now,
-    }
-    try:
-        await _db.comments.insert_one(doc)
-    except Exception as e:
-        logger.warning(f"bot comment insert failed: {e}")
+    lock = await _get_contribution_lock(bot["user_id"], feud["feud_id"])
+    async with lock:
+        if await _bot_has_contributed(bot["user_id"], feud["feud_id"]):
+            return
+        persona_full = _rehydrate_persona(bot)
+        llm_text = await _generate_comment(persona_full, feud, side)
+        if not llm_text:
+            return
+        # Basic length safety + cleanup
+        llm_text = _clean_comment(llm_text)
+        if not llm_text:
+            return
+        # Re-check inside the lock, right before the write, in case the LLM
+        # call above took long enough that another task committed first.
+        if await _bot_has_contributed(bot["user_id"], feud["feud_id"]):
+            return
+        now = _now()
+        doc = {
+            "comment_id": f"cmt_bot_{bot['user_id']}_{feud['feud_id']}_{int(now.timestamp())}",
+            "feud_id": feud["feud_id"],
+            "user_id": bot["user_id"],
+            "nickname": bot.get("nickname"),
+            "side": side,
+            "text": llm_text,
+            "mentions": [],
+            "created_at": now,
+        }
+        try:
+            await _db.comments.insert_one(doc)
+        except Exception as e:
+            logger.warning(f"bot comment insert failed: {e}")
 
 
 async def _bot_add_reply(
@@ -675,6 +733,10 @@ async def _bot_add_reply(
     """
     feud_id = feud.get("feud_id")
     if not feud_id:
+        return
+    # Realism guard: at most ONE contribution per feud per bot (either a
+    # top-level comment or a reply — never accumulate multiple).
+    if await _bot_has_contributed(bot["user_id"], feud_id):
         return
     # Fetch bot ids (used to filter out replies to other bots)
     bot_ids = [
@@ -728,11 +790,17 @@ async def _bot_add_reply(
         "mentions": [],
         "created_at": now,
     }
-    try:
-        await _db.replies.insert_one(reply_doc)
-    except Exception as e:
-        logger.warning(f"bot reply insert failed: {e}")
-        return
+    # Serialize the final "re-check + insert" step per (bot, feud) so that
+    # concurrent bursts cannot slip two contributions past the guard.
+    lock = await _get_contribution_lock(bot["user_id"], feud_id)
+    async with lock:
+        if await _bot_has_contributed(bot["user_id"], feud_id):
+            return
+        try:
+            await _db.replies.insert_one(reply_doc)
+        except Exception as e:
+            logger.warning(f"bot reply insert failed: {e}")
+            return
     # Notify parent-comment author (never bots).
     try:
         parent_uid = parent.get("user_id")

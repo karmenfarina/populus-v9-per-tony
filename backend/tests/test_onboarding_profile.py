@@ -4,7 +4,7 @@ import uuid
 import pytest
 import requests
 
-BASE_URL = "https://skeleton-cache-build.preview.emergentagent.com"
+BASE_URL = "https://bot-burst-fix.preview.emergentagent.com"
 
 
 @pytest.fixture
