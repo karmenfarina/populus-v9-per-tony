@@ -1,0 +1,38 @@
+{
+  "summary": "Iter 155 — Stories viewer auto-advance glitch fix reviewed. Backend smoke tests 5/5 PASS (1.59s). Frontend loaded OK, no red screen, login page rendering correctly. Code review of the 3-part fix in /app/frontend/app/(tabs)/stories/viewer/[userId].tsx confirms: (a) advanceLockRef guard is layered correctly BEFORE setProgress (line 561), lock is set inside the setProgress functional updater right before setIdx(currentIdx+1) (line 575), and released in useEffect [idx] (line 607); (b) progress-bar rendering switched from `width: X%` to `transform: [{ scaleX: pct }]` + `transformOrigin: 'left center'` in styles (line 1050) — dimensionally equivalent to the previous width-based approach, but immune to RN Web's implicit CSS transitions on `width` that were producing the visible 'sweep' of previously-seen bars during auto-advance; (c) progress-track key changed from `key={i}` to `key={`${currentUserId}-${i}`}` (line 773) — forces the whole strip to unmount+remount when the user changes, eliminating any intermediate state where old-user bar count leaks into the new user's render. Manual goNext/goPrev call setIdx directly and bypass advanceLockRef — safe because the useEffect [idx] resets the lock on every idx change (line 607). MINOR observation (edge case): jumpToUser branches (lines 302-306 and 316-320) do NOT explicitly reset advanceLockRef.current; they rely on setIdx changing idx to trigger the release effect. In the rare case that the target user's start idx equals the current idx (e.g., both at 0), React won't fire the [idx] effect and the lock could remain stuck. Recommended: add `advanceLockRef.current = false;` next to `setProgress(0)` in those two branches. Not blocking; safe to ship. The user reported the glitch is only reproducible on production APK, so visual regression must be validated post-redeploy on device.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter155_stories_viewer_smoke.py",
+    "/app/test_reports/pytest/iter155.xml"
+  ],
+  "action_items": [
+    "OPTIONAL (edge-case safety): reset advanceLockRef.current = false in the two jumpToUser success branches (viewer/[userId].tsx around line 306 and line 320, next to `setProgress(0)`). Covers the rare case where the target user's start idx equals the current idx and the [idx] useEffect doesn't fire → lock would remain stuck. Not blocking.",
+    "POST-REDEPLOY (main-user validation): the glitch was only reported on production APK. Ask the user to re-verify auto-advance after redeploy — testing on desktop web preview cannot reproduce the width-transition sweep."
+  ],
+  "critical_code_review_comments": [
+    "viewer/[userId].tsx:561 — the `if (advanceLockRef.current) return;` guard is placed INSIDE the interval callback but OUTSIDE the setProgress updater. Correct: it prevents the second tick from even entering the updater when a setIdx is in flight.",
+    "viewer/[userId].tsx:575-577 — the order (set advanceLock=true, then dispatch setIdx) inside the setProgress functional updater is atomic from React's perspective: the ref mutation happens synchronously before the state dispatch is queued. No race.",
+    "viewer/[userId].tsx:605-608 — releasing the lock in useEffect [idx] is the correct anchor point because idx is the very state whose commit closes the transition window. `setProgress(0)` is redundant with the return-0 inside the updater but not harmful.",
+    "viewer/[userId].tsx:773 — using `${currentUserId}-${i}` as the key is a strong guarantee against DOM/RN element reuse across user swaps. Combined with the atomic jumpToUser swap (currentUserId + stories set together), this eliminates the class of bugs where an old bar count briefly renders against the new stories array.",
+    "viewer/[userId].tsx:1039-1051 — the progress bar container has width:'100%', height:'100%' and `transformOrigin: 'left center'`. scaleX(0) collapses the fill to zero width from the left edge (correct visual), scaleX(1) covers the full track (correct visual). Confirmed dimensionally equivalent to the old width:X%.",
+    "viewer/[userId].tsx:302-306, 316-320 — jumpToUser branches rely on setIdx to change to trigger the [idx] useEffect that releases advanceLockRef. Edge case: if target idx equals current idx, effect doesn't run → lock stuck. Belt-and-braces: add explicit `advanceLockRef.current = false;` in both branches."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter155_stories_viewer_smoke.py (NEW — 5 smoke tests: /api/stories/feed reachable for anon, anonymous auth still works, /api/stories/{id}/view returns 404/403 for unknown id, unauth 401/403, /api/stories/user/{id} reachable)"
+  ],
+  "success_rate": {
+    "backend": "100% (5/5 iter155 smoke PASS in 1.59s)",
+    "frontend": "Home page loads OK on mobile viewport, no red screen, no page errors. Deep viewer testing skipped per review_request note (glitch only visible on production APK, not on desktop web preview)."
+  },
+  "seed_data_creation": "3 anon users created via /api/auth/anonymous with TESTiter155_ prefix (auto-cleaned by iter141 cleanup job).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "The story viewer glitch fix combines: (1) advanceLockRef useRef guard in the interval to prevent double-advance across a stale tick, (2) transform:scaleX instead of width:X% for the progress fill to bypass RN Web implicit CSS transitions on width, (3) key including currentUserId to force unmount+remount of the progress-bar strip on user swap. Visual validation must happen on production APK per the reporter. Backend endpoints /api/stories/feed and /api/stories/{id}/view are healthy.",
+  "rca_of_issue": "Reported: during auto-advance in the stories viewer, before landing on the next unseen story, the progress bars of the already-viewed stories appeared to sweep across very fast. Two combined causes diagnosed: (A) the 50ms setInterval could tick twice across an advance because the second tick would run against the STALE `p` value that hadn't yet been committed by the first tick's setIdx — this queued a second advance in the same frame, visually manifesting as skipping stories; (B) the progress bar used `width: X%` as an inline style, and some browsers/CSS resets apply implicit transitions on `width`, so when the strip re-rendered after setIdx, the past bars appeared to animate from their old pct to 1 rather than snapping instantly. FIX: (1) advanceLockRef guard skips the second tick until [idx] useEffect releases it; (2) transform:scaleX with transformOrigin:'left center' is not subject to implicit width transitions; (3) key includes currentUserId to remount the strip on user switch. Backend endpoints unchanged. Testing constraint: the width-transition sweep is only visible in APK/browser environments that apply implicit transitions — desktop web preview does not reliably reproduce it, so post-redeploy device validation is required."
+}

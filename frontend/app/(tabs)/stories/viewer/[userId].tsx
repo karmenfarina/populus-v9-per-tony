@@ -159,6 +159,13 @@ export default function StoriesViewer() {
   // ends. It is NOT used by the X button, delete, or manual goNext —
   // those must always work even after an auto-advance close attempt.
   const autoCloseFiredRef = useRef(false);
+  // Anti double-advance guard: while an auto-advance transition is in
+  // flight (setIdx dispatched, next render not committed yet), the
+  // 50ms interval can fire a second time on the STALE `p` state and
+  // trigger a second advance in one frame — the visible symptom is
+  // "past bars appear to scroll past very fast before landing on the
+  // next unseen story". Reset via useEffect on [idx].
+  const advanceLockRef = useRef(false);
 
   // Track in-flight view-mark promises so the close handler can wait
   // for them to settle before releasing navigation — Home's refetch
@@ -297,6 +304,7 @@ export default function StoriesViewer() {
       setIdx(fIdx);
       setProgress(0);
       autoCloseFiredRef.current = false;
+      advanceLockRef.current = false;
       return;
     }
     const nextIdx = startFromLast
@@ -311,6 +319,7 @@ export default function StoriesViewer() {
     setIdx(nextIdx);
     setProgress(0);
     autoCloseFiredRef.current = false;
+    advanceLockRef.current = false;
   }, [currentUserId, closeViewer]);
 
   // Load takes an explicit `uid` argument (rather than closing over
@@ -548,6 +557,10 @@ export default function StoriesViewer() {
           return;
         }
         if (pausedRef.current || !imageLoadedRef.current) return;
+        // If an advance is already in flight (dispatched setIdx not yet
+        // committed), skip this tick so we don't queue a second one on
+        // top of a stale `p`.
+        if (advanceLockRef.current) return;
         setProgress((p) => {
           const next = p + INCREMENT;
           if (next >= 1) {
@@ -561,6 +574,7 @@ export default function StoriesViewer() {
               jumpToUser("next");
               return 1;
             }
+            advanceLockRef.current = true;
             setIdx(currentIdx + 1);
             return 0;
           }
@@ -588,8 +602,12 @@ export default function StoriesViewer() {
   useEffect(() => { imageLoadedRef.current = imageLoaded; }, [imageLoaded]);
 
   // Reset progress every time the user manually navigates to a new
-  // story (either via tap or after auto-advance).
-  useEffect(() => { setProgress(0); }, [idx]);
+  // story (either via tap or after auto-advance). Also release the
+  // anti-double-advance lock so the next legitimate advance can fire.
+  useEffect(() => {
+    setProgress(0);
+    advanceLockRef.current = false;
+  }, [idx]);
 
   // Track in-flight view-mark promises so the close/back handler can
   // wait for them to settle before letting the Home tab refetch its
@@ -740,25 +758,34 @@ export default function StoriesViewer() {
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
         {/* Progress-bar strip. Only the currently active bar animates;
-            past bars are solid, future bars are dimmed. */}
+            past bars are solid, future bars are dimmed. `key` includes
+            currentUserId so switching between users unmounts+remounts
+            the whole strip instead of reusing bars — otherwise the
+            diff between the old user's bar count and the new one
+            could render intermediate states that look like a "fast
+            scroll" through already-seen bars. */}
         <View style={styles.progressStrip}>
-          {stories.map((_, i) => (
-            <View key={i} style={styles.progressTrack}>
-              <View
-                style={[
-                  styles.progressFill,
-                  {
-                    width:
-                      i < idx
-                        ? "100%"
-                        : i === idx
-                          ? `${Math.min(100, Math.max(0, progress * 100))}%`
-                          : "0%",
-                  },
-                ]}
-              />
-            </View>
-          ))}
+          {stories.map((_, i) => {
+            const pct = i < idx
+              ? 1
+              : i === idx
+                ? Math.min(1, Math.max(0, progress))
+                : 0;
+            return (
+              <View key={`${currentUserId}-${i}`} style={styles.progressTrack}>
+                <View
+                  style={[
+                    styles.progressFill,
+                    // Using transform+scaleX (with left-anchored origin)
+                    // instead of `width: X%` avoids implicit CSS
+                    // transitions on RN Web that made past bars appear
+                    // to sweep in quickly at story-to-story handoff.
+                    { transform: [{ scaleX: pct }] },
+                  ]}
+                />
+              </View>
+            );
+          })}
         </View>
 
         {/* Author header. The avatar + nickname block is tappable —
@@ -1012,8 +1039,17 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   progressFill: {
+    // Full-width fill anchored to left; the visible portion is driven
+    // by `transform: scaleX(pct)`. Left origin so the fill grows from
+    // the left edge instead of the center (default). This is set
+    // per-platform: on web we use `transformOrigin`; on native the
+    // View is fully-wide by default, so scaleX shrinks around center
+    // unless we pin the origin. `transformOrigin` on the style is
+    // supported by RN >=0.74 & react-native-web.
     height: "100%",
+    width: "100%",
     backgroundColor: "#fff",
+    transformOrigin: "left center",
   },
   headerRow: {
     flexDirection: "row",
