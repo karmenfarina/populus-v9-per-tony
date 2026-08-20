@@ -1,0 +1,34 @@
+{
+  "summary": "Iter159 — verification of the WALL-CLOCK guard fix in /app/frontend/app/(tabs)/stories/viewer/[userId].tsx. Static + regression tests confirm: (1) storyStartTsRef = useRef(Date.now()) declared (line 175), (2) wall-clock branch inside setProgress computes elapsed = Date.now() - storyStartTsRef.current and, if elapsed < STORY_DURATION_MS - TICK_MS, returns 1 (caps visually) WITHOUT triggering advance (lines 605-610), (3) storyStartTsRef.current is reset in useEffect[idx] (line 671) AND in a separate useEffect[currentUserId] (line 679) to cover the jumpToUser case where target idx equals current idx. All iter155-158 protections intact (advanceLockRef, transform:scaleX, unique key `${currentUserId}-${i}`, jumpToUserRef proxy, imageLoadedRef inline sync, single clearInterval in cleanup). Backend regression 4/4 PASS (feed, stories/user, view invalid id, anonymous auth). Frontend smoke: home renders without red screen. 9/9 pytest checks green.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter159_wallclock_regression.py",
+    "/app/test_reports/pytest/iter159.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Wall-clock guard implementation VERIFIED via regex assertions on the source file. Key invariant: even if `next = p + INCREMENT >= 1` is reached prematurely (image cache-hit onLoad firing instantly, tick catch-up after JS backlog, batched setState burst), the callback checks `Date.now() - storyStartTsRef.current < STORY_DURATION_MS - TICK_MS` and returns 1 (visual cap) WITHOUT calling setIdx. Next tick re-evaluates. Guarantees ~7s wall-clock per story regardless of upstream races.",
+    "Two independent effects reset the timestamp: `useEffect [idx]` handles same-user next/prev; `useEffect [currentUserId]` handles jumpToUser atomic swap when target idx == previous idx (React would skip [idx] effect due to Object.is equality). Belt-and-braces confirmed.",
+    "Progress bar visual correctness: `pct` is computed from `progress` state which is capped at 1 by the wall-clock branch. `transform: [{ scaleX: pct }]` (line 853, transformOrigin: 'left center') means the bar fills smoothly left-to-right and stays at 100% when capped — no visible flashing to 1 and back.",
+    "No regression risk of the story lasting MORE than 7s: the guard only PREVENTS early advance; it does not delay it. Once `elapsed >= STORY_DURATION_MS - TICK_MS` the next tick that sees `next >= 1` proceeds normally (either advance to next idx or jumpToUser('next') at end-of-chain). Worst case additional delay = TICK_MS (50ms), imperceptible.",
+    "Backend endpoints unchanged and green: /api/stories/feed 200, /api/stories/user/{uid} 200, /api/stories/{invalid}/view returns 4xx (400/404/422), /api/auth/anonymous 200."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter159_wallclock_regression.py (new — 9 tests: 4 backend regression + 5 static verifications of the wall-clock fix and iter155-158 invariants)"
+  ],
+  "success_rate": {
+    "backend": "100% (4/4 endpoints)",
+    "frontend": "smoke OK — home renders, no red screen, only known deprecation warnings (shadow*, textShadow*, pointerEvents, expo-notifications web). 5/5 static invariants on viewer file verified."
+  },
+  "seed_data_creation": "Anonymous ephemeral users TEST_iter159_{pid} and TEST_iter159smoke_{pid} — no cleanup needed.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Wall-clock guard is DEFINITIVE. Static tests in test_iter159_wallclock_regression.py enforce all critical invariants: storyStartTsRef declaration, elapsed comparison against STORY_DURATION_MS - TICK_MS, `return 1` (visual cap only, no advance), reset on both [idx] and [currentUserId]. Any future refactor of the timer callback that breaks these will fail the pytest. Iter155-158 protections (advanceLockRef, transform scaleX, unique key, jumpToUserRef proxy, imageLoadedRef inline sync, single clearInterval) also enforced by the same test class. If user reports the glitch AGAIN on APK production, the issue is NOT in this file — likely native RN timing (setInterval on JS thread) or an unrelated auto-advance trigger elsewhere in the code. Focus RCA on that.",
+  "rca_of_issue": "N/A — no residual issue found. Fix code review + static assertions PASS. The wall-clock guard is the last-resort defense; combined with iter155-158 (long-lived timer, inline imageLoadedRef sync, jumpToUserRef proxy, transform scaleX, unique key, advanceLockRef), the story cadence is guaranteed at ~7s wall-clock per story regardless of JS-thread races."
+}

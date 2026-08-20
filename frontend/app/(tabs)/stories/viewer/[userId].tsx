@@ -166,6 +166,13 @@ export default function StoriesViewer() {
   // "past bars appear to scroll past very fast before landing on the
   // next unseen story". Reset via useEffect on [idx].
   const advanceLockRef = useRef(false);
+  // Wall-clock guard: even if progress somehow reaches 1 early (image
+  // cache-hit, tick catch-up after JS backlog, batched setStates
+  // completing in a burst, whatever), the story MUST stay visible for
+  // at least STORY_DURATION_MS − a small tolerance. This is the last
+  // line of defense against "several stories flash past very fast":
+  // no matter what races upstream, wall-clock decides the cadence.
+  const storyStartTsRef = useRef<number>(Date.now());
 
   // Track in-flight view-mark promises so the close handler can wait
   // for them to settle before releasing navigation — Home's refetch
@@ -588,6 +595,19 @@ export default function StoriesViewer() {
         setProgress((p) => {
           const next = p + INCREMENT;
           if (next >= 1) {
+            // Wall-clock guard: refuse to advance if less than
+            // STORY_DURATION_MS (minus a small tick tolerance) has
+            // actually elapsed since this story became active. This
+            // clamps ANY upstream race — batched setState catch-up,
+            // stale imageLoadedRef reads, tick bursts after JS
+            // backlog, cache-hit onLoad firing instantly — into a
+            // guaranteed 7s per-story cadence.
+            const elapsed = Date.now() - storyStartTsRef.current;
+            if (elapsed < STORY_DURATION_MS - TICK_MS) {
+              // Cap progress at 1 (visually complete) but don't
+              // trigger the advance yet. Next tick will re-evaluate.
+              return 1;
+            }
             const currentIdx = idxRef.current;
             if (currentIdx + 1 >= storiesRef.current.length) {
               // End of THIS user's chain — try to hop to the next
@@ -643,11 +663,21 @@ export default function StoriesViewer() {
 
   // Reset progress every time the user manually navigates to a new
   // story (either via tap or after auto-advance). Also release the
-  // anti-double-advance lock so the next legitimate advance can fire.
+  // anti-double-advance lock and re-arm the wall-clock guard so the
+  // new story is guaranteed a full STORY_DURATION_MS visible window.
   useEffect(() => {
     setProgress(0);
     advanceLockRef.current = false;
+    storyStartTsRef.current = Date.now();
   }, [idx]);
+  // ALSO re-arm when the user chain changes (jumpToUser fires setIdx
+  // even if the target idx equals the current one — e.g. both users
+  // start at 0). Without this the wall-clock guard would compare
+  // against the previous user's start timestamp and immediately allow
+  // an advance.
+  useEffect(() => {
+    storyStartTsRef.current = Date.now();
+  }, [currentUserId]);
 
   // Track in-flight view-mark promises so the close/back handler can
   // wait for them to settle before letting the Home tab refetch its
