@@ -1,0 +1,38 @@
+{
+  "summary": "Iter 154 — Anti-generic caption filter in _generate_story_caption validated end-to-end. All 25 iter154 tests PASS (0.88s). NEW filter behaviour verified: (a) generic short captions ('questo mi piace', 'veramente interessante', 'ma quanto e vero questo', 'mi ritrovo in questo', 'mi tocca il cuore') on a feud with keywords 'Meloni'/'Schlein'/'PNRR' are rejected → None; (b) captions containing a party keyword ('Meloni ha ragione sul PNRR, e ora?') or a title keyword ('questo PNRR e un pasticcio') pass through verbatim; (c) long captions (>=90 chars) bypass the keyword check even with zero pool hits; (d) case-insensitive matching works ('MELONI' matches pool 'meloni'); (e) accent-insensitive via NFD works ('perché è così importante ora?' matches pool 'Perché'); (f) stopwords do NOT count: caption 'questo e fatto molto bene' on title 'Questo e un test' correctly REJECTED (all-stopwords caption), while 'il test dice altro' PASSES (non-stopword pool token 'test'); (g) iter153 refusal filter still triggers first ('Non posso commentare', 'Mi serve il post', 'Quale post stai condividendo'); (h) system+user prompts contain the new 'VIETATE' clause and 120-char cap. Integration tests on _bot_create_story: generic caption → story doc inserted with comment=''; valid keyword caption → persisted verbatim; iter146 anti-dup + 1/24h quota still hold. HTTP regression: /api/feuds 200, /api/auth/anonymous 200, /api/stories/feed reachable. Two iter153 tests now fail — NOT regressions, just outdated fixtures whose captions ('una frase pertinente', 'dibattito acceso questo') are correctly caught by the new filter because they contain no pool keyword; main agent may want to update those two fixtures to use keyword-bearing strings (e.g. 'PNRR' or party names).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter154_anti_generic_caption.py",
+    "/app/test_reports/pytest/iter154.xml",
+    "/app/test_reports/pytest/iter154_iter153_regression.xml"
+  ],
+  "action_items": [
+    "OPTIONAL: update 2 outdated iter153 test fixtures whose captions are now (correctly) caught by the new anti-generic filter — replace 'una frase pertinente' with e.g. 'PARTY_ALPHA_XYZ ha ragione' and 'dibattito acceso questo' with e.g. 'dibattito acceso su PARTY_ALPHA_XYZ' in test_iter153_story_caption_context.py:181 and :330. The tests would then verify the new pass-through behaviour instead of failing on the new filter. Not blocking — the iter154 suite already covers those scenarios.",
+    "OPTIONAL: consider expanding the Italian stopwords set as more filler patterns show up in production (e.g. 'perche' with apostrophe as pseudo-accent — currently 6 chars and not a stopword, so it would count as a keyword. Fine for the current use case since Italian feuds rarely use bare 'perche' as a subject term)."
+  ],
+  "critical_code_review_comments": [
+    "bot_engine.py:1050-1084 — the anti-generic filter is layered correctly AFTER the refusal filter and BEFORE the accept path. NFD normalisation via unicodedata + lowercase gives robust case+accent insensitivity. Stopword list is scoped to short Italian filler tokens that would otherwise create false positives (any title with 'questo' would let any caption pass).",
+    "bot_engine.py:1075-1079 — the pool is built from `f'{title} {party_a} {party_b}'` split by whitespace with punctuation stripped via strip('«»\"\\'.,;:!?()[]{}'). This handles quoted party names cleanly. Edge case not covered: hyphenated compound tokens ('Meloni-Salvini') would keep the hyphen — probably fine because the caption would repeat one of the halves.",
+    "bot_engine.py:1080-1084 — the >=90 char bypass is a sensible heuristic (a long caption is likely narrative/opinionated, not filler), but note: a 90+ char generic complaint like 'boh non lo so davvero ma sinceramente non mi piace per niente sto post veramente troppo strano' would bypass. Acceptable tradeoff — such captions are rare and less obviously bot-like than 4-word fillers.",
+    "bot_personas.py:593-612 — story_prompt_for now hardcodes both the 'cita fazione/soggetto' obligation AND the explicit ban list. Same wording for all 100 bots (no persona interpolation), which is fine and keeps the ban list uniform.",
+    "bot_engine.py:1000-1005 — user_prompt also duplicates the ban list. Some redundancy with system prompt, but LLMs respect user-prompt constraints slightly better when both are stated, so worthwhile."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter154_anti_generic_caption.py (NEW — 25 tests: 5 param'd generic-rejects + 2 keyword-pass + 2 long-bypass + 2 case/accent + 2 stopwords + 3 refusal-regression + 2 prompt-content + 4 _bot_create_story integration + 3 HTTP regression)"
+  ],
+  "success_rate": {
+    "backend": "100% (25/25 iter154 PASS in 0.88s). iter153 regression: 16/18 pass — the 2 failures are outdated fixtures newly caught by the anti-generic filter, NOT production regressions.",
+    "frontend": "not tested (backend-only per review request); expo service confirmed RUNNING under supervisor"
+  },
+  "seed_data_creation": "Each _bot_create_story integration test deletes bot stories for the picked bot before AND after (finally block). One anon signup with TESTiter154_<hex> prefix. No persistent data left in DB.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "The anti-generic filter is layered on top of the iter153 refusal filter at /app/backend/bot_engine.py:1050-1084. Order: refusal filter → generic filter → accept. Keywords are pulled from title + party_a + party_b (>=4 chars, minus Italian stopword set including 'questo/molto/fatto/bene/…'). NFD normalisation strips accents. Long captions (>=90 chars) bypass keyword check. Mocking pattern still works: inject fake emergentintegrations.llm.chat into sys.modules before importlib.reload(bot_engine) — see _install_fake_llm() in test_iter154_anti_generic_caption.py. The iter153 test file has 2 stale fixtures that now fail (captions 'una frase pertinente' and 'dibattito acceso questo' have no pool keyword) — not a bug in the fix, just outdated test data.",
+  "rca_of_issue": "User reported bot story captions were too generic ('Questo mi piace', 'Veramente interessante', 'Ma quanto e vero questo') — obviously bot-like, added zero context. Iter153 already fixed the meta-refusal problem but left a hole: even when the LLM returned a caption ABOUT something, it often defaulted to bland filler because Claude Haiku falls back to reactions when the system prompt is generic. Fix (iter154): (a) system prompt (bot_personas.story_prompt_for) reinforced with an explicit ban list of generic phrases and OBBLIGATORIO clause requiring reference to fazione/soggetto, max 120 chars; (b) user prompt (bot_engine._generate_story_caption) mirrors the same rules; (c) NEW post-response filter: if caption is <90 chars AND contains no >=4-char non-stopword token from title/party_a/party_b, return None → caller stores comment=''. Layered defensively: (a)+(b) reduce generic output; (c) hard-fails whatever slips through. 25/25 iter154 tests validate all three layers plus refusal-filter interaction and _bot_create_story integration."
+}

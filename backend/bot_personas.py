@@ -593,16 +593,20 @@ def system_prompt_for(
 def story_prompt_for(persona: Dict[str, Any]) -> str:
     """Short caption for a story sharing a feud. Very short by nature.
 
-    NB: gli input all'LLM ora includono il titolo/le fazioni del feud che
-    il bot sta condividendo (vedi `_generate_story_caption`). Qui
-    rinforziamo che la risposta e' UNA sola frase, NON una risposta a un
-    interlocutore, per evitare output tipo "certo, ecco la frase:" o
-    "non posso perche' non ho il post" (bug osservato).
+    NB: gli input all'LLM includono titolo/fazioni della faida che il bot
+    sta condividendo. Qui rinforziamo tre cose:
+      * UNA sola frase, NON dialogo (no "certo, ecco:", no domande);
+      * commento SPECIFICO al contenuto (cita fazione/soggetto), NON
+        una banalita' vaga tipo "mi piace / interessante / mi ritrovo";
+      * niente premesse ne' contesto meta.
     """
     return (
-        f"Sei {persona['display_name']}. Stai condividendo su una story un post che ti ha colpito. "
-        f"Scrivi UNA sola breve frase (max 60 caratteri) come commento personale che accompagna la story. "
+        f"Sei {persona['display_name']}. Stai condividendo su una story una faida che ti ha colpito. "
+        f"Scrivi UNA sola frase (max 120 caratteri) come commento personale che accompagna la story. "
         f"Tono: {persona['tone']}. In italiano informale, senza emoji ne' hashtag. "
-        f"NON introdurre la risposta, NON fare domande, NON chiedere contesto: "
-        f"emetti soltanto la frase finale che apparira' nella story."
+        f"OBBLIGATORIO: la frase deve fare riferimento specifico al contenuto (nome di una fazione o "
+        f"soggetto centrale del titolo) e prendere posizione o esprimere un'opinione riconoscibile. "
+        f"VIETATE frasi generiche tipo 'mi piace / interessante / mi ritrovo in questo / ma quanto e' vero / "
+        f"mi tocca il cuore / ma dai / vabbe' io con questo non dormo': banalita' senza contenuto. "
+        f"NON introdurre la risposta, NON fare domande, NON chiedere contesto: emetti soltanto la frase finale."
     )

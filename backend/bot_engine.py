@@ -997,9 +997,12 @@ async def _generate_story_caption(
     user_prompt = (
         f"Stai condividendo QUESTO post nella tua story: «{title}». "
         f"Categoria: {cat}. {parties_line}"
-        f"Scrivi UNA sola breve frase personale (max 60 caratteri) che accompagni "
-        f"la condivisione — commento tuo sul contenuto del post, NON una risposta "
-        f"a me. Rispondi solo con la frase, senza premesse."
+        f"Scrivi UNA sola frase personale (max 120 caratteri) che accompagni la condivisione. "
+        f"OBBLIGATORIO: cita almeno UNA delle due fazioni per nome (o il soggetto principale del titolo) "
+        f"e prendi una posizione o esprimi un'opinione riconoscibile — non una generica reazione. "
+        f"VIETATO scrivere frasi vaghe tipo 'mi piace', 'veramente interessante', 'ma quanto e' vero', "
+        f"'mi ritrovo in questo', 'mi tocca il cuore', 'ma dai davvero?' o simili banalita' senza contenuto. "
+        f"Rispondi solo con la frase, in italiano informale, senza premesse ne' emoji ne' hashtag."
     )
     async with _llm_lock:
         try:
@@ -1044,6 +1047,41 @@ async def _generate_story_caption(
             if _refusal_re.search(low):
                 logger.info(f"story caption refusal filtered: {text[:80]}")
                 return None
+            # Second filter: reject GENERIC / vague captions that don't
+            # reference the actual feud content. User complaint: bot
+            # captions like "questo mi piace", "veramente interessante",
+            # "ma quanto e' vero questo" are too obviously bot-generated
+            # and add zero context. We require the caption to reference
+            # at least one significant word (>=4 chars) from either
+            # `title` or `party_a`/`party_b`. Falls back to accepting
+            # captions >=90 chars if no match (a long caption is unlikely
+            # to be a bare generic filler).
+            import unicodedata as _ud
+            def _norm(s: str) -> str:
+                s = _ud.normalize('NFD', s.lower())
+                return ''.join(c for c in s if not _ud.combining(c))
+            _text_norm = _norm(text)
+            _pool = f"{title} {party_a} {party_b}"
+            _stopwords = {
+                'della','delle','degli','dello','sulla','sulle','sugli',
+                'sopra','sotto','sono','stato','stata','stanno','essere',
+                'questa','questo','questi','queste','quello','quella',
+                'quelli','quelle','molto','molta','molti','molte','ancora',
+                'anche','dopo','prima','tanto','tanti','proprio','tutti',
+                'tutte','contro','vero','vera','bene','male','fatto',
+                'fatti','cosa','cose','punto','punti','giorno','giorni',
+                'volta','volte','oggi','ieri','domani',
+            }
+            keywords = {
+                _norm(w).strip('«»"\'.,;:!?()[]{}') for w in _pool.split()
+                if len(w) >= 4
+            }
+            keywords = {k for k in keywords if len(k) >= 4 and k not in _stopwords}
+            if keywords:
+                has_hook = any(k in _text_norm for k in keywords)
+                if not has_hook and len(text) < 90:
+                    logger.info(f"story caption too generic (no keyword hook): {text[:80]}")
+                    return None
             return text
         except Exception as e:
             logger.warning(f"LLM story caption failed: {e}")
