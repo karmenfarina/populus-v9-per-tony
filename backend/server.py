@@ -7581,29 +7581,88 @@ async def stories_feed(user: dict = Depends(get_current_user)):
     ).to_list(500)
     circle_ids = [r['friend_id'] for r in circle_rows if r.get('friend_id')]
 
-    # Collect all authors we may show: self + circle + a rotating mix
-    # of bot authors. Bot stories exist in the DB (created by the bot
-    # engine when a bot "gets hit" by a feud — see
-    # bot_engine._bot_create_story) but WITHOUT this bot bucket they'd
-    # be invisible in-app: the story feed used to only show self+circle,
-    # and no real user adds bots to their circle. We now pick a stable
-    # random slice of bot authors (deterministic per calling user +
-    # UTC day so the top strip doesn't reshuffle on every pull-to-
-    # refresh, but rotates day-to-day for variety).
+    # "Interacted" bucket: users I've engaged with in the debate
+    # threads. This is the second-tier priority after my circle — I
+    # want their stories BEFORE random bots. Two sources:
+    #   1. Authors of comments I replied to (I engaged with them)
+    #   2. Authors of replies to my comments (they engaged with me)
     circle_set = set(circle_ids)
+    my_comment_ids = set()
+    my_comments_by_author: dict = {}  # author -> not needed, just for shape
+    async for c in db.comments.find(
+        {'user_id': me},
+        {'_id': 0, 'comment_id': 1},
+    ):
+        cid = c.get('comment_id')
+        if cid:
+            my_comment_ids.add(cid)
+
+    interacted_ids: set = set()
+    # 2. Replies made TO my comments — their authors are people
+    #    engaging with me. Bounded to avoid huge queries.
+    if my_comment_ids:
+        async for r in db.replies.find(
+            {'comment_id': {'$in': list(my_comment_ids)}, 'user_id': {'$ne': me}},
+            {'_id': 0, 'user_id': 1},
+        ):
+            uid = r.get('user_id')
+            if uid:
+                interacted_ids.add(uid)
+    # 1. Comments I replied to → look up their authors.
+    my_reply_targets: set = set()
+    async for r in db.replies.find(
+        {'user_id': me},
+        {'_id': 0, 'comment_id': 1},
+    ):
+        cid = r.get('comment_id')
+        if cid:
+            my_reply_targets.add(cid)
+    if my_reply_targets:
+        async for c in db.comments.find(
+            {'comment_id': {'$in': list(my_reply_targets)}, 'user_id': {'$ne': me}},
+            {'_id': 0, 'user_id': 1},
+        ):
+            uid = c.get('user_id')
+            if uid:
+                interacted_ids.add(uid)
+    # Strip out anyone already in the circle (they're in a higher
+    # tier) or myself.
+    interacted_ids.discard(me)
+    interacted_ids -= circle_set
+    # Only keep interacted users who ACTUALLY have an active story —
+    # otherwise we don't need them in the query set at all.
+    if interacted_ids:
+        active_authors = await db.stories.distinct(
+            'user_id',
+            {'user_id': {'$in': list(interacted_ids)}, 'expires_at': {'$gt': now}},
+        )
+        interacted_ids = set(active_authors)
+    # Cap the interacted bucket to keep the top strip focused.
+    interacted_list = list(interacted_ids)[:16]
+
+    # Third-tier bucket: rotating mix of bot authors. Bot stories
+    # exist in the DB (created by the bot engine when a bot "gets
+    # hit" by a feud — see bot_engine._bot_create_story) but WITHOUT
+    # this bot bucket they'd be invisible in-app: the story feed used
+    # to only show self+circle, and no real user adds bots to their
+    # circle. We now pick a stable random slice of bot authors
+    # (deterministic per calling user + UTC day so the top strip
+    # doesn't reshuffle on every pull-to-refresh, but rotates day-to-
+    # day for variety).
     bot_authors_with_active_story = await db.stories.distinct(
         'user_id',
         {'expires_at': {'$gt': now}},
     )
     bot_only = []
     if bot_authors_with_active_story:
-        # Filter to actual bots and NOT in caller circle (circle bots
-        # would already be included above).
+        # Filter to actual bots and NOT in circle/interacted (already
+        # picked up in higher tiers).
         bot_rows = await db.users.find(
             {'user_id': {'$in': bot_authors_with_active_story}, 'is_bot': True},
             {'_id': 0, 'user_id': 1},
         ).to_list(1000)
-        bot_only = [b['user_id'] for b in bot_rows if b['user_id'] not in circle_set and b['user_id'] != me]
+        exclude = circle_set | set(interacted_list) | {me}
+        bot_only = [b['user_id'] for b in bot_rows if b['user_id'] not in exclude]
     # Stable shuffle: seed = hash(caller + YYYY-MM-DD). Same user +
     # same day → same order → no visual jitter across the day.
     import hashlib as _hashlib
@@ -7614,7 +7673,16 @@ async def stories_feed(user: dict = Depends(get_current_user)):
     # Cap the bot bucket to keep the top strip manageable — 8 authors
     # is plenty and matches the count real users typically curate.
     bot_only = bot_only[:8]
-    author_ids = list({me, *circle_ids, *bot_only})
+    # Tier map used later by _sort_key. Lower tier = higher priority.
+    #   0 → me, 1 → circle, 2 → interacted, 3 → bots/others
+    interacted_set = set(interacted_list)
+    bot_set = set(bot_only)
+    def _tier(uid: str) -> int:
+        if uid == me: return 0
+        if uid in circle_set: return 1
+        if uid in interacted_set: return 2
+        return 3
+    author_ids = list({me, *circle_ids, *interacted_list, *bot_only})
     cur = db.stories.find(
         {'user_id': {'$in': author_ids}, 'expires_at': {'$gt': now}},
         {'_id': 0},
@@ -7646,20 +7714,31 @@ async def stories_feed(user: dict = Depends(get_current_user)):
             'author': rows[0]['author'] if rows and rows[0].get('author') else None,
             'has_unseen': has_unseen,
             'is_mine': author_id == me,
+            'tier': _tier(author_id),
             'stories': rows,
             'latest_ts': _iso_utc(latest),
         })
 
     # Sorting rules for the top strip:
-    #   1. Mine always first (even if all seen).
-    #   2. Unseen groups next, newest first.
-    #   3. Seen groups last, newest first.
+    #   1. Mine always first (tier 0).
+    #   2. Circle members next (tier 1).
+    #   3. Users I've interacted with in feuds (tier 2).
+    #   4. Everyone else / bots (tier 3).
+    # Within each tier, unseen groups come before seen ones, and
+    # newer stories bubble above older ones.
     def _sort_key(g):
-        mine = 0 if g['is_mine'] else 1
         unseen = 0 if g['has_unseen'] else 1
-        return (mine, unseen, -datetime.fromisoformat(g['latest_ts'].replace('Z', '+00:00')).timestamp())
+        return (
+            g['tier'],
+            unseen,
+            -datetime.fromisoformat(g['latest_ts'].replace('Z', '+00:00')).timestamp(),
+        )
 
     hydrated_groups.sort(key=_sort_key)
+    # Strip the internal `tier` field before returning to the client —
+    # it's an implementation detail of the ordering.
+    for g in hydrated_groups:
+        g.pop('tier', None)
     return {'groups': hydrated_groups, 'ttl_hours': STORY_TTL_HOURS, 'quota': STORY_DAILY_QUOTA}
 
 
