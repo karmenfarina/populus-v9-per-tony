@@ -544,7 +544,7 @@ export default function StoriesViewer() {
         // imageLoaded sync). Long-lived timer is safer.
         if (storiesRef.current.length === 0) return;
         if (idxRef.current >= storiesRef.current.length) return;
-        if (pausedRef.current || !imageLoadedRef.current) return;
+        if (pausedRef.current) return;
         // If an advance is already in flight (dispatched setIdx not yet
         // committed), skip this tick so we don't queue a second one on
         // top of a stale `p`.
