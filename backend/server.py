@@ -7559,36 +7559,18 @@ async def create_story(body: StoryCreateBody, user: dict = Depends(get_current_u
     return {'story': await _hydrate_story_row(doc, user['user_id'])}
 
 
-@api_router.get('/stories/feed')
-async def stories_feed(user: dict = Depends(get_current_user)):
-    """Return stories grouped by author. Groups with any unseen story
-    come first (`has_unseen: true`), then already-seen groups. Within a
-    group stories are chronological (oldest → newest) so the fullscreen
-    viewer can play them in order.
+async def _stories_interacted_authors(me: str, circle_set: set, now: datetime) -> list:
+    """Return up to 16 user_ids the caller has engaged with in feud
+    threads AND who currently have an active story.
 
-    Feed sources: (1) the caller's own stories (always first), (2) every
-    author in the caller's circle. Story-level hide-list is applied for
-    circle authors — an author can silence individual viewers.
+    Interaction sources (either direction counts):
+      1. The caller replied to someone else's comment.
+      2. Someone else replied to the caller's comment.
+
+    Users already in the caller's circle (or the caller themselves)
+    are filtered out — they belong to a higher priority tier.
     """
-    now = now_utc()
-    me = user['user_id']
-    # Circle IDs derive from the `friendships` collection: rows where
-    # `user_id == me` represent people I have added to MY circle. Those
-    # are the authors whose stories I'm entitled to see (plus my own).
-    circle_rows = await db.friendships.find(
-        {'user_id': me},
-        {'_id': 0, 'friend_id': 1},
-    ).to_list(500)
-    circle_ids = [r['friend_id'] for r in circle_rows if r.get('friend_id')]
-
-    # "Interacted" bucket: users I've engaged with in the debate
-    # threads. This is the second-tier priority after my circle — I
-    # want their stories BEFORE random bots. Two sources:
-    #   1. Authors of comments I replied to (I engaged with them)
-    #   2. Authors of replies to my comments (they engaged with me)
-    circle_set = set(circle_ids)
-    my_comment_ids = set()
-    my_comments_by_author: dict = {}  # author -> not needed, just for shape
+    my_comment_ids: set = set()
     async for c in db.comments.find(
         {'user_id': me},
         {'_id': 0, 'comment_id': 1},
@@ -7598,8 +7580,7 @@ async def stories_feed(user: dict = Depends(get_current_user)):
             my_comment_ids.add(cid)
 
     interacted_ids: set = set()
-    # 2. Replies made TO my comments — their authors are people
-    #    engaging with me. Bounded to avoid huge queries.
+    # (2) Replies made TO my comments — their authors engaged with me.
     if my_comment_ids:
         async for r in db.replies.find(
             {'comment_id': {'$in': list(my_comment_ids)}, 'user_id': {'$ne': me}},
@@ -7608,7 +7589,7 @@ async def stories_feed(user: dict = Depends(get_current_user)):
             uid = r.get('user_id')
             if uid:
                 interacted_ids.add(uid)
-    # 1. Comments I replied to → look up their authors.
+    # (1) Comments I replied to → look up their authors.
     my_reply_targets: set = set()
     async for r in db.replies.find(
         {'user_id': me},
@@ -7625,63 +7606,81 @@ async def stories_feed(user: dict = Depends(get_current_user)):
             uid = c.get('user_id')
             if uid:
                 interacted_ids.add(uid)
-    # Strip out anyone already in the circle (they're in a higher
-    # tier) or myself.
     interacted_ids.discard(me)
     interacted_ids -= circle_set
-    # Only keep interacted users who ACTUALLY have an active story —
-    # otherwise we don't need them in the query set at all.
-    if interacted_ids:
-        active_authors = await db.stories.distinct(
-            'user_id',
-            {'user_id': {'$in': list(interacted_ids)}, 'expires_at': {'$gt': now}},
-        )
-        interacted_ids = set(active_authors)
-    # Cap the interacted bucket to keep the top strip focused.
-    interacted_list = list(interacted_ids)[:16]
+    # Only keep users who ACTUALLY have an active story.
+    if not interacted_ids:
+        return []
+    active_authors = await db.stories.distinct(
+        'user_id',
+        {'user_id': {'$in': list(interacted_ids)}, 'expires_at': {'$gt': now}},
+    )
+    return list(active_authors)[:16]
 
-    # Third-tier bucket: rotating mix of bot authors. Bot stories
-    # exist in the DB (created by the bot engine when a bot "gets
-    # hit" by a feud — see bot_engine._bot_create_story) but WITHOUT
-    # this bot bucket they'd be invisible in-app: the story feed used
-    # to only show self+circle, and no real user adds bots to their
-    # circle. We now pick a stable random slice of bot authors
-    # (deterministic per calling user + UTC day so the top strip
-    # doesn't reshuffle on every pull-to-refresh, but rotates day-to-
-    # day for variety).
+
+async def _stories_bot_authors(me: str, exclude: set, now: datetime) -> list:
+    """Return up to 8 bot user_ids with an active story, stably
+    shuffled per caller/day. Bots outside the `exclude` set only —
+    callers pass their circle + interacted set here so we never pick
+    a bot that already appears in a higher-priority tier.
+    """
     bot_authors_with_active_story = await db.stories.distinct(
         'user_id',
         {'expires_at': {'$gt': now}},
     )
-    bot_only = []
-    if bot_authors_with_active_story:
-        # Filter to actual bots and NOT in circle/interacted (already
-        # picked up in higher tiers).
-        bot_rows = await db.users.find(
-            {'user_id': {'$in': bot_authors_with_active_story}, 'is_bot': True},
-            {'_id': 0, 'user_id': 1},
-        ).to_list(1000)
-        exclude = circle_set | set(interacted_list) | {me}
-        bot_only = [b['user_id'] for b in bot_rows if b['user_id'] not in exclude]
+    if not bot_authors_with_active_story:
+        return []
+    bot_rows = await db.users.find(
+        {'user_id': {'$in': bot_authors_with_active_story}, 'is_bot': True},
+        {'_id': 0, 'user_id': 1},
+    ).to_list(1000)
+    bot_only = [b['user_id'] for b in bot_rows if b['user_id'] not in exclude and b['user_id'] != me]
     # Stable shuffle: seed = hash(caller + YYYY-MM-DD). Same user +
-    # same day → same order → no visual jitter across the day.
+    # same day → same order → no visual jitter across the day, but
+    # rotates day-to-day for variety.
     import hashlib as _hashlib
     seed_src = f"{me}:{now.strftime('%Y-%m-%d')}"
     seed_int = int(_hashlib.md5(seed_src.encode('utf-8')).hexdigest(), 16)
     rng = random.Random(seed_int)
     rng.shuffle(bot_only)
-    # Cap the bot bucket to keep the top strip manageable — 8 authors
-    # is plenty and matches the count real users typically curate.
-    bot_only = bot_only[:8]
-    # Tier map used later by _sort_key. Lower tier = higher priority.
-    #   0 → me, 1 → circle, 2 → interacted, 3 → bots/others
+    return bot_only[:8]
+
+
+@api_router.get('/stories/feed')
+async def stories_feed(user: dict = Depends(get_current_user)):
+    """Return stories grouped by author. Groups with any unseen story
+    come first (`has_unseen: true`), then already-seen groups. Within a
+    group stories are chronological (oldest → newest) so the fullscreen
+    viewer can play them in order.
+
+    Ordering tiers (highest → lowest):
+      0. Mine
+      1. Circle
+      2. Users interacted with in feud threads
+      3. Bots / everyone else (rotating daily slice)
+    """
+    now = now_utc()
+    me = user['user_id']
+    # Circle IDs derive from the `friendships` collection: rows where
+    # `user_id == me` represent people I have added to MY circle.
+    circle_rows = await db.friendships.find(
+        {'user_id': me},
+        {'_id': 0, 'friend_id': 1},
+    ).to_list(500)
+    circle_ids = [r['friend_id'] for r in circle_rows if r.get('friend_id')]
+    circle_set = set(circle_ids)
+
+    interacted_list = await _stories_interacted_authors(me, circle_set, now)
     interacted_set = set(interacted_list)
-    bot_set = set(bot_only)
+
+    bot_only = await _stories_bot_authors(me, circle_set | interacted_set, now)
+
     def _tier(uid: str) -> int:
         if uid == me: return 0
         if uid in circle_set: return 1
         if uid in interacted_set: return 2
         return 3
+
     author_ids = list({me, *circle_ids, *interacted_list, *bot_only})
     cur = db.stories.find(
         {'user_id': {'$in': author_ids}, 'expires_at': {'$gt': now}},
@@ -7703,8 +7702,6 @@ async def stories_feed(user: dict = Depends(get_current_user)):
     for author_id, stories in groups.items():
         rows = [await _hydrate_story_row(s, me) for s in stories]
         has_unseen = any(not r['viewed'] for r in rows)
-        # Sort key for the bar: latest created_at (int seconds) — the
-        # frontend uses it to render "newest first" within each bucket.
         latest = max(
             (datetime.fromisoformat(r['created_at'].replace('Z', '+00:00')) for r in rows if r.get('created_at')),
             default=now,
@@ -7719,13 +7716,8 @@ async def stories_feed(user: dict = Depends(get_current_user)):
             'latest_ts': _iso_utc(latest),
         })
 
-    # Sorting rules for the top strip:
-    #   1. Mine always first (tier 0).
-    #   2. Circle members next (tier 1).
-    #   3. Users I've interacted with in feuds (tier 2).
-    #   4. Everyone else / bots (tier 3).
-    # Within each tier, unseen groups come before seen ones, and
-    # newer stories bubble above older ones.
+    # Sort primarily by tier, then unseen-first within tier, then
+    # newest-first within (tier, unseen).
     def _sort_key(g):
         unseen = 0 if g['has_unseen'] else 1
         return (
@@ -7735,8 +7727,6 @@ async def stories_feed(user: dict = Depends(get_current_user)):
         )
 
     hydrated_groups.sort(key=_sort_key)
-    # Strip the internal `tier` field before returning to the client —
-    # it's an implementation detail of the ordering.
     for g in hydrated_groups:
         g.pop('tier', None)
     return {'groups': hydrated_groups, 'ttl_hours': STORY_TTL_HOURS, 'quota': STORY_DAILY_QUOTA}
