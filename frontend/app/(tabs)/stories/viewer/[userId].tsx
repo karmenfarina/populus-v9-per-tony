@@ -282,6 +282,16 @@ export default function StoriesViewer() {
         : (firstUnseen >= 0 ? firstUnseen : 0);
       // Atomic swap onto this candidate.
       internalNavRef.current = true;
+      // Reset wall-clock BEFORE flipping autoCloseFiredRef back to
+      // false so the timer's very next tick uses the NEW story's
+      // start time (not the previous story's, which would make
+      // `elapsed >= STORY_DURATION_MS` fire immediately and trigger
+      // another jump). We do the same inside the useEffect on
+      // [currentUserId]/[idx] as a safety net, but the ref update
+      // MUST happen synchronously here — the useEffect only runs
+      // after the next commit, and the interval can tick in
+      // between.
+      storyStartTsRef.current = Date.now();
       setCurrentUserId(candidateUid);
       setStories(candidateStories);
       setIdx(targetIdxInUser);
@@ -526,7 +536,6 @@ export default function StoriesViewer() {
       // so a viewer we came back to can still complete + close.
       autoCloseFiredRef.current = false;
       const TICK_MS = 50;
-      const INCREMENT = TICK_MS / STORY_DURATION_MS;
       const timer = setInterval(() => {
         if (autoCloseFiredRef.current) {
           // Just skip this tick — DO NOT clearInterval(). The gate is
@@ -537,62 +546,55 @@ export default function StoriesViewer() {
           // cleanup which clears the interval naturally.
           return;
         }
-        // No stories loaded → wait; the timer stays live but idle. This
-        // is different from returning early on `stories.length === 0`
-        // in the useCallback deps because that made the effect tear
-        // down + rebuild the timer at every user swap (racing with the
-        // imageLoaded sync). Long-lived timer is safer.
         if (storiesRef.current.length === 0) return;
         if (idxRef.current >= storiesRef.current.length) return;
         if (pausedRef.current) return;
         // If an advance is already in flight (dispatched setIdx not yet
-        // committed), skip this tick so we don't queue a second one on
-        // top of a stale `p`.
+        // committed), skip this tick so we don't compute progress
+        // against the outgoing story's start timestamp.
         if (advanceLockRef.current) return;
-        setProgress((p) => {
-          const next = p + INCREMENT;
-          if (next >= 1) {
-            // Wall-clock guard: refuse to advance if less than
-            // STORY_DURATION_MS (minus a small tick tolerance) has
-            // actually elapsed since this story became active. This
-            // clamps ANY upstream race — batched setState catch-up,
-            // stale imageLoadedRef reads, tick bursts after JS
-            // backlog, cache-hit onLoad firing instantly — into a
-            // guaranteed 7s per-story cadence.
-            const elapsed = Date.now() - storyStartTsRef.current;
-            if (elapsed < STORY_DURATION_MS - TICK_MS) {
-              // Cap progress at 1 (visually complete) but don't
-              // trigger the advance yet. Next tick will re-evaluate.
-              return 1;
-            }
-            const currentIdx = idxRef.current;
-            const list = storiesRef.current;
-            // Instagram-style: al termine di THIS story, cerchiamo la
-            // prossima UNSEEN dello stesso user. Se non c'e' piu' nulla
-            // di non-visto dopo di noi (sia perche' e' l'ultima in
-            // assoluto, sia perche' le successive sono tutte viewed),
-            // hop al next user tramite jumpToUser — che a sua volta
-            // salta gli user senza unseen e chiude se non ne trova.
-            let nextUnseenIdx = -1;
-            for (let i = currentIdx + 1; i < list.length; i++) {
-              if (!list[i].viewed) { nextUnseenIdx = i; break; }
-            }
-            if (nextUnseenIdx < 0) {
-              autoCloseFiredRef.current = true;
-              jumpToUserRef.current?.("next");
-              return 1;
-            }
-            advanceLockRef.current = true;
-            setIdx(nextUnseenIdx);
-            return 0;
-          }
-          return next;
-        });
+        // Wall-clock is the ONLY source of truth for the progress bar.
+        // Previously we drove progress via `setProgress((p) => p + INC)`
+        // and called jumpToUser INSIDE that reducer — but React 18
+        // treats setState-inside-reducer as an antipattern and can
+        // drop the follow-up `setProgress(0)` from jumpToUser, leaving
+        // the progress bar frozen at the previous story's tail end
+        // (the reported "barra dei secondi bloccata al passaggio tra
+        // utenti" bug). Computing progress from wall-clock also makes
+        // catch-up ticks harmless: after a JS backlog we snap to the
+        // right value instead of accumulating stale increments.
+        const elapsed = Date.now() - storyStartTsRef.current;
+        if (elapsed < STORY_DURATION_MS) {
+          const pct = Math.min(1, elapsed / STORY_DURATION_MS);
+          setProgress(pct);
+          return;
+        }
+        // Story elapsed. Decide next action OUTSIDE any reducer.
+        const currentIdx = idxRef.current;
+        const list = storiesRef.current;
+        // Instagram-style: cerchiamo la prossima UNSEEN dello stesso
+        // user. Se non ce n'è più, hop al next user via jumpToUser —
+        // che a sua volta salta gli user senza unseen e chiude se
+        // non ne trova.
+        let nextUnseenIdx = -1;
+        for (let i = currentIdx + 1; i < list.length; i++) {
+          if (!list[i].viewed) { nextUnseenIdx = i; break; }
+        }
+        if (nextUnseenIdx < 0) {
+          autoCloseFiredRef.current = true;
+          setProgress(1);
+          // Defer the jump one microtask so the current tick's
+          // setState commits first (avoids ordering issues where the
+          // wall-clock reset inside jumpToUser races with the tick
+          // scheduler).
+          Promise.resolve().then(() => jumpToUserRef.current?.("next"));
+          return;
+        }
+        advanceLockRef.current = true;
+        setProgress(1);
+        setIdx(nextUnseenIdx);
       }, TICK_MS);
       return () => clearInterval(timer);
-    // Intentionally minimal dep list — see the ref-forwarding block
-    // above. Adding stories.length or jumpToUser here would re-race
-    // the imageLoaded sync effect on every user swap.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [initialLoading]),
   );
@@ -708,6 +710,7 @@ export default function StoriesViewer() {
       jumpToUser("prev");
       return;
     }
+    storyStartTsRef.current = Date.now();
     setIdx(idx - 1);
     setProgress(0);
   };
@@ -731,6 +734,7 @@ export default function StoriesViewer() {
       jumpToUser("next");
       return;
     }
+    storyStartTsRef.current = Date.now();
     setIdx(idx + 1);
     setProgress(0);
   };
