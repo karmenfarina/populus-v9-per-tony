@@ -662,7 +662,23 @@ export default function StoriesViewer() {
       .catch(() => { /* noop */ });
     pendingViewMarksRef.current.add(p);
     p.finally(() => pendingViewMarksRef.current.delete(p));
+    // Update BOTH the live `stories` state AND the per-user cache in
+    // `cacheRef`. Without touching the cache, `jumpToUser`'s
+    // Instagram-style skip logic (which reads candidateStories from
+    // `cacheRef` to decide "has any unseen?") would still see the
+    // just-viewed story as unseen — and land on that user for a
+    // brief flash before the timer's next-unseen search realises
+    // the truth and hops away. This was the "shows an already-seen
+    // ring for a moment before closing" symptom the user reported.
     setStories((prev) => prev.map((s, i) => (i === idxRef.current ? { ...s, viewed: true } : s)));
+    const uid = currentStory.user_id;
+    const cached = cacheRef.current.get(uid);
+    if (cached) {
+      cacheRef.current.set(
+        uid,
+        cached.map((s) => (s.story_id === currentStory.story_id ? { ...s, viewed: true } : s)),
+      );
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentStory?.story_id]);
 
