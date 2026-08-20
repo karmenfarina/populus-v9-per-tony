@@ -1,0 +1,34 @@
+{
+  "summary": "Iter158 DEFINITIVO — retest fix stories viewer auto-advance. CODE REVIEW PASS: `grep -n clearInterval /app/frontend/app/(tabs)/stories/viewer/[userId].tsx` restituisce SOLO 3 match: linea 568 (COMMENTO 'DO NOT clearInterval()'), linea 596 (COMMENTO 'we DON'T clearInterval anymore'), linea 614 (unico clearInterval reale, nel return del useFocusEffect). Il body del timer callback (linee 566-612) NON contiene piu' alcuna chiamata a clearInterval. Il gate `if (autoCloseFiredRef.current) return;` a linea 566-575 e' senza clearInterval come richiesto. Backend regression 4/4 PASS (feed, stories/user, view invalid id, anonymous auth). Frontend home carica senza red screen. Tutte le protezioni iter155-157 intatte.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter158_regression.py",
+    "/app/test_reports/pytest/iter158.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Verifica code review COMPLETA: file `/app/frontend/app/(tabs)/stories/viewer/[userId].tsx` contiene ora un solo `clearInterval(timer)` reale, a linea 614, nella funzione di cleanup del `useFocusEffect` return. Le linee 568 e 596 sono commenti che documentano perche' NON si chiama clearInterval nel body del timer.",
+    "Task (a) OK: end-of-chain con next user — linee 590-605: setProgress updater vede `next>=1` e `currentIdx+1 >= storiesRef.current.length`, imposta `autoCloseFiredRef.current=true` (linea 603), chiama `jumpToUserRef.current?.('next')` fire-and-forget (linea 604), ritorna `1`. Durante l'async gap di `api.storiesByUser` in cache-miss, il timer da 50ms continua a fire ma il gate a linea 566-575 (`if (autoCloseFiredRef.current) return;`) fa skip PULITO senza uccidere il timer. Quando jumpToUser completa (linee 323-330), fa atomic swap `setCurrentUserId + setStories + setIdx + setProgress(0) + autoCloseFiredRef.current=false + advanceLockRef.current=false` e il SAME live interval riprende a ticare sul nuovo user al prossimo tick.",
+    "Task (b) OK: end-of-chain SENZA next user — jumpToUser vede `targetIdx>=order.length` (linee 239-242) o `feedOrder vuoto` (linea 235) e chiama `closeViewer()`. closeViewer await max 400ms per pending view marks poi router.replace/router.back. Componente si unmounta → useFocusEffect return cleanup (linea 614) esegue `clearInterval(timer)` naturalmente. `autoCloseFiredRef` resta true → nessuna race condition possibile (il timer, se sopravvive un tick, entra nel gate e ritorna immediatamente).",
+    "Regressione protezioni iter155-157 TUTTE INTATTE: `advanceLockRef` (dichiarato linea 168, gate linea 587, set linea 607, reset linea 649 su [idx]); `transform: [{ scaleX: pct }]` per progress bar (linea 823) invece di width%; key univoca `${currentUserId}-${i}` (linea 815) forza unmount+remount della strip al cambio user; `imageLoadedRef` sync INLINE con setState nell'effetto (linee 640-641) e negli onLoad/onError callbacks (linee 941-942); `jumpToUserRef` proxy (dichiarato 218, published 335) permette timer con dep list minimale `[initialLoading]`; refs sync per storiesRef/idxRef/pausedRef/feedOrderRef (linee 219-222).",
+    "Nota minore fuori scope: linea 842 (header profile Pressable) e linea 502 (route-sync effect) settano `autoCloseFiredRef.current=true` per congelare il timer durante navigazioni esterne. Con il nuovo comportamento (skip senza clearInterval), il timer continuera' a fire e a fare skip finche' focus perso o load() completa e reset la ref a false — comportamento corretto, non un bug."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter158_regression.py (new — copia di iter157 con label aggiornata)"
+  ],
+  "success_rate": {
+    "backend": "100% (4/4)",
+    "frontend": "smoke OK — home renders, no red screen, no console errors beyond known deprecation warnings (shadow*, textShadow*, pointerEvents, expo-notifications web)"
+  },
+  "seed_data_creation": "Anonymous user creato via /api/auth/anonymous con prefisso TEST_iter158_ (ephemeral, no cleanup).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Il fix del bug 'stories viewer auto-advance dopo end-of-chain' è DEFINITIVO. Il body del timer callback (linee 566-612 in viewer/[userId].tsx) non contiene piu' clearInterval — solo il cleanup del useFocusEffect return a linea 614 lo chiama, come previsto. Tutte le race condition documentate in iter156/157 (cache-miss di jumpToUser che uccideva il timer durante il gap di api.storiesByUser) sono risolte. Backend regression clean, smoke frontend OK. Nessun altro fix richiesto per questa area.",
+  "rca_of_issue": "NESSUN ISSUE RESIDUO. Verifica finale: `grep -n clearInterval` mostra 3 righe (568=commento, 596=commento, 614=cleanup return). Task (a)/(b)/(c) del review request soddisfatti. Non serve rewriting fondamentale."
+}

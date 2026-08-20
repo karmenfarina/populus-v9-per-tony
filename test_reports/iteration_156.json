@@ -1,0 +1,48 @@
+{
+  "summary": "Iter 156 — reviewed the 'long-lived timer + jumpToUserRef proxy + inline imageLoadedRef sync' fix in stories/viewer/[userId].tsx. Backend regression PASS (5/5 iter155 smoke, 1.65s). Frontend web preview loads cleanly (no red screen, login page rendering, no page errors — only a benign RN warning about deprecated `props.pointerEvents`). Code review confirms points (2), (3), (4), (5), (6) of the fix are correctly implemented — jumpToUserRef proxy (line 218/335), useFocusEffect dep list reduced to [initialLoading] (line 608), imageLoadedRef inline sync via useEffect on story_id+image_url (lines 627-631), onLoad/onError updating both ref+state (lines 930-931), advance lock + scaleX + user-scoped key regressions preserved. HOWEVER — I identified ONE CRITICAL REGRESSION in point (1) ('timer long-lived from open to close'): at end-of-chain the interval callback still does `clearInterval(timer)` on line 592 BEFORE calling `jumpToUserRef.current?.('next')`. Because useFocusEffect deps are `[initialLoading]` only and jumpToUser NEVER triggers a load() (uses cacheRef → internalNavRef.current=true → load-effect skipped → initialLoading stays false), the useFocusEffect cleanup+re-run does NOT fire, so the timer is DEAD for the remainder of the viewer session. Consequence: when auto-advance hops from user N's last story to user N+1's ring, N+1's stories no longer auto-advance — the user must tap manually. Same after N+1→N+2 etc. Only the very first user in the chain gets working auto-advance. This directly contradicts the review request's claim 'Il timer deve essere long-lived dall'apertura del viewer alla chiusura'. The fix is otherwise structurally solid.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "stories viewer — auto-advance across users (auto-hop at end-of-chain)",
+        "issue": "Timer setInterval is clearInterval'd at line 592 before jumpToUserRef.current?.('next'). Since useFocusEffect deps are `[initialLoading]` and jumpToUser sets internalNavRef.current=true (skipping load(), so initialLoading never toggles), the effect never re-runs → timer stays dead → auto-advance is broken on all users after the first end-of-chain auto-hop. Manual tap navigation still works. Contradicts the stated design goal 'long-lived timer'.",
+        "affected_testIDs": ["stories-viewer", "story-body"]
+      }
+    ],
+    "design_issues": [],
+    "react_native_issues": [
+      {
+        "component": "Pressable (viewer/[userId].tsx around line 895)",
+        "issue": "Console warning `props.pointerEvents is deprecated. Use style.pointerEvents`. Non-blocking but should be migrated to `style={{ pointerEvents: 'none' }}` for RN 0.74+ / react-native-web parity."
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter155_stories_viewer_smoke.py",
+    "/app/test_reports/pytest/iter156.xml"
+  ],
+  "action_items": [
+    "CRITICAL FIX: remove the `clearInterval(timer)` on line 592 of stories/viewer/[userId].tsx. Rely on `autoCloseFiredRef.current = true` (line 591) to gate the next tick via the guard on line 567-570, and let jumpToUser reset autoCloseFiredRef=false on successful swap (already done at lines 314 & 329) so the still-alive interval resumes ticking on the new user. If jumpToUser closes the viewer (no next user), the component unmounts and the useFocusEffect cleanup naturally clears the interval. This achieves the actual 'long-lived timer' semantics the fix intended.",
+    "OPTIONAL: migrate the `pointerEvents: 'none' as any` inline prop (line ~895 on the card) to `style={{ pointerEvents: 'none' }}` to silence the RN deprecation warning."
+  ],
+  "critical_code_review_comments": [
+    "viewer/[userId].tsx:218 + 335 — jumpToUserRef proxy is correctly implemented: ref updated in useEffect [jumpToUser], timer uses jumpToUserRef.current(...). Identity change of jumpToUser no longer forces useFocusEffect to teardown. GOOD.",
+    "viewer/[userId].tsx:608 — useFocusEffect deps reduced to `[initialLoading]`. Correct intent, but INCOMPLETE — because `clearInterval(timer)` on line 592 stops the timer manually, and no dep change re-fires the effect, so after end-of-chain auto-hop the timer never restarts. The dep-list change alone is insufficient without also dropping the `clearInterval` at line 592.",
+    "viewer/[userId].tsx:576-577 — new gates on `storiesRef.current.length === 0` and `idxRef.current >= length` correctly convert the 'wait if not ready' logic into refs, avoiding cross-user drift. GOOD.",
+    "viewer/[userId].tsx:627-631 — inline sync `imageLoadedRef.current = ready` alongside `setImageLoaded(ready)` in the useEffect on `[currentStory?.story_id, currentStory?.feud?.image_url]` correctly eliminates the stale-ref window between setState and effect commit. GOOD.",
+    "viewer/[userId].tsx:930-931 — Image onLoad/onError update both ref AND state synchronously. GOOD.",
+    "viewer/[userId].tsx:591-593 — CRITICAL: `autoCloseFiredRef.current = true; clearInterval(timer); jumpToUserRef.current?.('next');` — clearInterval permanently kills the timer for the remaining viewer session because useFocusEffect deps [initialLoading] don't toggle during jumpToUser (uses cacheRef, sets internalNavRef=true, load() is skipped). Fix: drop the clearInterval line; the autoCloseFiredRef=true guard on line 567 already prevents further ticks until jumpToUser succeeds and resets autoCloseFiredRef=false (already done at lines 314, 329). If jumpToUser closes the viewer, cleanup on unmount clears the interval naturally.",
+    "viewer/[userId].tsx:626 — `imageLoadedRef = useRef(true)` initial value: safe because initialLoading is true at mount so timer is inactive until first load() completes, and by then the useEffect on currentStory has synced the ref. Confirmed no race at first mount."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "100% (5/5 iter155 smoke PASS in 1.65s — /api/stories/feed, /api/stories/{id}/view, /api/stories/user/{id}, anonymous auth all healthy)",
+    "frontend": "Home page loads clean on mobile viewport (375x667), no red screen, no page errors. Deep viewer behavior not visually validated (per review_request agent_to_agent_context_note the glitch is only visible on APK — but the code-review finding above is verifiable by static analysis of the effect dep list vs the clearInterval placement)."
+  },
+  "seed_data_creation": "3 anon users created via /api/auth/anonymous with TESTiter156_ prefix (auto-cleaned by iter141 cleanup job).",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iter156 fix is 5/6 correct. The MISSING piece: line 592 `clearInterval(timer)` inside the end-of-chain branch defeats the 'long-lived timer' design because jumpToUser never toggles initialLoading (uses cacheRef+internalNavRef, load() is skipped), so useFocusEffect deps [initialLoading] never change → effect never re-runs → timer is dead for the rest of the viewer session. Remove that clearInterval; the autoCloseFiredRef.current=true guard on line 567 combined with jumpToUser resetting it to false on success (lines 314, 329) is enough to pause/resume the timer safely across auto-hops. After fix, retest by simulating: (a) auto-advance to end of user N, (b) hop to N+1 automatically, (c) verify N+1's story 0 progress bar starts filling within ~50ms without any user tap.",
+  "rca_of_issue": "Re-analysis of iter156's own fix: point (1) of the fix description says 'timer long-lived dall'apertura alla chiusura'. Reading the code confirms that on the HOT path (user swap via manual tap goNext/goPrev, or jumpToUser called from anywhere OTHER than the interval callback) the timer IS long-lived — useFocusEffect deps [initialLoading] don't churn, so no teardown. But the AUTO-hop path (interval callback observes end-of-chain, calls jumpToUser) still contains `clearInterval(timer)` at line 592. Since useFocusEffect doesn't re-fire when jumpToUser swaps users (cacheRef → internalNavRef → load() skipped → initialLoading unchanged), the timer is not recreated. Result: auto-advance is dead on user N+1 after an auto-hop from user N. Manual taps still work because goNext/goPrev don't touch the interval. This is a REGRESSION against the design intent. Fix in action_items #1."
+}

@@ -208,6 +208,14 @@ export default function StoriesViewer() {
   const idxRef = useRef(0);
   const pausedRef = useRef(false);
   const feedOrderRef = useRef<string[]>([]);
+  // `jumpToUser` changes identity every time `currentUserId` changes.
+  // Putting it in the useFocusEffect dep list would tear down + rebuild
+  // the interval on EVERY user swap — and the fresh interval would race
+  // the `imageLoadedRef` sync effect (still holding the old story's
+  // `true`), causing the visible symptom of "all subsequent stories
+  // sweep past very fast". We proxy through a ref so the timer can call
+  // the always-latest version without being a dep.
+  const jumpToUserRef = useRef<((direction: "next" | "prev") => Promise<void>) | null>(null);
   useEffect(() => { storiesRef.current = stories; }, [stories]);
   useEffect(() => { idxRef.current = idx; }, [idx]);
   useEffect(() => { pausedRef.current = paused; }, [paused]);
@@ -321,6 +329,10 @@ export default function StoriesViewer() {
     autoCloseFiredRef.current = false;
     advanceLockRef.current = false;
   }, [currentUserId, closeViewer]);
+
+  // Publish latest jumpToUser on a ref so the always-mounted timer can
+  // call it without adding it to the useFocusEffect dep list.
+  useEffect(() => { jumpToUserRef.current = jumpToUser; }, [jumpToUser]);
 
   // Load takes an explicit `uid` argument (rather than closing over
   // `currentUserId`) so we never call it against a stale closure —
@@ -545,7 +557,7 @@ export default function StoriesViewer() {
   // the viewer was off-screen and closed the viewer prematurely.
   useFocusEffect(
     useCallback(() => {
-      if (initialLoading || stories.length === 0) return;
+      if (initialLoading) return;
       // Reset the auto-close guard whenever the screen regains focus
       // so a viewer we came back to can still complete + close.
       autoCloseFiredRef.current = false;
@@ -553,9 +565,21 @@ export default function StoriesViewer() {
       const INCREMENT = TICK_MS / STORY_DURATION_MS;
       const timer = setInterval(() => {
         if (autoCloseFiredRef.current) {
-          clearInterval(timer);
+          // Just skip this tick — DO NOT clearInterval(). The gate is
+          // temporary: jumpToUser will flip it back to false on a
+          // successful user swap, and the same interval must resume
+          // ticking on the new user. If closeViewer runs (no next
+          // user), component unmount fires the useFocusEffect
+          // cleanup which clears the interval naturally.
           return;
         }
+        // No stories loaded → wait; the timer stays live but idle. This
+        // is different from returning early on `stories.length === 0`
+        // in the useCallback deps because that made the effect tear
+        // down + rebuild the timer at every user swap (racing with the
+        // imageLoaded sync). Long-lived timer is safer.
+        if (storiesRef.current.length === 0) return;
+        if (idxRef.current >= storiesRef.current.length) return;
         if (pausedRef.current || !imageLoadedRef.current) return;
         // If an advance is already in flight (dispatched setIdx not yet
         // committed), skip this tick so we don't queue a second one on
@@ -567,11 +591,17 @@ export default function StoriesViewer() {
             const currentIdx = idxRef.current;
             if (currentIdx + 1 >= storiesRef.current.length) {
               // End of THIS user's chain — try to hop to the next
-              // user's ring instead of closing. jumpToUser falls
-              // back to closeViewer() if there's no next user.
+              // user's ring instead of closing. jumpToUser (via ref)
+              // falls back to closeViewer() if there's no next user.
+              // NB: we DON'T clearInterval anymore — the timer is
+              // long-lived across user swaps. `autoCloseFiredRef=true`
+              // already gates further ticks; jumpToUser resets it to
+              // false on successful swap so the SAME interval resumes
+              // ticking on the new user. If no next user, closeViewer
+              // unmounts the component and the cleanup returned by
+              // useFocusEffect clears the interval naturally.
               autoCloseFiredRef.current = true;
-              clearInterval(timer);
-              jumpToUser("next");
+              jumpToUserRef.current?.("next");
               return 1;
             }
             advanceLockRef.current = true;
@@ -582,7 +612,11 @@ export default function StoriesViewer() {
         });
       }, TICK_MS);
       return () => clearInterval(timer);
-    }, [initialLoading, stories.length, jumpToUser]),
+    // Intentionally minimal dep list — see the ref-forwarding block
+    // above. Adding stories.length or jumpToUser here would re-race
+    // the imageLoaded sync effect on every user swap.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [initialLoading]),
   );
 
   // Track which story image is fully loaded. Until then the auto-
@@ -591,15 +625,21 @@ export default function StoriesViewer() {
   // behaviour where a story never counts down while its image is
   // still coming down the wire.
   const [imageLoaded, setImageLoaded] = useState(false);
-  useEffect(() => {
-    // Reset for every new story. If the story has no image the load
-    // event will never fire, so we mark it ready immediately.
-    setImageLoaded(!currentStory?.feud?.image_url);
-  }, [currentStory?.story_id, currentStory?.feud?.image_url]);
-  // Timer honours this via pausedRef indirectly — we OR our loading
-  // gate into the paused check inside the interval closure.
+  // NB: `imageLoadedRef` is what the long-lived timer reads. We keep
+  // BOTH the state (drives the UI shimmer) AND the ref in sync — but
+  // update the ref SYNCHRONOUSLY inline with setState so the timer
+  // (which ticks every 50 ms) can never race the async render→effect
+  // cycle. Root cause of the "sweeps past all remaining stories at
+  // end-of-chain" bug: the ref used to lag one render behind, and
+  // between the `setIdx(new user's first unseen)` and the useEffect
+  // that reset it to `false`, the timer had 1–2 ticks of `true` from
+  // the OUTGOING story and advanced immediately.
   const imageLoadedRef = useRef(true);
-  useEffect(() => { imageLoadedRef.current = imageLoaded; }, [imageLoaded]);
+  useEffect(() => {
+    const ready = !currentStory?.feud?.image_url;
+    imageLoadedRef.current = ready;
+    setImageLoaded(ready);
+  }, [currentStory?.story_id, currentStory?.feud?.image_url]);
 
   // Reset progress every time the user manually navigates to a new
   // story (either via tap or after auto-advance). Also release the
@@ -898,8 +938,8 @@ export default function StoriesViewer() {
                     source={{ uri: currentStory.feud.image_url }}
                     style={styles.cardImage}
                     resizeMode="cover"
-                    onLoad={() => setImageLoaded(true)}
-                    onError={() => setImageLoaded(true)}
+                    onLoad={() => { imageLoadedRef.current = true; setImageLoaded(true); }}
+                    onError={() => { imageLoadedRef.current = true; setImageLoaded(true); }}
                   />
                 ) : null}
                 <View style={styles.cardBody}>

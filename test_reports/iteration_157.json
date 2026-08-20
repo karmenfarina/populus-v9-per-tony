@@ -1,0 +1,45 @@
+{
+  "summary": "Iter157 retest — verified 1-line change (rimozione di clearInterval a linea ~592 end-of-chain). Backend regression 4/4 PASS (feed, stories/user, anonymous auth, invalid view id). Frontend home page carica senza red screen. **CRITICAL FINDING via code review**: linea 568 CONTIENE ANCORA `clearInterval(timer);` dentro il timer callback, gated su `autoCloseFiredRef.current === true`. Questo VIOLA il requisito (a) del task ('nessun clearInterval eccetto nel cleanup del useFocusEffect return') e riproduce la stessa regressione di iter156 in scenari cache-miss di jumpToUser.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "Stories viewer auto-advance across users (cache-miss path)",
+        "issue": "Line 568 clearInterval(timer) inside timer callback kills the long-lived timer during the async gap in jumpToUser when the target user is NOT in cacheRef. Sequence: end-of-chain sets autoCloseFiredRef=true (line 598), fire-and-forgets jumpToUser('next'); if cache miss, jumpToUser awaits api.storiesByUser(nextUid) for ~100-500ms; during that gap the 50ms tick sees autoCloseFired=true and executes clearInterval on line 568; when jumpToUser eventually sets autoCloseFiredRef=false the timer is already dead → next user's stories display but never auto-advance. Prefetch (lines 508-521) masks this in typical cases but doesn't cover: (1) very fast chained end-of-chain hops where the prefetch of user C hasn't landed by the time user B ends, (2) prefetch network failures, (3) the very first end-of-chain right after mount if the neighbour prefetch is still in flight.",
+        "affected_testIDs": ["stories-viewer"]
+      }
+    ],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter157_regression.py",
+    "/app/test_reports/pytest/iter157.xml"
+  ],
+  "action_items": [
+    "REMOVE lines 567-570 in /app/frontend/app/(tabs)/stories/viewer/[userId].tsx — the `if (autoCloseFiredRef.current) { clearInterval(timer); return; }` block. Replace with a simple `if (autoCloseFiredRef.current) return;` (no clearInterval). This makes the timer truly long-lived; only the useFocusEffect return cleanup (line 609) should clear it. The gating via `autoCloseFiredRef=true` alone already prevents ticks from advancing the story during the jumpToUser async gap, and once jumpToUser flips it back to false the SAME live interval resumes ticking on the new user.",
+    "After fix, retest end-of-chain hop scenario explicitly with a forced cache-miss (e.g. throttled prefetch or first-mount hop) to confirm auto-advance resumes on next user.",
+    "Consider: also removing autoCloseFiredRef.current=true in the header profile Pressable (line 837) is unnecessary if the useFocusEffect cleanup already handles pause-on-navigation, but that's out of scope for this fix."
+  ],
+  "critical_code_review_comments": [
+    "Line 568: `clearInterval(timer)` inside the timer callback contradicts the task requirement (a) 'nessun clearInterval eccetto nel cleanup del useFocusEffect return'. Same regression as iter156 in the cache-miss code path of jumpToUser. Must be replaced with a bare `return;` to keep the interval long-lived.",
+    "Otherwise the code changes are coherent: (b) autoCloseFiredRef=true is set BEFORE jumpToUserRef.current?.('next') on line 598-599 ✓; (c) jumpToUser resets autoCloseFiredRef.current=false on all three atomic-swap code paths — lines 314 (empty target skip), 329 (normal swap), plus reset in load() at line 408 ✓; (d) closeViewer path unmounts the component and useFocusEffect return cleanup fires clearInterval naturally ✓; advanceLockRef guard on line 582, transform scaleX on line 818, unique key `${currentUserId}-${i}` on line 810, imageLoadedRef sync inline on lines 634-636 & 936-937, jumpToUserRef proxy on lines 218 & 335 — all intact.",
+    "Line 837 (header profile press) sets autoCloseFiredRef.current=true but does NOT set initialLoading — this means the timer will tick once, hit line 568, and clearInterval itself before useFocusEffect cleanup runs. Not user-visible since screen loses focus anyway (useFocusEffect cleanup runs), but conceptually part of the same anti-pattern."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter157_regression.py (new)"
+  ],
+  "success_rate": {
+    "backend": "100%",
+    "frontend": "smoke OK (login screen renders, no red screen, no console errors beyond known deprecation warnings for shadow*/textShadow*/pointerEvents)"
+  },
+  "seed_data_creation": "Anonymous user created via /api/auth/anonymous with TEST_iter157_ prefix (cleanup not strictly required — anon users are ephemeral).",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Il fix di iter157 (rimozione clearInterval a linea 592) è INCOMPLETO. Rimane un secondo clearInterval a linea 568 dentro il timer callback, gated su autoCloseFiredRef. In scenari cache-miss di jumpToUser (che avviene se il prefetch di user C non è ancora atterrato quando l'utente completa user B), quel clearInterval ucciderà il timer durante l'async gap dell'api.storiesByUser call — riproducendo lo stesso sintomo di iter156. Il main agent DEVE rimuovere anche linee 567-570 (mantenendo solo `if (autoCloseFiredRef.current) return;`) prima di considerare il fix definitivo. La regressione backend è pulita, home page carica senza errori.",
+  "rca_of_issue": "ROOT CAUSE: durante end-of-chain, la sequenza è: (1) setProgress updater rileva next>=1; (2) autoCloseFiredRef.current=true (line 598); (3) jumpToUserRef.current?.('next') chiamato fire-and-forget. Se il target user NON è in cacheRef, jumpToUser awaits api.storiesByUser per 100-500ms. Durante quell'attesa il timer da 50ms fires almeno 2-10 volte, ognuna entrando nel branch `if (autoCloseFiredRef.current)` a linea 567, e `clearInterval(timer)` a linea 568 uccide il timer. Quando jumpToUser finalmente completa e imposta autoCloseFiredRef.current=false (linea 329), il timer è già morto e non ripartirà — le storie del nuovo utente vengono renderizzate ma non auto-avanzano. STEPS TO REPRODUCE: (1) aprire viewer da un utente con 1-2 storie; (2) forzare cache-miss (chained hops rapidi o prefetch throttling); (3) osservare che sul secondo utente il progress bar non parte. MITIGATION: cambiare linee 567-570 da `if (autoCloseFiredRef.current) { clearInterval(timer); return; }` a `if (autoCloseFiredRef.current) return;`."
+}
