@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -114,6 +114,9 @@ export default function StoriesBar() {
   // persist across cold starts — we want the strip to reintroduce
   // itself every time the app opens.
   const [collapsed, setCollapsed] = useState<boolean>(false);
+  // Monotonic token for the `load` function — see the comment inside
+  // `load` for the race-condition rationale.
+  const loadTokenRef = useRef(0);
 
   const toggleCollapsed = useCallback(() => {
     setCollapsed((prev) => !prev);
@@ -133,14 +136,27 @@ export default function StoriesBar() {
     // (e.g. after a story-view) do NOT reset it — otherwise the ring
     // would re-animate every time and never reach the "loaded" state.
     if (!opts?.silent) setRingLoading(true);
+    // Monotonic token to guard against races: when the user auto-
+    // advances through several stories, `notifyStoryViewed()` fires
+    // once per mark and each fires an independent `load({silent:true})`.
+    // Under network jitter an older request can resolve AFTER a newer
+    // one — without this guard its stale groups (with `has_unseen:
+    // true` for the story that was JUST marked viewed) would stomp
+    // on the fresh state and the orange ring would linger. This was
+    // the reported bug: "a volte una persona che ha zero storie da
+    // visualizzare continua ad avere il cerchio arancione".
+    const myToken = ++loadTokenRef.current;
     try {
       const r: any = await api.storiesFeed();
+      if (myToken !== loadTokenRef.current) return;
       setGroups((r?.groups || []) as LocalStoryGroup[]);
     } catch {
       // Silent failure — the strip is a secondary UI element and we
       // don't want to blow up the whole home screen if it flakes.
+      if (myToken !== loadTokenRef.current) return;
       setGroups([]);
     } finally {
+      if (myToken !== loadTokenRef.current) return;
       setLoading(false);
       setFirstLoadDone(true);
       if (!opts?.silent) {

@@ -614,9 +614,26 @@ export default function StoriesViewer() {
   // the OUTGOING story and advanced immediately.
   const imageLoadedRef = useRef(true);
   useEffect(() => {
-    const ready = !currentStory?.feud?.image_url;
+    const url = currentStory?.feud?.image_url;
+    const ready = !url;
     imageLoadedRef.current = ready;
     setImageLoaded(ready);
+    if (!ready) {
+      // Safety fallback: RN's Image component sometimes does NOT
+      // re-fire `onLoad` when the URL is already in the native/HTTP
+      // cache (extremely common here because the viewer prefetches
+      // neighbouring users' images — see the prefetch effect above).
+      // Without this guard, when the timer auto-advances into the
+      // next user's story its image is already cached, `onLoad`
+      // never fires, `imageLoadedRef.current` stays `false`, and the
+      // per-story timer is paused forever → the reported "story
+      // blocca anziché continuare a scorrere" bug.
+      const t = setTimeout(() => {
+        imageLoadedRef.current = true;
+        setImageLoaded(true);
+      }, 350);
+      return () => clearTimeout(t);
+    }
   }, [currentStory?.story_id, currentStory?.feud?.image_url]);
 
   // Reset progress every time the user manually navigates to a new
