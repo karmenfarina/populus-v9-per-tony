@@ -242,99 +242,56 @@ export default function StoriesViewer() {
     if (!order.length) { closeViewer(); return; }
     const currentIdx = order.indexOf(currentUserId);
     if (currentIdx < 0) { closeViewer(); return; }
-    const targetIdx = direction === "next" ? currentIdx + 1 : currentIdx - 1;
-    if (targetIdx < 0 || targetIdx >= order.length) {
-      closeViewer();
-      return;
-    }
-    const nextUid = order[targetIdx];
+    const step = direction === "next" ? 1 : -1;
     const startFromLast = direction === "prev";
-
-    // Load target user's stories (from cache if available) BEFORE
-    // swapping the state — this way we swap current user + stories
-    // atomically and the render never shows an empty/loading frame.
-    let targetStories = cacheRef.current.get(nextUid) || null;
-    if (!targetStories) {
-      try {
-        const r: any = await api.storiesByUser(nextUid);
-        targetStories = (r?.stories || []) as Story[];
-        cacheRef.current.set(nextUid, targetStories);
-      } catch {
-        // Skip broken/empty user and hop to the one AFTER without
-        // touching currentUserId (setState would trigger a full
-        // reload for that empty user). Just call jumpToUser again
-        // starting from the same index — we already advanced by
-        // targetIdx locally, so we need to pretend we're on
-        // `nextUid` for the recursion. Easiest way: skip inline.
-        targetStories = [];
-      }
-    }
-    if (!targetStories || targetStories.length === 0) {
-      // Empty target — advance one more in the same direction by
-      // temporarily pretending we're at nextUid via the feed order.
-      // We DON'T setCurrentUserId here to avoid firing the load
-      // effect on a user with no stories. Instead we mutate the
-      // feed order lookup by re-invoking jumpToUser after telling
-      // it the "current" is nextUid via a ref-only override.
-      // Simpler: just look up the next user relative to nextUid
-      // and recurse inline.
-      const nowOrder = feedOrderRef.current;
-      const skipIdx = nowOrder.indexOf(nextUid);
-      const followingIdx = direction === "next" ? skipIdx + 1 : skipIdx - 1;
-      if (followingIdx < 0 || followingIdx >= nowOrder.length) {
-        closeViewer();
-        return;
-      }
-      // Temporarily pretend we're on nextUid so the next recursion
-      // starts from the right spot. Use ref only.
-      feedOrderRef.current = nowOrder;
-      // Direct recursion — this call will process `followingIdx`.
-      // We simulate by adjusting the perceived currentUserId via
-      // a local variable.
-      // Simplest reliable approach: manually replicate the target
-      // hop rather than recursing.
-      const followingUid = nowOrder[followingIdx];
-      let followingStories = cacheRef.current.get(followingUid) || null;
-      if (!followingStories) {
+    // Instagram-style behaviour: on `next`, skip over any user whose
+    // stories are ALL already viewed — the auto-advance is meant to
+    // surface only fresh content, not replay stuff the viewer has
+    // already seen. If no unseen user is left, closeViewer() (return
+    // to home). On `prev` we don't skip: manual back should still let
+    // the user rewatch previously-seen rings if they want.
+    let cursor = currentIdx + step;
+    while (cursor >= 0 && cursor < order.length) {
+      const candidateUid = order[cursor];
+      // Load candidate stories (cache first, fetch fallback).
+      let candidateStories = cacheRef.current.get(candidateUid) || null;
+      if (!candidateStories) {
         try {
-          const rr: any = await api.storiesByUser(followingUid);
-          followingStories = (rr?.stories || []) as Story[];
-          cacheRef.current.set(followingUid, followingStories);
+          const r: any = await api.storiesByUser(candidateUid);
+          candidateStories = (r?.stories || []) as Story[];
+          cacheRef.current.set(candidateUid, candidateStories);
         } catch {
-          followingStories = [];
+          candidateStories = [];
         }
       }
-      if (!followingStories || followingStories.length === 0) {
-        closeViewer();
-        return;
+      if (!candidateStories || candidateStories.length === 0) {
+        // Empty user (deleted / expired between prefetch and now) — skip.
+        cursor += step;
+        continue;
       }
-      const fIdx = startFromLast
-        ? followingStories.length - 1
-        : Math.max(0, followingStories.findIndex((s) => !s.viewed) >= 0
-            ? followingStories.findIndex((s) => !s.viewed)
-            : 0);
+      // For `next` direction, require at least one unseen story to
+      // land here. If none, keep walking the feed order. For `prev`
+      // we always land on the last story of the candidate.
+      const firstUnseen = candidateStories.findIndex((s) => !s.viewed);
+      if (direction === "next" && firstUnseen < 0) {
+        cursor += step;
+        continue;
+      }
+      const targetIdxInUser = startFromLast
+        ? candidateStories.length - 1
+        : (firstUnseen >= 0 ? firstUnseen : 0);
+      // Atomic swap onto this candidate.
       internalNavRef.current = true;
-      setCurrentUserId(followingUid);
-      setStories(followingStories);
-      setIdx(fIdx);
+      setCurrentUserId(candidateUid);
+      setStories(candidateStories);
+      setIdx(targetIdxInUser);
       setProgress(0);
       autoCloseFiredRef.current = false;
       advanceLockRef.current = false;
       return;
     }
-    const nextIdx = startFromLast
-      ? targetStories.length - 1
-      : Math.max(0, targetStories.findIndex((s) => !s.viewed) >= 0
-          ? targetStories.findIndex((s) => !s.viewed)
-          : 0);
-    // Atomic swap.
-    internalNavRef.current = true;
-    setCurrentUserId(nextUid);
-    setStories(targetStories);
-    setIdx(nextIdx);
-    setProgress(0);
-    autoCloseFiredRef.current = false;
-    advanceLockRef.current = false;
+    // Exhausted the feed order without finding a suitable candidate.
+    closeViewer();
   }, [currentUserId, closeViewer]);
 
   // Publish latest jumpToUser on a ref so the always-mounted timer can
@@ -609,23 +566,24 @@ export default function StoriesViewer() {
               return 1;
             }
             const currentIdx = idxRef.current;
-            if (currentIdx + 1 >= storiesRef.current.length) {
-              // End of THIS user's chain — try to hop to the next
-              // user's ring instead of closing. jumpToUser (via ref)
-              // falls back to closeViewer() if there's no next user.
-              // NB: we DON'T clearInterval anymore — the timer is
-              // long-lived across user swaps. `autoCloseFiredRef=true`
-              // already gates further ticks; jumpToUser resets it to
-              // false on successful swap so the SAME interval resumes
-              // ticking on the new user. If no next user, closeViewer
-              // unmounts the component and the cleanup returned by
-              // useFocusEffect clears the interval naturally.
+            const list = storiesRef.current;
+            // Instagram-style: al termine di THIS story, cerchiamo la
+            // prossima UNSEEN dello stesso user. Se non c'e' piu' nulla
+            // di non-visto dopo di noi (sia perche' e' l'ultima in
+            // assoluto, sia perche' le successive sono tutte viewed),
+            // hop al next user tramite jumpToUser — che a sua volta
+            // salta gli user senza unseen e chiude se non ne trova.
+            let nextUnseenIdx = -1;
+            for (let i = currentIdx + 1; i < list.length; i++) {
+              if (!list[i].viewed) { nextUnseenIdx = i; break; }
+            }
+            if (nextUnseenIdx < 0) {
               autoCloseFiredRef.current = true;
               jumpToUserRef.current?.("next");
               return 1;
             }
             advanceLockRef.current = true;
-            setIdx(currentIdx + 1);
+            setIdx(nextUnseenIdx);
             return 0;
           }
           return next;

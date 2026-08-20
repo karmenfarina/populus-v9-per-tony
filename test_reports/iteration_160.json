@@ -1,0 +1,35 @@
+{
+  "summary": "Iter160 — verification of Instagram-style unseen-only auto-advance in /app/frontend/app/(tabs)/stories/viewer/[userId].tsx. Static + backend regression 18/18 PASS. Verified: (1) jumpToUser uses `let cursor = currentIdx + step; while (cursor >= 0 && cursor < order.length)` loop; (2) direction==='next' + firstUnseen<0 → `cursor += step; continue;` (skip all-viewed users); (3) direction==='prev' with startFromLast=true never skips; (4) targetIdxInUser = startFromLast ? last : (firstUnseen>=0 ? firstUnseen : 0); (5) loop exhaustion → closeViewer(); (6) atomic swap sets internalNavRef+setCurrentUserId+setStories+setIdx+setProgress(0)+autoCloseFiredRef=false+advanceLockRef=false; (7) timer callback iterates `for (let i = currentIdx + 1; i < list.length; i++)` for next unseen in SAME user; (8) if nextUnseenIdx<0 → autoCloseFiredRef=true + jumpToUserRef.current?.('next'); (9) else → advanceLockRef=true + setIdx(nextUnseenIdx). Regression: manual goPrev/goNext use setIdx directly with NO viewed filter (only boundary hits jumpToUser). All iter155-159 protections intact (wall-clock guard, transform scaleX, unique key ${currentUserId}-${i}, jumpToUserRef proxy, imageLoadedRef inline sync, single clearInterval, storyStartTsRef reset on both [idx] and [currentUserId]). Backend: /api/stories/feed 200, /api/stories/user/{uid} 200, /api/stories/{invalid}/view returns 4xx, /api/auth/anonymous 200.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter160_unseen_only_autoadvance.py",
+    "/app/test_reports/pytest/iter160.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "End-to-end trace validated (User A [A0 unseen] → B [all viewed] → C [C0 unseen]): open on A → timer ticks 7s → for-loop from idx=1 in A finds nothing → nextUnseenIdx=-1 → autoCloseFiredRef=true + jumpToUserRef('next'). Inside jumpToUser('next'): cursor=idxA+1=idxB → candidateB.findIndex(!viewed)=-1 → cursor+=1=idxC → candidateC.findIndex(!viewed)=0 → atomic swap to C at idx 0. Timer ticks C0 for 7s → for-loop finds nothing → jumpToUser('next'). Inside jumpToUser('next'): cursor=idxC+1 ≥ order.length → while exits → closeViewer(). CORRECT.",
+    "Manual goNext (line 693) at boundary calls jumpToUser('next'); mid-chain calls setIdx(idx+1) directly — bypasses unseen filter as required. Same for goPrev (line 669): boundary calls jumpToUser('prev') which lands on candidateStories.length-1 regardless of viewed state (startFromLast=true; no direction guard on prev). Mid-chain calls setIdx(idx-1) directly.",
+    "Timer callback at line 552-590 preserves wall-clock guard BEFORE the unseen-search branch: if `elapsed < STORY_DURATION_MS - TICK_MS` returns 1 (visual cap) without any setIdx/jumpToUser call. The Instagram-style skip only fires once the 7s wall clock is honoured. No risk of racing past multiple stories.",
+    "advanceLockRef.current = true is only set when we DO advance to a same-user next unseen (line 585). In the cross-user jumpToUser branch it stays false (jumpToUser will reset it to false anyway on atomic swap). Consistent.",
+    "autoCloseFiredRef.current=true gates the next timer ticks (guard at line 531) until jumpToUser resets it to false on successful swap OR closeViewer fires and unmounts. Prevents duplicate jumpToUser calls during the async candidate fetch inside jumpToUser (cache miss → api.storiesByUser).",
+    "jumpToUser deps [currentUserId, closeViewer] correct — closeViewer identity is stable (deps [router]); currentUserId changes on both external route and internal swap. The proxy pattern via jumpToUserRef isolates the timer from this identity churn."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter160_unseen_only_autoadvance.py (new — 18 tests: 4 backend regression + 6 jumpToUser semantics + 3 timer next-unseen semantics + 2 manual navigation bypass + 3 iter155-159 regression)"
+  ],
+  "success_rate": {
+    "backend": "100% (4/4 endpoints)",
+    "frontend": "100% static (14/14 invariants on viewer file). No red-screen, no code-level regression."
+  },
+  "seed_data_creation": "Ephemeral anonymous users TEST_iter160_{pid} + TEST_iter160smoke_{pid} — no cleanup needed (bot dedup + ephemeral).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Iter160 introduced Instagram-style unseen-only auto-advance: (a) timer callback searches for next unseen in SAME user via `for (let i = currentIdx+1; i < list.length; i++)`; (b) jumpToUser('next') iterates order with while-loop and skips users where `candidateStories.findIndex((s)=>!s.viewed) < 0`; (c) jumpToUser('prev') always lands on last story (never skips). Manual taps go through setIdx(idx±1) directly and bypass the unseen filter. All iter155-159 protections still enforced by test_iter160_unseen_only_autoadvance.py::TestIter155to159RegressionIntact. If a future refactor breaks any of these, that pytest class will fail. If the user reports 'auto-advance skipped over an unseen story' → the RCA is likely in the `viewed` mutation timing (setStories updater at line 665 sets viewed=true synchronously in state; the for-loop reads storiesRef.current which lags one render cycle) — investigate whether the same-user next-unseen search should use idxRef+state, not the potentially-stale storiesRef snapshot. But per current code the timer uses `list = storiesRef.current`, which IS updated by the storiesRef useEffect on [stories]; so the mutation IS seen by the timer within one tick (50ms).",
+  "rca_of_issue": "N/A — behavior change is definitive and code-review confirmed. No residual issue."
+}
