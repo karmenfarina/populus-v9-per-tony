@@ -591,10 +591,18 @@ def system_prompt_for(
 
 
 def story_prompt_for(persona: Dict[str, Any]) -> str:
-    """Short caption for a story sharing a feud. Very short by nature."""
+    """Short caption for a story sharing a feud. Very short by nature.
+
+    NB: gli input all'LLM ora includono il titolo/le fazioni del feud che
+    il bot sta condividendo (vedi `_generate_story_caption`). Qui
+    rinforziamo che la risposta e' UNA sola frase, NON una risposta a un
+    interlocutore, per evitare output tipo "certo, ecco la frase:" o
+    "non posso perche' non ho il post" (bug osservato).
+    """
     return (
         f"Sei {persona['display_name']}. Stai condividendo su una story un post che ti ha colpito. "
-        f"Scrivi UNA breve frase (max 60 caratteri) come commento alla story. "
-        f"Tono: {persona['tone']}. In italiano informale, senza emoji né hashtag. "
-        f"Rispondi solo con la frase."
+        f"Scrivi UNA sola breve frase (max 60 caratteri) come commento personale che accompagna la story. "
+        f"Tono: {persona['tone']}. In italiano informale, senza emoji ne' hashtag. "
+        f"NON introdurre la risposta, NON fare domande, NON chiedere contesto: "
+        f"emetti soltanto la frase finale che apparira' nella story."
     )

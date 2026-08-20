@@ -1,0 +1,39 @@
+{
+  "summary": "Iter 153 — Bot story-caption fix validated end-to-end. New signature `_generate_story_caption(persona, feud)` correctly injects title / party_a / party_b / category into the user_prompt (verified via a fake LlmChat stub that captures the prompt). Post-response refusal filter drops LLM outputs containing any of the markers ('non posso', 'mi servirebbe', 'non ho abbastanza', 'puoi darmi', 'post di riferimento', 'riferimento a un post', 'non riesco') → returns None so the caller stores comment='' instead of the refusal text. `_bot_create_story` integration test: when the LLM refuses, the story is still inserted (kind='feud') with an empty comment; when the LLM returns a valid caption, that exact caption is persisted. `story_prompt_for` system prompt now contains the reinforcement clauses 'NON introdurre la risposta' / 'NON chiedere contesto'. Regression: `_generate_comment` signature unchanged (persona, feud, side); iter146 anti-dup + 1/24h quota still hold; /api/stories/feed reachable; /api/feuds returns 200; /api/auth/signup + /api/auth/anonymous work. DB inspection confirms the one-shot cleanup: 0 bot stories out of 99 currently in DB carry refusal captions. Total: 25/25 PASS (18 iter153 + 7 iter146 regression) in 2.11s.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter153_story_caption_context.py",
+    "/app/test_reports/pytest/iter153.xml",
+    "/app/test_reports/pytest/iter153_full.xml"
+  ],
+  "action_items": [
+    "None blocking — fix works as specified. Main agent can close this iteration.",
+    "OPTIONAL polish: consider expanding the refusal-marker list with additional Italian variants observed in production (e.g. 'quale post', 'mi manca il post', 'senza il post') — the current set catches the top offenders reported by the user, but real-world LLM outputs occasionally use synonyms. Add them incrementally as they show up in the story feed."
+  ],
+  "critical_code_review_comments": [
+    "bot_engine.py:971-1029 — the fix is layered defensively: (a) inject feud context into the user_prompt so the model has grounding, (b) system prompt reinforces 'no intro / no context-asking' via story_prompt_for, (c) post-response refusal filter as a safety net. Even if the LLM ignores clauses (a)+(b), (c) still kills the bad output. Sound design.",
+    "bot_engine.py:890 — caller uses `caption = await _generate_story_caption(...)` then `(caption or '')[:200]`. Combined with the new filter returning None on refusal, this produces a story doc with comment=''. The frontend's StoryViewer must gracefully render empty caption (should already do so — the field was optional in the schema).",
+    "bot_engine.py:1017-1023 — refusal_markers list is case-folded via `.lower()` before matching, which is correct. Substring match (not word-boundary) means a caption legitimately using 'non posso credere' would ALSO be filtered as false-positive. This is acceptable given the low-caption-length constraint (60 chars) and the empty-string fallback, but note the tradeoff: recall > precision on this filter.",
+    "bot_personas.py:593-608 — story_prompt_for hardcodes the reinforcement clauses (not persona-dependent), which is fine here. Same tone-agnostic instruction for all 100 bots.",
+    "test_iter146_bot_story_dedup.py — the older iter146 test suite monkey-patched `be._generate_story_caption` with a single-arg lambda, which broke against the new (persona, feud) signature. Fixed the four lambdas AND added a save/restore snapshot in the `bot_engine_mod` fixture so future signature changes don't cause silent cross-test leakage."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter153_story_caption_context.py (NEW — 18 tests: signature, prompt-content, refusal-filter param'd over 5 markers, valid caption pass-through, empty-response, _bot_create_story integration for refusal+valid, iter146 quota regression, _generate_comment untouched regression, HTTP endpoints regression)",
+    "/app/backend/tests/test_iter146_bot_story_dedup.py (fixed 4 lambdas from `lambda persona:` to `lambda persona, feud:` to match new signature; added save/restore of _generate_story_caption in the `bot_engine_mod` fixture to prevent cross-test module-level leakage)"
+  ],
+  "success_rate": {
+    "backend": "100% (25/25: 18 iter153 + 7 iter146 regression)",
+    "frontend": "not tested (backend-only iteration per review request); Expo service confirmed RUNNING under supervisor"
+  },
+  "seed_data_creation": "Each _bot_create_story integration test deletes bot stories for the picked (bot, feud) pair before AND after the test (finally block). No persistent test data. One ephemeral TEST_iter153_<hex>@populus-it.co signup + one anon user via /api/auth/anonymous — same pattern as prior iterations, cleaned up by the TEST_ prefix convention.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "The story-caption fix is locked in at /app/backend/bot_engine.py:971-1029 with new signature (persona, feud). Mocking strategy: inject a fake `emergentintegrations.llm.chat` into sys.modules BEFORE the runtime import inside `_generate_story_caption` (see `_install_fake_llm()` in test_iter153_story_caption_context.py). This is the cleanest way to test both the prompt-construction contract AND the refusal filter without hitting the real Claude API. NOTE: when writing tests that reload/monkey-patch bot_engine, always snapshot the original `_generate_story_caption` (and any other module-level function you may patch) so you don't leak state into unrelated tests — this bit iter146 and is now fixed there. DB has 99 bot stories, 0 with refusal captions — cleanup was successful.",
+  "rca_of_issue": "User reported two failure modes in bot stories: (1) meta refusals stored verbatim as captions ('non posso commentare perche non c\\'e un post di riferimento'), (2) captions unrelated to the shared feud. RCA identified by main agent: `_generate_story_caption` was called with `persona` only, and the user_prompt was a bare 'Genera la frase per la story.' The system prompt (`story_prompt_for`) said 'stai condividendo un post che ti ha colpito' but no post was ever specified → model hallucinated random content OR politely refused asking for the post. Fix: (a) new signature (persona, feud) with user_prompt injecting title/party_a/party_b/category, (b) system prompt reinforced with 'NON introdurre la risposta / NON chiedere contesto', (c) post-response refusal filter as safety net returning None so caller stores empty caption. Testing agent validated all three layers via fake-LlmChat mocking + real DB integration + prompt-content assertions. 25/25 tests PASS. Historical DB was cleaned one-shot by main agent (28 refusal captions removed → 0 remaining, confirmed)."
+}

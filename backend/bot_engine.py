@@ -887,7 +887,7 @@ async def _bot_create_story(bot: Dict[str, Any], feud: Dict[str, Any]) -> None:
     })
     if recent >= 1:
         return
-    caption = await _generate_story_caption(_rehydrate_persona(bot))
+    caption = await _generate_story_caption(_rehydrate_persona(bot), feud)
     doc = {
         "story_id": f"story_bot_{bot['user_id']}_{feud['feud_id']}_{int(now.timestamp())}",
         "user_id": bot["user_id"],
@@ -968,7 +968,19 @@ async def _generate_comment(
             return None
 
 
-async def _generate_story_caption(persona: Dict[str, Any]) -> Optional[str]:
+async def _generate_story_caption(
+    persona: Dict[str, Any], feud: Dict[str, Any]
+) -> Optional[str]:
+    """Short caption for a story SHARING a specific feud.
+
+    Historical bug: the user_prompt used to be a bare 'Genera la frase per
+    la story.' with zero feud context — the model then either hallucinated
+    a caption unrelated to the shared feud ("fuori luogo") or, worse,
+    politely refused with a meta-comment like "non posso commentare, non
+    mi hai indicato il post di riferimento" which we then stored verbatim
+    as the caption. Now we inject title + parties + category so the
+    output is always about the actual feud being shared.
+    """
     api_key = os.environ.get("EMERGENT_LLM_KEY")
     if not api_key:
         return None
@@ -977,6 +989,18 @@ async def _generate_story_caption(persona: Dict[str, Any]) -> Optional[str]:
     except Exception:
         return None
     system = story_prompt_for(persona)
+    title = (feud.get('title') or '').strip()
+    party_a = (feud.get('party_a') or '').strip()
+    party_b = (feud.get('party_b') or '').strip()
+    cat = (feud.get('category_label') or feud.get('category') or '').strip()
+    parties_line = f"Le due fazioni sono «{party_a}» e «{party_b}». " if party_a and party_b else ""
+    user_prompt = (
+        f"Stai condividendo QUESTO post nella tua story: «{title}». "
+        f"Categoria: {cat}. {parties_line}"
+        f"Scrivi UNA sola breve frase personale (max 60 caratteri) che accompagni "
+        f"la condivisione — commento tuo sul contenuto del post, NON una risposta "
+        f"a me. Rispondi solo con la frase, senza premesse."
+    )
     async with _llm_lock:
         try:
             chat = LlmChat(
@@ -984,8 +1008,43 @@ async def _generate_story_caption(persona: Dict[str, Any]) -> Optional[str]:
                 session_id=f"botstory-{persona.get('display_name', 'x')[:20]}-{int(_now().timestamp())}",
                 system_message=system,
             ).with_model("anthropic", "claude-haiku-4-5-20251001")
-            resp = await chat.send_message(UserMessage(text="Genera la frase per la story."))
-            return (str(resp) or "").strip() or None
+            resp = await chat.send_message(UserMessage(text=user_prompt))
+            text = (str(resp) or "").strip()
+            if not text:
+                return None
+            # Sanity filter: if the model politely refused or asked for
+            # context anyway, drop it (would look worse than no caption).
+            # "non posso" e' matchato solo se seguito da un verbo di
+            # rifiuto (commentare/generare/…) per non tagliare frasi
+            # legittime tipo "non posso credere ai miei occhi".
+            low = text.lower()
+            _refusal_re = re.compile(
+                r"non posso (commentare|generare|dare|fornire|rispondere|scrivere|farlo)"
+                r"|non riesco a (commentare|generare|dare|rispondere)"
+                r"|non mi hai (dato|fornito|indicato|passato)"
+                r"|(puoi (darmi|fornirmi|indicarmi|passarmi)|mi servirebbe|mi serve (il|vedere|leggere|sapere|conoscere))"
+                r"|non ho abbastanza (contesto|informazioni)"
+                r"|(post|contenuto) di riferimento"
+                r"|riferimento a un post"
+                r"|non vedo un post"
+                r"|(quale|qual) (post|contenuto|argomento) (stai|vuoi|devo|e|hai)"
+                r"|non ho ricevuto (il|un) post"
+                r"|dammi il post"
+                r"|potresti condividere il contenuto"
+                r"|serve il contesto"
+                r"|manca il post"
+                r"|riferirmi a"
+                r"|condividere il contenuto"
+                r"|mi puoi indicare"
+                r"|di che post"
+                r"|condividi il contenuto"
+                r"|il post che stai condividendo"
+                r"|scrivere il commento"
+            )
+            if _refusal_re.search(low):
+                logger.info(f"story caption refusal filtered: {text[:80]}")
+                return None
+            return text
         except Exception as e:
             logger.warning(f"LLM story caption failed: {e}")
             return None

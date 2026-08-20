@@ -63,9 +63,16 @@ def bot_engine_mod():
     """Import bot_engine — DB handle is (re)wired inside each async run
     because motor binds to the calling event loop, which asyncio.run
     recreates for every test.
+
+    We snapshot & restore `_generate_story_caption` around each test so
+    tests that monkey-patch it don't leak into unrelated tests.
     """
     import bot_engine as be
-    return be
+    _orig_caption = be._generate_story_caption
+    try:
+        yield be
+    finally:
+        be._generate_story_caption = _orig_caption
 
 
 def _wire_db(be):
@@ -116,7 +123,7 @@ class TestBotStoryAntiDuplicate:
                 _wire_db(be)
                 # Monkey-patch the LLM caption gen so tests never hit the
                 # real API. Just returns a fixed caption.
-                be._generate_story_caption = lambda persona: _immediate("caption test")
+                be._generate_story_caption = lambda persona, feud: _immediate("caption test")
                 await be._bot_create_story(bot_user, feud)
                 # Same (bot, feud) again — must be skipped by anti-dup.
                 await be._bot_create_story(bot_user, feud)
@@ -148,7 +155,7 @@ class TestBotStoryAntiDuplicate:
         try:
             async def run():
                 _wire_db(be)
-                be._generate_story_caption = lambda persona: _immediate("shape test")
+                be._generate_story_caption = lambda persona, feud: _immediate("shape test")
                 await be._bot_create_story(bot_user, feud)
 
             asyncio.run(run())
@@ -194,7 +201,7 @@ class TestBotStoryDailyQuota:
         try:
             async def run():
                 _wire_db(be)
-                be._generate_story_caption = lambda persona: _immediate("quota test")
+                be._generate_story_caption = lambda persona, feud: _immediate("quota test")
                 await be._bot_create_story(bot_user, feud_a)
                 await be._bot_create_story(bot_user, feud_b)
 
@@ -247,7 +254,7 @@ class TestBotStoryDailyQuota:
         try:
             async def run():
                 _wire_db(be)
-                be._generate_story_caption = lambda persona: _immediate("post24h")
+                be._generate_story_caption = lambda persona, feud: _immediate("post24h")
                 await be._bot_create_story(bot_user, feud_b)
 
             asyncio.run(run())
